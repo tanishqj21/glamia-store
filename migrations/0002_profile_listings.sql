@@ -1,0 +1,6 @@
+ALTER TABLE users ADD COLUMN dob TEXT;
+ALTER TABLE users ADD COLUMN phone TEXT;
+
+ALTER TABLE products ADD COLUMN material TEXT NOT NULL DEFAULT '';
+ALTER TABLE products ADD COLUMN images_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE products ADD COLUMN image_keys_json TEXT;

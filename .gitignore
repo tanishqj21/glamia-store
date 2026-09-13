@@ -1,0 +1,9 @@
+.dev.vars
+.env
+.env.*
+!.dev.vars.example
+.wrangler/
+.wrangler-state/
+node_modules/
+dist/
+test-results/

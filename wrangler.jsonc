@@ -1,0 +1,45 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "maison-mode-commerce",
+	"main": "src/index.js",
+	"compatibility_date": "2026-08-26",
+	"assets": {
+		"directory": "./public",
+		"binding": "ASSETS",
+		"run_worker_first": true,
+		"not_found_handling": "single-page-application"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "maison-mode-db",
+			"database_id": "9f757277-5ef0-460b-ae8c-e6f52b9bc458",
+			"migrations_dir": "migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "PRODUCT_IMAGES",
+			"bucket_name": "maison-mode-product-images"
+		}
+	],
+	"ai": {
+		"binding": "AI"
+	},
+	"vectorize": [
+		{
+			"binding": "VEC",
+			"index_name": "glamia-product-search",
+			"remote": true
+		}
+	],
+	"vars": {
+		"GOOGLE_CLIENT_ID": "831595711865-ofo1b36f728opnm2h6rs7i2e9l0jrs3r.apps.googleusercontent.com",
+		"ADMIN_EMAILS": [
+			"tanishqj29@gmail.com",
+  			"glamia.apparels@gmail.com"
+		],
+		"BREVO_FROM_NAME": "Glamia",
+		"BREVO_FROM_EMAIL": "support@glamiastore.com"
+	}
+}

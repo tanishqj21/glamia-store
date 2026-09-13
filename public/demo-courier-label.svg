@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="700" viewBox="0 0 800 700">
+  <rect width="800" height="700" fill="#fff"/>
+  <rect x="24" y="24" width="752" height="652" rx="8" fill="#fff" stroke="#000" stroke-width="2"/>
+  <text x="54" y="62" class="brand">GLAMIA · COURIER LABEL</text>
+  <text x="54" y="104" class="heading">ORDER GM-20260908-DEMO1234</text>
+  <text x="54" y="146" class="body">Ship to: Aarav Sharma</text>
+  <text x="54" y="176" class="body">Phone: +91 90000 00000</text>
+  <text x="54" y="206" class="body">12 Demo Lane</text>
+  <text x="54" y="236" class="body">Mumbai, Maharashtra, 400001</text>
+  <text x="54" y="292" class="section">ITEMS</text>
+  <text x="54" y="328" class="body">Relaxed Cotton Night Suit × 1 · M</text>
+  <text x="54" y="382" class="body">Payment: COD · pending</text>
+  <text x="54" y="412" class="body">Total: ₹1,499</text>
+  <line x1="54" y1="456" x2="746" y2="456" stroke="#000"/>
+  <text x="54" y="492" class="section">TRACKING: TRK-DEMO123456</text>
+  <g fill="#000">
+    <rect x="390" y="472" width="4" height="72"/><rect x="400" y="472" width="2" height="72"/><rect x="408" y="472" width="6" height="72"/><rect x="420" y="472" width="2" height="72"/><rect x="427" y="472" width="4" height="72"/><rect x="438" y="472" width="7" height="72"/><rect x="451" y="472" width="2" height="72"/><rect x="458" y="472" width="5" height="72"/><rect x="469" y="472" width="3" height="72"/><rect x="479" y="472" width="7" height="72"/><rect x="492" y="472" width="2" height="72"/><rect x="500" y="472" width="5" height="72"/><rect x="512" y="472" width="2" height="72"/><rect x="520" y="472" width="6" height="72"/><rect x="532" y="472" width="3" height="72"/><rect x="541" y="472" width="7" height="72"/><rect x="555" y="472" width="2" height="72"/><rect x="563" y="472" width="5" height="72"/><rect x="575" y="472" width="3" height="72"/><rect x="585" y="472" width="6" height="72"/><rect x="598" y="472" width="2" height="72"/><rect x="606" y="472" width="7" height="72"/><rect x="619" y="472" width="3" height="72"/><rect x="628" y="472" width="5" height="72"/><rect x="640" y="472" width="2" height="72"/><rect x="648" y="472" width="6" height="72"/><rect x="660" y="472" width="3" height="72"/><rect x="670" y="472" width="7" height="72"/>
+  </g>
+  <text x="54" y="610" class="section">DEMO LABEL · READY TO PRINT</text>
+  <text x="54" y="642" class="body">Use the admin Label Generation section for real order labels.</text>
+  <style>
+    .brand{font:600 14px Arial;letter-spacing:4px;fill:#000}.heading{font:700 22px Arial;fill:#000}.section{font:700 13px Arial;letter-spacing:2px;fill:#000}.body{font:16px Arial;fill:#000}
+  </style>
+</svg>
