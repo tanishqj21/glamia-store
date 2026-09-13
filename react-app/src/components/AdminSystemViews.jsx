@@ -6,23 +6,48 @@ function escapeSvg(value) {
   return String(value || "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" }[character]));
 }
 
-function barcode(value) {
-  const text = String(value || "ORDER").toUpperCase().replace(/[^A-Z0-9 -]/g, "").slice(0, 28) || "ORDER";
+const CODE128_PATTERNS = ["212222", "222122", "222221", "121223", "121322", "131222", "122212", "122321", "132212", "221213", "221312", "231212", "112232", "122132", "122231", "113222", "123122", "123221", "223211", "221132", "221231", "213212", "223112", "312131", "311222", "321122", "321221", "312212", "322112", "322211", "212123", "212321", "232121", "111323", "131123", "131321", "112313", "132113", "132311", "211313", "231113", "231311", "112133", "112331", "132131", "113123", "113321", "133121", "313121", "211331", "231131", "213113", "213311", "213131", "311123", "311321", "331121", "312113", "312311", "332111", "314111", "221411", "431111", "111224", "111422", "121124", "121421", "141122", "141221", "112214", "112412", "122114", "122411", "142112", "142211", "241211", "221114", "413111", "241112", "134111", "111242", "121142", "121241", "114212", "124112", "124211", "411212", "421112", "421211", "212141", "214121", "412121", "111143", "111341", "131141", "114113", "114313", "411113", "411311", "113141", "114131", "311141", "411131", "211412", "211214", "211232", "2331112"];
+
+/* Scannable Code 128-B barcode for the courier label (thermal printers scan it
+   directly off the label). */
+function code128(value) {
+  const text = String(value || "").replace(/[^\x20-\x7e]/g, "").slice(0, 20) || "ORDER";
+  const codes = [104, ...[...text].map((character) => character.charCodeAt(0) - 32)];
+  let checksum = codes[0];
+  for (let index = 1; index < codes.length; index++) checksum += codes[index] * index;
+  codes.push(checksum % 103, 106);
   let x = 0;
-  const bars = [...text].flatMap((character, index) => { const code = character.charCodeAt(0) + index; const parts = [1 + (code % 3), 1, 1 + ((code >> 2) % 3), 1, 1 + ((code >> 4) % 2)]; return parts.map((width, partIndex) => { const bar = `<rect x="${x}" y="0" width="${width * 2}" height="54"/>`; x += width * 2 + (partIndex % 2 ? 2 : 1); return bar; }); });
-  return `<g fill="#000">${bars.join("")}</g>`;
+  const bars = codes.map((code) => {
+    const pattern = CODE128_PATTERNS[code];
+    let markup = "";
+    let position = 0;
+    for (let partIndex = 0; partIndex < pattern.length; partIndex++) {
+      const width = Number(pattern[partIndex]);
+      if (partIndex % 2 === 0) markup += `<rect x="${x}" y="0" width="${width}" height="72"/>`;
+      position += width;
+      x += width;
+    }
+    return markup;
+  }).join("");
+  return { markup: `<g fill="#000">${bars}</g>`, width: x };
 }
 
+/* TSC TE244 thermal label: exact 100mm x 150mm stock, monochrome, layout top to
+   bottom = order id, ship to, order summary, from address, tracking barcode. */
 function labelSvg(order, fromAddress) {
   const shipping = order.shipping || {};
-  const title = order.order_type === "replacement" ? "REPLACEMENT PRODUCT ORDER" : order.order_type === "preorder" ? "PRE-ORDER" : "ORDER";
-  const destination = [shipping.line1, shipping.line2, [shipping.city, shipping.state, shipping.pin].filter(Boolean).join(", "), shipping.country || "India"].filter(Boolean);
-  const items = (order.items || []).map((item) => `${item.name || item.product_name || "Item"} × ${item.quantity}${item.size ? ` · ${item.size}` : ""}`);
-  const lines = [title, order.order_number || order.id, "FROM:", ...String(fromAddress || "Warehouse address not configured").split(/\r?\n/).filter(Boolean), "SHIP TO:", shipping.name || order.customer_name || "Recipient", shipping.phone ? `Phone: ${shipping.phone}` : "", ...destination, "ITEMS:", ...items, `Payment: ${(order.payment_method || "cod").toUpperCase()} · ${order.payment_status || "pending"}`, `Total: ₹${Number(order.total || 0).toLocaleString("en-IN")}`].filter(Boolean);
-  const height = Math.max(650, 220 + lines.length * 28);
-  const textLines = lines.map((line, index) => `<text x="38" y="${78 + index * 27}" class="${index === 0 ? "heading" : ["FROM:", "SHIP TO:", "ITEMS:"].includes(line) ? "section" : "body"}">${escapeSvg(line)}</text>`).join("");
+  const orderId = String(order.order_number || order.id || "").toUpperCase();
+  const orderType = order.order_type === "replacement" ? "REPLACEMENT ORDER" : order.order_type === "preorder" ? "PRE-ORDER" : "ORDER";
+  const destination = [shipping.line1, shipping.line2, [shipping.city, shipping.state, shipping.pin].filter(Boolean).join(", "), shipping.country || "India"].filter(Boolean).slice(0, 3);
+  const allItems = order.items || [];
+  const items = allItems.slice(0, 5).map((item) => `${item.name || item.product_name || "Item"}${item.size ? ` · ${item.size}` : ""} × ${item.quantity}`);
+  const hiddenItems = allItems.length - items.length;
+  const fromLines = String(fromAddress || "Warehouse address not configured").split(/\r?\n/).filter(Boolean).slice(0, 4);
   const tracking = String(order.tracking_number || "").trim();
-  return `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="700" height="${height}" viewBox="0 0 700 ${height}"><rect width="700" height="${height}" fill="#fff"/><rect x="16" y="16" width="668" height="${height - 32}" fill="#fff" stroke="#000" stroke-width="2"/><text x="38" y="48" class="brand">GLAMIA · COURIER LABEL</text>${textLines}${tracking ? `<text x="38" y="${height - 118}" class="tracking">TRACKING: ${escapeSvg(tracking)}</text><g transform="translate(300 ${height - 160}) scale(.7 1)">${barcode(tracking)}</g>` : `<text x="38" y="${height - 58}" class="tracking">TRACKING NUMBER NOT ASSIGNED</text>`}<style>.brand{font:600 13px Arial;letter-spacing:3px;fill:#000}.heading{font:700 20px Arial;fill:#000}.section{font:700 12px Arial;letter-spacing:2px;fill:#000}.body{font:15px Arial;fill:#000}.tracking{font:700 12px Arial;letter-spacing:1px;fill:#000}</style></svg>`;
+  const payment = `${(order.payment_method || "cod").toUpperCase()} · ${(order.payment_status || "pending").toUpperCase()}`;
+  const barcode = code128(tracking || orderId);
+  const barcodeX = Math.round((400 - barcode.width * 1.15) / 2);
+  return `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="150mm" viewBox="0 0 400 600"><rect width="400" height="600" fill="#fff"/><rect x="8" y="8" width="384" height="584" fill="none" stroke="#000" stroke-width="4"/><text x="24" y="36" class="section">ORDER ID${order.order_type !== "standard" ? ` · ${orderType}` : ""}</text><text x="24" y="64" class="heading">${escapeSvg(orderId)}</text><line x1="24" y1="78" x2="376" y2="78" stroke="#000" stroke-width="2"/><text x="24" y="100" class="section">SHIP TO</text><text x="24" y="124" class="heading">${escapeSvg(shipping.name || order.customer_name || "Recipient")}</text>${shipping.phone ? `<text x="24" y="144" class="body">${escapeSvg(shipping.phone)}</text>` : ""}${destination.map((line, index) => `<text x="24" y="${166 + index * 19}" class="body">${escapeSvg(line)}</text>`).join("")}<text x="24" y="240" class="section">ORDER SUMMARY</text>${items.map((item, index) => `<text x="24" y="${262 + index * 18}" class="body">${escapeSvg(item)}</text>`).join("")}${hiddenItems > 0 ? `<text x="24" y="${262 + items.length * 18}" class="body">+ ${hiddenItems} more item${hiddenItems === 1 ? "" : "s"}</text>` : ""}<text x="24" y="${262 + (items.length + (hiddenItems > 0 ? 1 : 0)) * 18 + 6}" class="total">${escapeSvg(payment)} — TOTAL ₹${Number(order.total || 0).toLocaleString("en-IN")}</text><text x="24" y="382" class="section">FROM</text>${fromLines.map((line, index) => `<text x="24" y="${404 + index * 17}" class="body">${escapeSvg(line)}</text>`).join("")}<text x="24" y="486" class="section">TRACKING</text>${tracking ? `<text x="24" y="508" class="heading">${escapeSvg(tracking)}</text>` : `<text x="24" y="508" class="body">No tracking assigned yet</text>`}<g transform="translate(${barcodeX} 518) scale(1.15 0.78)">${barcode.markup}</g><text x="200" y="583" class="barcode-text" text-anchor="middle">${escapeSvg(tracking || orderId)}</text><style>.section{font:700 12px Arial;letter-spacing:2px;fill:#000}.heading{font:700 22px Arial;fill:#000}.body{font:400 13px Arial;fill:#000}.total{font:700 13px Arial;fill:#000}.barcode-text{font:400 13px Arial;letter-spacing:1px;fill:#000}</style></svg>`;
 }
 
 function downloadText(filename, text, type) {

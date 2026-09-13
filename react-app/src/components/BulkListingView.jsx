@@ -163,10 +163,11 @@ export function BulkListingView({ categories, subcategories }) {
       {rows.length > 0 && <button className="secondary-action" type="button" onClick={clearRows}>Clear preview</button>}
     </div>
     {fileName && <p className="form-hint bulk-file-name">Selected: {fileName}</p>}
-    {message && <p className={`inline-note ${tone}`} role="status" aria-live="polite">{message}</p>}
+    
     {rows.length > 0 && <>
       <div className="bulk-summary"><strong>{validRows.length} ready</strong><span>{rows.length - validRows.length} need attention</span><span>Rows with errors will not be imported.</span></div>
       <div className="bulk-preview-table"><table><thead><tr><th>Row</th><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Images</th><th>Result</th></tr></thead><tbody>{rows.map((row) => <tr className={row.errors.length ? "has-errors" : "is-valid"} key={row.rowNumber}><td>{row.rowNumber}</td><td>{row.product.name || "—"}</td><td>{row.product.category || "—"}</td><td>{Number.isFinite(row.product.price) ? `₹${row.product.price.toLocaleString("en-IN")}` : "—"}</td><td>{row.product.stock || 0}</td><td>{row.product.images.length}</td><td>{row.errors.length ? <span className="error-text">{row.errors.join("; ")}</span> : row.result ? <span className="status-pill live">{row.result}</span> : <span className="status-pill">Ready</span>}</td></tr>)}</tbody></table></div>
+      {message && <p className={`inline-note ${tone}`} role="status" aria-live="polite">{message}</p>}
       <button className="primary-action" type="button" disabled={!validRows.length || busy} onClick={importListings}>{busy ? "Importing…" : `Import ${validRows.length} ready listing${validRows.length === 1 ? "" : "s"}`} <span aria-hidden="true">↗</span></button>
     </>}
     {!rows.length && <div className="bulk-empty"><strong>Start with a clean import</strong><span>The template includes a Products sheet and a short Instructions sheet so size-level stock and image requirements stay clear.</span></div>}

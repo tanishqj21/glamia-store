@@ -340,17 +340,12 @@ function CartPage({ cart, products, setCart, onNavigate }) {
 }
 
 function LoginPage({ onNavigate, onSignedIn }) {
-  const [mode, setMode] = useState("login");
-  const [signupEnabled, setSignupEnabled] = useState(false);
   const [status, setStatus] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ email: "", password: "", name: "", gender: "", dob: "" });
   useEffect(() => {
     let attempts = 0; let cancelled = false;
     async function init() {
       const config = await apiFetch("/api/config").then((response) => response.json()).catch(() => ({}));
       if (cancelled) return;
-      setSignupEnabled(config.passwordSignupEnabled === true);
       if (!config.googleClientId || config.googleClientId.includes("REPLACE_WITH")) return;
       if (!window.google?.accounts?.id) { if (attempts++ < 20) return setTimeout(init, 250); return setStatus("Google sign-in is unavailable right now."); }
       window.google.accounts.id.initialize({ client_id: config.googleClientId, callback: async (response) => { try { const result = await apiFetch("/api/auth/google", { method: "POST", body: JSON.stringify({ credential: response.credential }) }); const data = await result.json(); if (!result.ok) throw new Error(data.error || "Sign-in failed"); onSignedIn(data.user); onNavigate("/"); } catch (error) { setStatus(error.message); } } });
@@ -358,20 +353,8 @@ function LoginPage({ onNavigate, onSignedIn }) {
     }
     init(); return () => { cancelled = true; };
   }, [onNavigate, onSignedIn]);
-  function change(event) { setForm((current) => ({ ...current, [event.target.name]: event.target.value })); }
-  async function submit(event) {
-    event.preventDefault();
-    setBusy(true); setStatus("");
-    try {
-      const response = await apiFetch(`/api/auth/${mode}`, { method: "POST", body: JSON.stringify(mode === "signup" ? form : { email: form.email, password: form.password }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Authentication failed");
-      onSignedIn(data.user); onNavigate("/");
-    } catch (error) { setStatus(error.message); } finally { setBusy(false); }
-  }
-  return <main className="page-main"><section className="login-page"><p className="eyebrow">Welcome to Glamia</p><h1 className="page-title">Your wardrobe,<br /><em>your edit.</em></h1><p className="muted">{mode === "signup" ? "Create an account to save your details, orders, and wishlist." : "Sign in to view saved addresses, orders, wishlist items, and member checkout options."}</p><form className="login-form" onSubmit={submit}><label>Email<input type="email" name="email" autoComplete="email" value={form.email} onChange={change} required /></label>{mode === "signup" && <label>Full name<input name="name" autoComplete="name" value={form.name} onChange={change} required /></label>}<label>Password<input type="password" name="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} minLength="8" value={form.password} onChange={change} required /></label>{mode === "signup" && <div className="form-row"><label>Gender / sex<select name="gender" value={form.gender} onChange={change}><option value="">Prefer not to specify</option><option value="female">Female</option><option value="male">Male</option><option value="non_binary">Non-binary</option><option value="prefer_not_to_say">Prefer not to say</option></select></label><label>Date of birth<input type="date" name="dob" autoComplete="bday" value={form.dob} onChange={change} required /></label></div>}<button className="primary-action" disabled={busy}>{busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"} <span aria-hidden="true">↗</span></button></form><div id="reactGoogleButton" className="google-button" /><p className="inline-note" role="status">{status}</p>{signupEnabled && <button type="button" className="text-link" onClick={() => { setMode((current) => current === "login" ? "signup" : "login"); setStatus(""); }}>{mode === "signup" ? "Already have an account? Sign in" : "New to Glamia? Create an account"}</button>}<button type="button" className="text-link" onClick={() => onNavigate("/")}>Continue browsing as a guest ↗</button></section></main>;
+  return <main className="page-main"><section className="login-page"><p className="eyebrow">Welcome to Glamia</p><h1 className="page-title">Your wardrobe,<br /><em>your edit.</em></h1><p className="muted">Sign in to view saved addresses, orders, wishlist items, and member checkout options.</p><div id="reactGoogleButton" className="google-button" /><p className="inline-note" role="status">{status}</p><button type="button" className="text-link" onClick={() => onNavigate("/")}>Continue browsing as a guest</button></section></main>;
 }
-
 function CinematicHero({ slides = [], onNavigate }) {
   const availableSlides = slides.length ? slides : [{ eyebrow: "The Glamia Edit", title: "Everyday pieces, beautifully composed.", tagline: "Curated apparel and accessories for every wardrobe, sourced from independent ateliers.", cta_label: "Explore the collection", cta_category: "", frames: [] }];
   const [index, setIndex] = useState(0);
