@@ -14,6 +14,15 @@ export function availableQuantity(product, size) {
   return Math.max(0, Number(stock && Object.keys(stock).length ? stock[size] || 0 : product.stock || 0));
 }
 
+export function isPreorder(product) {
+  return Boolean(product?.preorder_enabled);
+}
+
+export function preorderRemaining(product) {
+  if (!isPreorder(product) || product.preorder_limit == null) return null;
+  return Math.max(0, Number(product.preorder_limit) - Number(product.preorder_sold || 0));
+}
+
 export function readStorage(key, fallback) {
   try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
 }
@@ -36,26 +45,22 @@ export function formatIST(value, options) {
   return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", ...options });
 }
 
-/* Search-engine friendly product URLs: /product/<name-slug>. When several live
-   products share a name (colourways, re-edits) every one of them disambiguates
-   with a short id suffix: /product/<name-slug>-<8-char-id>. Bare ids and the
-   older <slug>-<full-id> links keep resolving on the backend. */
-let productSlugRegistry = null;
-
-export function setSlugRegistry(products) {
-  productSlugRegistry = (Array.isArray(products) ? products : [])
-    .map((product) => ({
-      id: String(product?.id || product?.slug || "").trim(),
-      slug: String(product?.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
-    }))
-    .filter((entry) => entry.id && entry.slug);
+/* Canonical product URLs use the product hierarchy:
+   /<category-slug>/<subcategory-slug>/<name-slug>-<stable-product-id>.
+   The category and subcategory make the URL useful to shoppers and search
+   engines; the complete stable id suffix guarantees colourways and future
+   re-edits remain unique even when names overlap.
+   Legacy /product/<slug> links continue to resolve and redirect server-side. */
+function urlSlug(value, fallback = "collection") {
+  const slug = String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || fallback;
 }
 
 export function productUrl(product) {
   const id = String(product?.id || product?.slug || "").trim();
   if (!id) return "/search";
-  const slug = String(product?.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  if (!slug) return `/product/${id}`;
-  const ambiguous = productSlugRegistry ? productSlugRegistry.filter((entry) => entry.slug === slug).length > 1 : false;
-  return `/product/${ambiguous ? `${slug}-${id.slice(0, 8)}` : slug}`;
+  const slug = urlSlug(product?.name, id);
+  const category = urlSlug(product?.category);
+  const subcategory = urlSlug(product?.subcategory);
+  return `/${category}/${subcategory}/${slug}-${id.toLowerCase()}`;
 }

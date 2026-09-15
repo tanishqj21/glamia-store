@@ -15,7 +15,7 @@ export function PhoneField({ countryCode = "+91", number = "", onCountryCodeChan
         <select aria-label="Country calling code" value={countryCode} onChange={(event) => onCountryCodeChange(event.target.value)}>
           {PHONE_COUNTRIES.map(([code, country]) => <option value={code} key={code}>{code} · {country}</option>)}
         </select>
-        <input id={id ? `${id}-number` : undefined} type="tel" inputMode="tel" autoComplete="tel-national" value={number} onChange={(event) => onNumberChange(event.target.value)} required={required} placeholder="Mobile number" />
+        <input id={id ? `${id}-number` : undefined} aria-label={label || "Mobile number"} type="tel" inputMode="tel" autoComplete="tel-national" value={number} onChange={(event) => onNumberChange(event.target.value)} required={required} placeholder="Mobile number" />
       </span>
     </label>
   </div>;

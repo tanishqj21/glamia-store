@@ -1,13 +1,14 @@
 import React, { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { apiFetch } from "../lib/api";
+import { taxRuleFor } from "./TaxCodePicker";
 
 const BULK_HEADERS = [
-  "Name", "Category", "Subcategory", "Brand", "Price", "MRP", "Colour", "Material", "Description", "Sizes", "Stock by Size", "Images", "Size Chart URL",
+  "Name", "Category", "Subcategory", "Brand", "Price", "MRP", "Colour", "Material", "HSN Code", "Tax Code Type", "GST Rate (%)", "Price Includes GST", "Description", "Sizes", "Stock by Size", "Images", "Size Chart URL",
 ];
 
 const TEMPLATE_ROW = [
-  "Pearl Button Knit Polo", "Women", "Tops", "Aster Lane", 2299, 3499, "Pearl", "Ribbed Cotton Knit",
+  "Pearl Button Knit Polo", "Women", "Tops", "Aster Lane", 2299, 3499, "Pearl", "Ribbed Cotton Knit", "6109", "HSN", 12, "Yes",
   "A soft ribbed knit polo with pearl buttons and a polished fit.", "XS|S|M|L", "XS:6|S:10|M:12|L:8",
   "https://example.com/front.jpg|https://example.com/back.jpg|https://example.com/detail.jpg|https://example.com/look.jpg", "",
 ];
@@ -37,6 +38,10 @@ function normalizeRow(raw, index, categories, subcategories) {
   const mrp = Number(cell(raw, "MRP"));
   const color = cell(raw, "Colour") || cell(raw, "Color");
   const material = cell(raw, "Material");
+  const hsnSacCode = (cell(raw, "HSN Code") || cell(raw, "HSN / SAC Code") || cell(raw, "Tax Code")).toUpperCase();
+  const hsnSacType = (cell(raw, "Tax Code Type") || cell(raw, "HSN / SAC Type") || "HSN").toUpperCase();
+  const gstRateInput = cell(raw, "GST Rate (%)") || cell(raw, "GST Rate");
+  const taxInclusiveInput = cell(raw, "Price Includes GST") || cell(raw, "GST Inclusive");
   const description = cell(raw, "Description");
   const sizes = splitList(cell(raw, "Sizes"));
   const images = splitList(cell(raw, "Images"));
@@ -51,6 +56,10 @@ function normalizeRow(raw, index, categories, subcategories) {
   if (!brand) errors.push("brand is required");
   if (!Number.isSafeInteger(price) || price < 1) errors.push("price must be a positive whole number");
   if (!Number.isSafeInteger(mrp) || mrp < 1 || price > mrp) errors.push("MRP must be a whole number at least as high as price");
+  if (!["HSN", "SAC"].includes(hsnSacType)) errors.push("tax code type must be HSN or SAC");
+  const autoTaxRule = taxRuleFor(hsnSacCode, price, mrp);
+  const gstRate = gstRateInput === "" ? (autoTaxRule?.rate ?? null) : Number(gstRateInput);
+  if (gstRateInput !== "" && (!Number.isFinite(gstRate) || gstRate < 0 || gstRate > 100)) errors.push("GST rate must be between 0 and 100");
   if (!color) errors.push("colour is required");
   if (!material) errors.push("material is required");
   if (description.length < 3) errors.push("description is required");
@@ -67,7 +76,9 @@ function normalizeRow(raw, index, categories, subcategories) {
     result: "",
     product: {
       name, category: categoryMatch || category, subcategory: subcategoryMatch?.name || "", brand,
-      price, mrp, color, material, description, sizes, size_stock: sizeStock, stock, images,
+      price, mrp, color, material, hsn_sac_code: hsnSacCode, hsn_sac_type: hsnSacType,
+      gst_rate: gstRate, gst_tax_inclusive: !["no", "false", "0", "n"].includes(taxInclusiveInput.toLowerCase()),
+      description, sizes, size_stock: sizeStock, stock, images,
       thumbnail_urls: images.slice(0, 1), image_keys: [], variants: [], size_chart_url: cell(raw, "Size Chart URL"), reorder_point: 15,
     },
   };
@@ -76,7 +87,7 @@ function normalizeRow(raw, index, categories, subcategories) {
 function downloadTemplate() {
   const workbook = XLSX.utils.book_new();
   const products = XLSX.utils.aoa_to_sheet([BULK_HEADERS, TEMPLATE_ROW]);
-  products["!cols"] = BULK_HEADERS.map((header, index) => ({ wch: index === 8 ? 52 : index === 11 ? 70 : Math.max(16, header.length + 2) }));
+  products["!cols"] = BULK_HEADERS.map((header, index) => ({ wch: index === 8 ? 16 : index === 12 ? 52 : index === 15 ? 70 : Math.max(16, header.length + 2) }));
   XLSX.utils.book_append_sheet(workbook, products, "Products");
   const instructions = XLSX.utils.aoa_to_sheet([
     ["Glamia bulk listing template"],
@@ -84,6 +95,10 @@ function downloadTemplate() {
     ["Field", "How to fill"],
     ["Sizes", "Separate sizes with |, for example XS|S|M|L"],
     ["Stock by Size", "Use size:quantity pairs separated with |, for example XS:6|S:10|M:12|L:8"],
+    ["HSN Code", "Add the confirmed HSN code for goods. HSN / SAC Code is also accepted for compatibility."],
+    ["Tax Code Type", "Use HSN for goods or SAC for services. Defaults to HSN when blank."],
+    ["GST Rate (%)", "Optional confirmed rate. If blank, known apparel/footwear defaults are applied when available."],
+    ["Price Includes GST", "Use Yes or No. Defaults to Yes when blank."],
     ["Images", "Add 4 to 6 HTTPS image URLs separated with |. The first image becomes the thumbnail."],
     ["Category and Subcategory", "Use names that already exist in the store category catalogue."],
   ]);
@@ -166,10 +181,10 @@ export function BulkListingView({ categories, subcategories }) {
     
     {rows.length > 0 && <>
       <div className="bulk-summary"><strong>{validRows.length} ready</strong><span>{rows.length - validRows.length} need attention</span><span>Rows with errors will not be imported.</span></div>
-      <div className="bulk-preview-table"><table><thead><tr><th>Row</th><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Images</th><th>Result</th></tr></thead><tbody>{rows.map((row) => <tr className={row.errors.length ? "has-errors" : "is-valid"} key={row.rowNumber}><td>{row.rowNumber}</td><td>{row.product.name || "—"}</td><td>{row.product.category || "—"}</td><td>{Number.isFinite(row.product.price) ? `₹${row.product.price.toLocaleString("en-IN")}` : "—"}</td><td>{row.product.stock || 0}</td><td>{row.product.images.length}</td><td>{row.errors.length ? <span className="error-text">{row.errors.join("; ")}</span> : row.result ? <span className="status-pill live">{row.result}</span> : <span className="status-pill">Ready</span>}</td></tr>)}</tbody></table></div>
+      <div className="bulk-preview-table"><table><thead><tr><th>Row</th><th>Product</th><th>Category</th><th>HSN</th><th>GST</th><th>Price</th><th>Stock</th><th>Images</th><th>Result</th></tr></thead><tbody>{rows.map((row) => <tr className={row.errors.length ? "has-errors" : "is-valid"} key={row.rowNumber}><td>{row.rowNumber}</td><td>{row.product.name || "—"}</td><td>{row.product.category || "—"}</td><td>{row.product.hsn_sac_code || "—"}</td><td>{Number.isFinite(row.product.gst_rate) ? `${row.product.gst_rate}%` : "—"}</td><td>{Number.isFinite(row.product.price) ? `₹${row.product.price.toLocaleString("en-IN")}` : "—"}</td><td>{row.product.stock || 0}</td><td>{row.product.images.length}</td><td>{row.errors.length ? <span className="error-text">{row.errors.join("; ")}</span> : row.result ? <span className="status-pill live">{row.result}</span> : <span className="status-pill">Ready</span>}</td></tr>)}</tbody></table></div>
       {message && <p className={`inline-note ${tone}`} role="status" aria-live="polite">{message}</p>}
       <button className="primary-action" type="button" disabled={!validRows.length || busy} onClick={importListings}>{busy ? "Importing…" : `Import ${validRows.length} ready listing${validRows.length === 1 ? "" : "s"}`} <span aria-hidden="true">↗</span></button>
     </>}
-    {!rows.length && <div className="bulk-empty"><strong>Start with a clean import</strong><span>The template includes a Products sheet and a short Instructions sheet so size-level stock and image requirements stay clear.</span></div>}
+    {!rows.length && <div className="bulk-empty"><strong>Start with a clean import</strong><span>The template includes HSN/GST fields, a Products sheet, and a short Instructions sheet so tax classification, size-level stock, and image requirements stay clear.</span></div>}
   </section>;
 }

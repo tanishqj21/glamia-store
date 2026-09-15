@@ -33,8 +33,12 @@
 			"remote": true
 		}
 	],
+	"triggers": {
+		"crons": ["*/5 * * * *"]
+	},
 	"vars": {
 		"GOOGLE_CLIENT_ID": "831595711865-ofo1b36f728opnm2h6rs7i2e9l0jrs3r.apps.googleusercontent.com",
+		"GA4_MEASUREMENT_ID": "G-YB686J9CE4",
 		"ADMIN_EMAILS": [
 			"tanishqj29@gmail.com",
   			"glamia.apparels@gmail.com"

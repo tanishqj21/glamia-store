@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/api";
 import { money, formatIST, productUrl } from "../lib/commerce";
 import { AfterSalesDialog } from "./CustomerCare";
 import { PhoneField, composePhone, splitPhone } from "./PhoneField";
+import { MyReviewsPanel } from "./Reviews";
 
 
 function addressLine(address) {
@@ -28,14 +29,22 @@ function calculateAge(value) {
   return age >= 0 ? age : null;
 }
 
+const CANCELLATION_WINDOW_DAYS = 2;
+
+function cancellationWindowOpen(order) {
+  const createdAt = Date.parse(order?.created_at || "");
+  return !Number.isFinite(createdAt) || Date.now() - createdAt <= CANCELLATION_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+}
+
 function profileGenderLabel(value) {
   return ({ female: "Female", male: "Male", non_binary: "Non-binary", prefer_not_to_say: "Prefer not to say" })[value] || "Not set";
 }
 
-function profileForm(data = {}) {
+function profileForm(data = {}, requirePhone = false) {
   const phones = Array.isArray(data.phones) && data.phones.length
     ? data.phones.map((item) => ({ id: item.id, label: item.label || "", country_code: item.country_code || "+91", phone_number: item.phone_number || item.phone || "", is_primary: Boolean(item.is_primary) }))
     : data.phone ? (() => { const parsed = splitPhone(data.phone); return [{ id: "primary", label: "", country_code: parsed.countryCode, phone_number: parsed.number, is_primary: true }]; })() : [];
+  if (requirePhone && !phones.length) phones.push({ id: "primary", label: "", country_code: "+91", phone_number: "", is_primary: true });
   return { first_name: data.first_name || "", middle_name: data.middle_name || "", last_name: data.last_name || "", dob: data.dob || "", gender: data.gender || "", phones };
 }
 
@@ -45,6 +54,7 @@ function AccountNav({ route, onNavigate }) {
     ["/address", "Address book"],
     ["/orders", "Your orders"],
     ["/wishlist", "Wishlist"],
+    ["/reviews", "Reviews"],
   ];
 
   return (
@@ -177,6 +187,85 @@ function ProfilePanel({ user }) {
   );
 }
 
+export function ProfileCompletionPage({ user, onComplete }) {
+  const [profile, setProfile] = useState(null);
+  const [form, setForm] = useState(profileForm({}, true));
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    apiFetch("/api/profile")
+      .then((response) => response.json().then((data) => ({ response, data })))
+      .then(({ response, data }) => {
+        if (!response.ok) throw new Error(data.error || "Profile could not be loaded");
+        if (!active) return;
+        setProfile(data);
+        setForm(profileForm(data, true));
+      })
+      .catch((error) => active && setStatus(error.message))
+      .catch(() => null);
+    return () => { active = false; };
+  }, []);
+
+  function changeField(event) {
+    const name = event.target.name;
+    const value = ["first_name", "middle_name", "last_name"].includes(name) ? capitalizeNamePart(event.target.value) : event.target.value;
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  function updatePhone(field, value) {
+    setForm((current) => ({ ...current, phones: current.phones.map((phone, index) => index === 0 ? { ...phone, [field]: value } : phone) }));
+  }
+
+  async function save(event) {
+    event.preventDefault();
+    setBusy(true);
+    setStatus("");
+    try {
+      const normalized = {
+        ...form,
+        first_name: capitalizeNamePart(form.first_name),
+        middle_name: capitalizeNamePart(form.middle_name),
+        last_name: capitalizeNamePart(form.last_name),
+      };
+      const response = await apiFetch("/api/profile", { method: "PUT", body: JSON.stringify(normalized) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Profile could not be saved");
+      setProfile(data);
+      setForm(profileForm(data, true));
+      onComplete(data);
+    } catch (error) {
+      setStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const age = calculateAge(form.dob);
+  const birthdayLocked = Boolean(profile?.dob && !profile?.can_change_dob);
+  return (
+    <main className="page-main">
+      <section className="account-page profile-completion-page">
+        <p className="eyebrow">One last step</p>
+        <h1 className="page-title">Complete your profile.</h1>
+        <p className="profile-completion-intro">Welcome to Glamia, {user?.name || "member"}. Add these details before you continue so your account, orders, and reviews use the right information.</p>
+        <section className="account-panel profile-completion-panel" aria-labelledby="profile-completion-title">
+          <div className="profile-edit-heading"><div><p className="eyebrow">Required account details</p><h2 id="profile-completion-title">Tell us about you.</h2></div><p className="muted">Your name is shown with an uppercase first letter.</p></div>
+          <form className="account-form" onSubmit={save}>
+            <div className="form-row"><label>First name<input name="first_name" value={form.first_name} onChange={changeField} required autoComplete="given-name" /></label><label>Middle name <span className="form-hint">optional</span><input name="middle_name" value={form.middle_name} onChange={changeField} autoComplete="additional-name" /></label></div>
+            <div className="form-row"><label>Last name<input name="last_name" value={form.last_name} onChange={changeField} required autoComplete="family-name" /></label><div className="profile-phone-list"><div className="profile-phone-heading"><span>Mobile number</span><span className="form-hint">required</span></div>{form.phones.slice(0, 1).map((phone) => <div className="profile-phone-row profile-phone-row-required" key={phone.id}><PhoneField id="onboarding-phone" label="" countryCode={phone.country_code} number={phone.phone_number} onCountryCodeChange={(value) => updatePhone("country_code", value)} onNumberChange={(value) => updatePhone("phone_number", value)} required /></div>)}</div></div>
+            <div className="form-row"><label>Gender / sex<select name="gender" value={form.gender} onChange={changeField} required><option value="">Choose an option</option><option value="female">Female</option><option value="male">Male</option><option value="non_binary">Non-binary</option><option value="prefer_not_to_say">Prefer not to say</option></select></label><label>Birthday<input name="dob" type="date" value={form.dob} onChange={changeField} disabled={birthdayLocked} required autoComplete="bday" />{age !== null && <span className="profile-age-note">Calculated age: {age}</span>}</label></div>
+            {birthdayLocked && <p className="inline-note">Birthday changes are locked until {formatIST(profile.dob_change_available_at, { dateStyle: "medium" })}.</p>}
+            {status && <p className="inline-error" role="alert">{status}</p>}
+            <button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving details…" : "Save and continue"} <span aria-hidden="true">↗</span></button>
+          </form>
+        </section>
+      </section>
+    </main>
+  );
+}
+
 function AddressPanel({ initialAddresses }) {
   const [addresses, setAddresses] = useState(initialAddresses || []);
   const [form, setForm] = useState({ name: "", phone: "", line1: "", line2: "", city: "", state: "", pin: "", country: "India" });
@@ -275,7 +364,7 @@ function OrdersPanel({ initialOrders, products }) {
     <section className="account-panel" aria-labelledby="orders-title">
       <div className="account-panel-heading"><div><p className="eyebrow">Order history</p><h2 id="orders-title">Your purchases</h2></div><span className="account-badge">{orders.length} total</span></div>
       {status && <p className="inline-note" role="status">{status}</p>}
-      {orders.length ? <div className="order-list">{orders.map((order) => <article className="account-order-card" key={order.id}><div className="order-card-top"><div><strong>{order.order_number}</strong><p>{order.created_at ? formatIST(order.created_at) : "Recent order"} · {String(order.payment_method || "COD").toUpperCase()}</p></div><span className={`status-pill status-${order.status}`}>{String(order.status || "pending").replace(/_/g, " ")}</span></div><div className="order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.title || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}</span>)}</div><div className="order-card-bottom"><strong>{money(order.total)}</strong><div className="order-card-actions">{order.status === "delivered" && <button type="button" onClick={() => setAfterSalesOrder(order)}>Return / Refund</button>}{["pending", "confirmed"].includes(order.status) && <button type="button" onClick={() => cancel(order)}>Cancel order</button>}</div></div></article>)}</div> : <div className="empty-state">You have not placed an order yet.</div>}
+      {orders.length ? <div className="order-list">{orders.map((order) => <article className="account-order-card" key={order.id}><div className="order-card-top"><div><strong>{order.order_number}</strong><p>{order.created_at ? formatIST(order.created_at) : "Recent order"} · {order.order_type === "preorder" ? "Pre-order" : String(order.payment_method || "demo").toUpperCase()}</p></div><span className={`status-pill status-${order.status}`}>{String(order.status || "pending").replace(/_/g, " ")}</span></div><div className="order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.title || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}{item.preorder && <small className="preorder-line-label">Pre-order</small>}</span>)}</div><div className="order-card-bottom"><strong>{money(order.total)}</strong><div className="order-card-actions">{order.status === "delivered" && <button type="button" onClick={() => setAfterSalesOrder(order)}>Return / Refund</button>}{["pending", "confirmed"].includes(order.status) && cancellationWindowOpen(order) && <button type="button" onClick={() => cancel(order)}>Cancel order</button>}{["pending", "confirmed"].includes(order.status) && !cancellationWindowOpen(order) && <small className="form-hint">Cancellation window closed after 2 days.</small>}</div></div></article>)}</div> : <div className="empty-state">You have not placed an order yet.</div>}
       {afterSalesOrder && <AfterSalesDialog order={afterSalesOrder} products={products} onClose={() => setAfterSalesOrder(null)} onComplete={(data) => { setAfterSalesOrder(null); setStatus(data.replacement_order ? "Exchange submitted and a replacement order was created." : "Return / refund request submitted."); }} />}
     </section>
   );
@@ -296,6 +385,6 @@ export function AccountPage({ route, user, addresses, orders, products, wishlist
     return <AccountLayout route={route} onNavigate={onNavigate} title="Sign in to continue"><section className="account-panel"><p className="muted">Sign in to access your profile, saved addresses, orders, and wishlist.</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Continue to sign in <span aria-hidden="true">↗</span></button></section></AccountLayout>;
   }
 
-  const title = route === "/address" ? "Address book" : route === "/orders" ? "Your orders" : route === "/wishlist" ? "Wishlist" : "Your account";
-  return <AccountLayout route={route} onNavigate={onNavigate} title={title}>{route === "/profile" && <ProfilePanel user={user} />}{route === "/address" && <AddressPanel initialAddresses={addresses} />}{route === "/orders" && <OrdersPanel initialOrders={orders} products={products} />}{route === "/wishlist" && <WishlistPanel products={products} wishlist={wishlist} toggleWishlist={toggleWishlist} onNavigate={onNavigate} />}</AccountLayout>;
+  const title = route === "/address" ? "Address book" : route === "/orders" ? "Your orders" : route === "/wishlist" ? "Wishlist" : route === "/reviews" ? "Your reviews" : "Your account";
+  return <AccountLayout route={route} onNavigate={onNavigate} title={title}>{route === "/profile" && <ProfilePanel user={user} />}{route === "/address" && <AddressPanel initialAddresses={addresses} />}{route === "/orders" && <OrdersPanel initialOrders={orders} products={products} />}{route === "/wishlist" && <WishlistPanel products={products} wishlist={wishlist} toggleWishlist={toggleWishlist} onNavigate={onNavigate} />}{route === "/reviews" && <MyReviewsPanel onNavigate={onNavigate} />}</AccountLayout>;
 }

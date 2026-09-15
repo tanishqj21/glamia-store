@@ -25,6 +25,12 @@ const filler = [
   "https://images.unsplash.com/photo-1551028719-00167b16eac5?auto=format&fit=crop&w=900&q=82"
 ];
 
+function canonicalProductPath(product) {
+  const slug = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const id = String(product?.id || "").trim();
+  return `/${slug(product?.category) || "collection"}/${slug(product?.subcategory) || "collection"}/${slug(product?.name) || id || "item"}-${id.toLowerCase()}`;
+}
+
 function readDevVar(name) {
   try {
     const line = readFileSync(new URL("../.dev.vars", import.meta.url), "utf8")
@@ -108,7 +114,13 @@ console.log("React migration wiring:");
   const adminOperations = readFileSync(new URL("../react-app/src/components/AdminOperations.jsx", import.meta.url), "utf8");
   const adminMerchandising = readFileSync(new URL("../react-app/src/components/AdminMerchandising.jsx", import.meta.url), "utf8");
   const adminSystem = readFileSync(new URL("../react-app/src/components/AdminSystemViews.jsx", import.meta.url), "utf8");
+  const taxPicker = readFileSync(new URL("../react-app/src/components/TaxCodePicker.jsx", import.meta.url), "utf8");
+  const bulkListing = readFileSync(new URL("../react-app/src/components/BulkListingView.jsx", import.meta.url), "utf8");
   const support = readFileSync(new URL("../react-app/src/components/CustomerCare.jsx", import.meta.url), "utf8");
+  const publicPages = readFileSync(new URL("../react-app/src/components/PublicPages.jsx", import.meta.url), "utf8");
+  const googleAnalytics = readFileSync(new URL("../react-app/src/components/GoogleAnalyticsView.jsx", import.meta.url), "utf8");
+  const imageManager = readFileSync(new URL("../react-app/src/components/ImageManager.jsx", import.meta.url), "utf8");
+  const worker = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
   const reactHtml = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   check("React frontend is the primary entry point", reactHtml.includes("/assets/index-") && reactHtml.includes("<div id=\"root\"></div>"));
   check("All storefront, account, checkout, support, and admin routes render through React",
@@ -126,6 +138,33 @@ console.log("React migration wiring:");
   check("React admin includes the store map and all major control views",
     admin.includes("function OrdersView") && adminOperations.includes("export function CouponsView") &&
     adminMerchandising.includes("export function HeroStudioView") && adminSystem.includes("export function ManageStoreView"));
+  check("Policies are published in React and linked as five separate footer pages",
+    publicPages.includes("Terms & Conditions") && publicPages.includes("Privacy Policy") &&
+    publicPages.includes("Refund & Cancellation") && publicPages.includes("Return Policy") &&
+    publicPages.includes("Shipping Policy") && app.includes("/terms-and-conditions") &&
+    app.includes("/privacy-policy") && app.includes("/refund-cancellation-policy") &&
+    app.includes("/return-policy") && app.includes("/shipping-policy"));
+  check("Listing forms include smart HSN/SAC suggestions",
+    admin.includes("<TaxCodePicker") && taxPicker.includes("/data/tax/hsn.json") &&
+    taxPicker.includes("/data/tax/sac.json") && taxPicker.includes("Suggested matches") &&
+    taxPicker.includes("taxRuleFor") && taxPicker.includes("gst_rate: rule.rate"));
+  check("Bulk listing template imports HSN and GST fields",
+    bulkListing.includes('"HSN Code"') && bulkListing.includes('"GST Rate (%)"') &&
+    bulkListing.includes("hsn_sac_code: hsnSacCode") && bulkListing.includes("gst_rate: gstRate") &&
+    bulkListing.includes("taxRuleFor"));
+  check("Admin dashboard includes a server-side Google Analytics 4 view",
+    admin.includes("GoogleAnalyticsView") && googleAnalytics.includes("/api/admin/google-analytics") &&
+    googleAnalytics.includes("Connect GA4") && googleAnalytics.includes("Top pages"));
+  check("React storefront wires the public Google Analytics 4 measurement ID",
+    app.includes("ensureGoogleAnalytics") && app.includes("googleAnalyticsMeasurementId") &&
+    app.includes('"page_view"') && app.includes("googletagmanager.com/gtag/js"));
+  check("Listing image manager previews, reorders, and selects thumbnails",
+    admin.includes("<ImageManager") && imageManager.includes("First") && imageManager.includes("Last") &&
+    imageManager.includes("Use as thumbnail") && imageManager.includes("preview"));
+  check("Weekly R2 cleanup is scheduled and reference-aware",
+    worker.includes("runWeeklyR2Cleanup") && worker.includes("PRODUCT_IMAGES.list") &&
+    worker.includes("maintenance_tasks") && worker.includes("R2_CLEANUP_GRACE_MS") &&
+    worker.includes('"products/", "reviews/"'));
 }
 
 console.log("Public endpoints:");
@@ -134,14 +173,18 @@ console.log("Public endpoints:");
   const sitemapText = await sitemapResponse.text();
   check("GET /sitemap.xml returns a Google-compatible XML sitemap", sitemapResponse.status === 200 &&
     sitemapResponse.headers.get("content-type")?.includes("application/xml") &&
-    sitemapText.includes("<urlset") && sitemapText.includes(`${BASE}/`) && sitemapText.includes("/product/"));
+    sitemapText.includes("<urlset") && sitemapText.includes(`${BASE}/`));
   const robotsResponse = await call("GET", "/robots.txt", { raw: true });
   const robotsText = await robotsResponse.text();
   check("GET /robots.txt points crawlers to the sitemap", robotsResponse.status === 200 &&
     robotsResponse.headers.get("content-type")?.includes("text/plain") &&
-    robotsText.includes("Disallow: /admin") && robotsText.includes(`Sitemap: ${BASE}/sitemap.xml`));
+    robotsText.includes("Disallow: /admin") && robotsText.includes("Allow: /api/products") &&
+    robotsText.includes("Allow: /api/assets/") && robotsText.includes(`Sitemap: ${BASE}/sitemap.xml`));
   const { status, data } = await call("GET", "/api/config");
   check("GET /api/config returns googleClientId", status === 200 && typeof data.googleClientId === "string");
+  check("GET /api/config returns a valid Google Analytics measurement ID",
+    status === 200 && typeof data.googleAnalyticsMeasurementId === "string" &&
+    /^G-[A-Z0-9]+$/i.test(data.googleAnalyticsMeasurementId));
   googleConfigured = Boolean(data.googleClientId) && !data.googleClientId.includes("REPLACE_WITH");
   const session = await call("GET", "/api/session");
   check("GET /api/session is anonymous", session.status === 200 && session.data.user === null);
@@ -149,6 +192,24 @@ console.log("Public endpoints:");
   check("GET /api/products lists only live products", products.status === 200 &&
     products.data.products.length >= 5 && products.data.products.every(p => p.status === "live"),
     `got ${products.data.products?.length}`);
+  const apiCrawlerResponse = await fetch(`${BASE}/api/products?view=cards`);
+  check("Public rendering APIs are crawlable but cannot be indexed as standalone pages",
+    apiCrawlerResponse.status === 200 && apiCrawlerResponse.headers.get("x-robots-tag") === "noindex, nofollow");
+  const expectedProductPath = products?.data?.products?.[0] ? canonicalProductPath(products.data.products[0]) : "";
+  check("Sitemap exposes canonical hierarchical product paths and no legacy product namespace", expectedProductPath &&
+    sitemapText.includes(`${BASE}${expectedProductPath}`) && !sitemapText.includes("/product/"));
+  const seoProductResponse = await fetch(`${BASE}${expectedProductPath}`, { headers: { "user-agent": "Google-InspectionTool/1.0" } });
+  const seoProductHtml = await seoProductResponse.text();
+  check("Google inspection receives a self-contained product page instead of an API-dependent shell", seoProductResponse.status === 200 &&
+    seoProductHtml.includes(`<h1>${products.data.products[0].name}</h1>`) &&
+    seoProductHtml.includes("Product details") && seoProductHtml.includes("Availability") &&
+    seoProductHtml.includes("application/ld+json") && !seoProductHtml.includes('type="module"'));
+  const seoCategoryResponse = await fetch(`${BASE}/category/Women`, { headers: { "user-agent": "Google-InspectionTool/1.0" } });
+  const seoCategoryHtml = await seoCategoryResponse.text();
+  check("Google inspection receives server-rendered category content instead of a soft 404", seoCategoryResponse.status === 200 &&
+    seoCategoryHtml.includes("<title>Women collection | Glamia</title>") &&
+    seoCategoryHtml.includes("Midnight Satin Wrap Dress") &&
+    seoCategoryHtml.includes("rel=\"canonical\"") && !seoCategoryHtml.includes('type="module"'));
   const compactProducts = await call("GET", "/api/products?view=cards&limit=2&page=1");
   check("Compact catalogue is paginated and omits detail-only fields", compactProducts.status === 200 &&
     compactProducts.data.products?.length === 2 && compactProducts.data.products.every(product => product.compact === true && !("description" in product) && !("variants" in product)) &&
@@ -167,6 +228,17 @@ console.log("Public endpoints:");
   const storefrontSettings = await call("GET", "/api/storefront-settings");
   check("GET /api/storefront-settings returns storefront chrome", storefrontSettings.status === 200 &&
     storefrontSettings.data.announcement && storefrontSettings.data.trust_strip?.items?.length === 3);
+  const hsnReference = await fetch(`${BASE}/data/tax/hsn.json`);
+  const hsnReferenceData = await hsnReference.json().catch(() => []);
+  const sacReference = await fetch(`${BASE}/data/tax/sac.json`);
+  const sacReferenceData = await sacReference.json().catch(() => []);
+  const stateReference = await fetch(`${BASE}/data/tax/states.json`);
+  const stateReferenceData = await stateReference.json().catch(() => []);
+  check("Workbook tax references are available to the admin UI", hsnReference.status === 200 &&
+    sacReference.status === 200 && stateReference.status === 200 &&
+    Array.isArray(hsnReferenceData) && hsnReferenceData.length > 20000 &&
+    Array.isArray(sacReferenceData) && sacReferenceData.length > 600 &&
+    Array.isArray(stateReferenceData) && stateReferenceData.length >= 30);
   const invalidPostal = await call("GET", "/api/postal-lookup?pin=123");
   check("Postal lookup rejects incomplete PIN codes", invalidPostal.status === 400);
   const validPostal = await call("GET", "/api/postal-lookup?pin=110052");
@@ -178,6 +250,16 @@ console.log("Public endpoints:");
   check("Health endpoint reports D1 availability", health.status === 200 && health.data.ok === true && health.data.database === "ok");
   const protectedHeaders = await fetch(`${BASE}/api/health`, { method: "POST", headers: { origin: "https://evil.example" } });
   check("Mutating cross-origin requests are blocked", protectedHeaders.status === 403);
+  const rateProbeIp = `rate-probe-${Date.now()}`;
+  const rateProbeStatuses = [];
+  for (let index = 0; index < 21; index++) {
+    const response = await fetch(`${BASE}/api/order-tracking?order=not-found&email=rate-probe@example.com`, {
+      headers: { "CF-Connecting-IP": rateProbeIp }
+    });
+    rateProbeStatuses.push(response.status);
+  }
+  check("Shared rate limit rejects requests beyond the window allowance",
+    rateProbeStatuses.slice(0, 20).every(status => status === 400) && rateProbeStatuses[20] === 429);
 }
 
 console.log("Auth guards:");
@@ -194,6 +276,8 @@ console.log("Auth guards:");
   check("Admin reset requires sign-in (401)", reset.status === 401);
   const upload = await call("POST", "/api/uploads/image", { form: new FormData() });
   check("Upload requires sign-in (401)", upload.status === 401);
+  const googleAnalytics = await call("GET", "/api/admin/google-analytics");
+  check("Google Analytics endpoint requires admin sign-in (401)", googleAnalytics.status === 401);
 }
 
 console.log("Google credential verification:");
@@ -211,6 +295,9 @@ console.log("Google credential verification:");
       garbage.status === 500 && /Configure GOOGLE_CLIENT_ID/.test(garbage.data.error || ""),
       JSON.stringify(garbage.data));
   }
+  const passwordSignup = await call("POST", "/api/auth/signup", { body: { email: "password@example.com", password: "not-used" } });
+  const passwordLogin = await call("POST", "/api/auth/login", { body: { email: "password@example.com", password: "not-used" } });
+  check("Password authentication is disabled in demo mode", passwordSignup.status === 410 && passwordLogin.status === 410);
 }
 
 console.log("Seller session (non-whitelisted email):");
@@ -361,12 +448,13 @@ let baselineCredits = 0;
   };
   const created = await call("POST", "/api/products", {
     cookie: sellerCookie,
-    body: { ...base, images: goodImages }
+    body: { ...base, images: goodImages, thumbnail_source_url: goodImages[2], thumbnail_urls: [goodImages[2]] }
   });
-  check("Seller creates listing (201, on hold, first image is thumbnail)",
+  check("Seller creates listing (201, on hold, selected image is thumbnail)",
     created.status === 201 && created.data.product?.status === "hold" &&
     created.data.product?.images?.length === 4 && created.data.product?.images[0] === goodImages[0] &&
-    created.data.product?.material === "Brushed Cotton");
+    created.data.product?.thumbnail_source_url === goodImages[2] &&
+    created.data.product?.thumbnail_url === goodImages[2] && created.data.product?.material === "Brushed Cotton");
   createdProductId = created.data.product?.id;
 
   const publicAfterCreate = await call("GET", "/api/products");
@@ -578,6 +666,9 @@ console.log("R2 image upload:");
   const asset = await fetch(`${BASE}${upload.data.imageUrl}`);
   check("Uploaded image served from R2", asset.status === 200 && asset.headers.get("content-type") === "image/png" &&
     Buffer.compare(Buffer.from(await asset.arrayBuffer()), PNG_1PX) === 0);
+  const assetHead = await fetch(`${BASE}${upload.data.imageUrl}`, { method: "HEAD" });
+  check("Product images support crawler HEAD requests", assetHead.status === 200 &&
+    assetHead.headers.get("content-type") === "image/png" && Number(assetHead.headers.get("content-length")) === PNG_1PX.length);
 
   const missing = await fetch(`${BASE}/api/assets/products/nobody/missing.png`);
   check("Missing asset returns 404", missing.status === 404);
@@ -640,17 +731,18 @@ console.log("Orders, coupons, customers, reviews:");
     body: { items: [{ id: "seed-midnight-satin-dress", quantity: 1, size: "M" }], payment_method: "cod", email: SELLER_EMAIL, address: testAddress }
   });
   const guestOrderId = guestCod.data.order?.id;
-  check("Guest can place a worldwide demo Cash on Delivery order", guestCod.status === 201 &&
-    guestCod.data.order?.payment_method === "cod" && guestCod.data.order?.customer_email === SELLER_EMAIL &&
+  check("Guest can place a worldwide demo payment order", guestCod.status === 201 &&
+    guestCod.data.order?.payment_method === "demo" && guestCod.data.order?.payment_status === "demo" &&
+    Boolean(guestCod.data.order?.tracking_token) && guestCod.data.order?.customer_email === SELLER_EMAIL &&
     guestCod.data.order?.shipping?.country === "United Kingdom" && !("email" in (guestCod.data.order?.shipping || {})));
   const guestCard = await call("POST", "/api/orders", {
     body: { items: [{ id: "seed-midnight-satin-dress", quantity: 1, size: "M" }], payment_method: "card", email: SELLER_EMAIL, address: testAddress }
   });
-  check("Guest card checkout remains sign-in protected", guestCard.status === 401);
+  check("Real card payment methods are rejected in demo mode", guestCard.status === 400 && /demo payments/i.test(guestCard.data.error));
 
   const noAddress = await call("POST", "/api/orders", {
     cookie: sellerCookie,
-    body: { items: [{ id: createdProductId, quantity: 1 }], payment_method: "card" }
+    body: { items: [{ id: createdProductId, quantity: 1 }], payment_method: "demo" }
   });
   check("Order without address rejected (400)", noAddress.status === 400);
 
@@ -668,13 +760,14 @@ console.log("Orders, coupons, customers, reviews:");
     body: {
       items: [{ id: createdProductId, quantity: 2, size: "S" }],
       coupon: "GLAMIA10",
-      payment_method: "card",
+      payment_method: "demo",
       address: testAddress
     }
   });
-  check("Card order created with coupon discount, marked paid", order.status === 201 &&
+  check("Demo order created with coupon discount and demo payment status", order.status === 201 &&
     order.data.order?.subtotal === 2598 && order.data.order?.discount === 260 && order.data.order?.total === 2338 &&
-    order.data.order?.payment_method === "card" && order.data.order?.payment_status === "paid" &&
+    order.data.order?.payment_method === "demo" && order.data.order?.payment_status === "demo" &&
+    Boolean(order.data.order?.tracking_token) &&
     order.data.order?.shipping?.city === "London" && order.data.order?.shipping?.country === "United Kingdom");
   const orderId = order.data.order?.id;
 
@@ -686,8 +779,8 @@ console.log("Orders, coupons, customers, reviews:");
       address: testAddress
     }
   });
-  check("COD order stays payment-pending", codOrder.status === 201 && codOrder.data.order?.payment_method === "cod" &&
-    codOrder.data.order?.payment_status === "pending");
+  check("Legacy COD requests are stored as demo payments", codOrder.status === 201 && codOrder.data.order?.payment_method === "demo" &&
+    codOrder.data.order?.payment_status === "demo");
   check("Order items keep size and colour", codOrder.data.order?.items?.[0]?.size === "M" &&
     codOrder.data.order?.items?.[0]?.variant === "Charcoal");
 
@@ -756,11 +849,25 @@ console.log("Orders, coupons, customers, reviews:");
   const orderNumber = order.data.order?.order_number;
   check("Orders receive unique courier order numbers", /^GM-\d{8}-[A-Z0-9]{1,3}-\d{5}$/.test(orderNumber) &&
     orderNumber !== codOrder.data.order?.order_number);
+  const publicTrackWithoutEmail = await call("GET", `/api/order-tracking?order_id=${encodeURIComponent(orderNumber)}`);
+  const publicTrackWrongEmail = await call("GET", `/api/order-tracking?order_id=${encodeURIComponent(orderNumber)}&email=wrong@example.com`);
+  const publicTrackWithEmail = await call("GET", `/api/order-tracking?order_id=${encodeURIComponent(orderNumber)}&email=${encodeURIComponent(SELLER_EMAIL)}`);
+  const publicTrackWithToken = await call("GET", `/api/order-tracking?order_id=${encodeURIComponent(order.data.order?.tracking_token)}`);
+  check("Public order tracking requires ownership proof", publicTrackWithoutEmail.status === 404 && publicTrackWrongEmail.status === 404 &&
+    publicTrackWithEmail.status === 200 && publicTrackWithEmail.data.order?.order_number === orderNumber &&
+    publicTrackWithToken.status === 200 && publicTrackWithToken.data.order?.order_number === orderNumber);
   const notifications = await call("GET", "/api/admin/notifications", { cookie: adminCookie });
   check("Admin notification center receives new-order alert", notifications.status === 200 &&
     notifications.data.notifications.some(n => n.type === "new_order" && n.order_id === orderId && n.message.includes(orderNumber)));
   const readNotifications = await call("POST", "/api/admin/notifications/read-all", { cookie: adminCookie, body: {} });
   check("Admin can mark notifications read", readNotifications.status === 200 && readNotifications.data.unread_count === 0);
+
+  const productQuestion = await call("POST", `/api/products/${encodeURIComponent(createdProductId)}/questions`, {
+    cookie: sellerCookie, body: { question: "Does this demo listing have a lining?" }
+  });
+  const questionNotifications = await call("GET", "/api/admin/notifications", { cookie: adminCookie });
+  check("Product questions create admin notifications", productQuestion.status === 201 && questionNotifications.status === 200 &&
+    questionNotifications.data.notifications.some(n => n.type === "product_question" && n.product_id === createdProductId));
 
   const sellerAdminScope = await call("GET", "/api/orders?scope=admin", { cookie: sellerCookie });
   check("Seller denied admin order scope (403)", sellerAdminScope.status === 403);
@@ -811,10 +918,11 @@ console.log("Orders, coupons, customers, reviews:");
   check("Admin can manage an after-sales request", adminReturns.status === 200 && adminReturns.data.requests?.some(entry => entry.id === returnId) && approvedReturn.status === 200 && approvedReturn.data.request?.status === "approved", JSON.stringify({ adminReturns, approvedReturn }));
   const refundedReturn = await call("PATCH", `/api/admin/returns/${returnId}`, { cookie: adminCookie, body: { status: "refunded", refund_amount: 1000, notes: "Refund recorded for smoke test" } });
   const repeatRefund = await call("PATCH", `/api/admin/returns/${returnId}`, { cookie: adminCookie, body: { status: "refunded", refund_amount: 1000, notes: "Refund recorded for smoke test" } });
+  const refundReopen = await call("PATCH", `/api/admin/returns/${returnId}`, { cookie: adminCookie, body: { status: "approved" } });
   const credited = await call("GET", "/api/loyalty", { cookie: sellerCookie });
   check("Refund processing records an amount and timestamp", refundedReturn.status === 200 &&
     refundedReturn.data.request?.refund_amount === 1000 && Boolean(refundedReturn.data.request?.refund_processed_at) &&
-    repeatRefund.status === 200 && credited.data.balance === baselineCredits + 1000, JSON.stringify({ refundedReturn, repeatRefund, credited }));
+    repeatRefund.status === 200 && refundReopen.status === 409 && credited.data.balance === baselineCredits + 1000, JSON.stringify({ refundedReturn, repeatRefund, refundReopen, credited }));
 
   const customers = await call("GET", "/api/admin/customers", { cookie: adminCookie });
   const sellerRow = customers.data.customers.find(c => c.email === SELLER_EMAIL);
@@ -1055,13 +1163,10 @@ console.log("Orders, coupons, customers, reviews:");
   });
   check("Orders charge the deal price during the window", dealOrder.status === 201 &&
     dealOrder.data.order?.items?.[0]?.price === 999 && dealOrder.data.order?.total === 999);
-  const dealPriceRemove = await call("PATCH", `/api/admin/products/${dealListingId}`, {
-    cookie: adminCookie, body: { deal_price: null, deal_ends_at: null }
-  });
-  check("Deal price removable on edit", dealPriceRemove.status === 200 && !dealPriceRemove.data.product?.deal_price);
-
   // Shopping-behaviour events + dashboard aggregates.
-  await call("POST", "/api/cart-events", { cookie: sellerCookie, body: { id: dealListingId, quantity: 2 } });
+  const recoveryEmail = "cart-recovery@example.com";
+  const recoveryCookie = mintSession(recoveryEmail, "seller");
+  await call("POST", "/api/cart-events", { cookie: recoveryCookie, body: { id: dealListingId, quantity: 2 } });
   await call("POST", "/api/wishlist-events", { cookie: sellerCookie, body: { id: dealListingId } });
   const dashboard = await call("GET", "/api/admin/dashboard", { cookie: adminCookie });
   const dashProduct = dashboard.data.byProduct?.find(p => p.id === dealListingId);
@@ -1071,8 +1176,26 @@ console.log("Orders, coupons, customers, reviews:");
     dashboard.data.orders_by_hour.length === 24 &&
     dashProduct && dashProduct.image && dashProduct.image === dashProduct.thumbnail &&
     dashProduct.adds === 2 && dashProduct.wishlists === 1);
+  const visitors = dashboard.data.visitors || {};
+  const dailyVisitTotal = (visitors.by_day || []).reduce((sum, entry) => sum + Number(entry.views || 0), 0);
+  check("Dashboard exposes reconciled daily and hourly visitor analytics", dashboard.status === 200 &&
+    Array.isArray(visitors.by_day) && visitors.by_day.length === 30 &&
+    Array.isArray(visitors.by_hour) && visitors.by_hour.length === 24 &&
+    Array.isArray(visitors.by_day_hour) && visitors.total_30d === dailyVisitTotal);
+  const dealRecovery = dashboard.data.cart_recovery?.find(item => item.customer_email === recoveryEmail);
+  check("Cart recovery estimates active deal pricing", dealRecovery?.estimated_value === 1998,
+    JSON.stringify({ expected: 1998, recovery: dealRecovery, dashboardStatus: dashboard.status }));
   const dashboardAsSeller = await call("GET", "/api/admin/dashboard", { cookie: sellerCookie });
   check("Seller denied dashboard (403)", dashboardAsSeller.status === 403);
+  const googleAnalytics = await call("GET", "/api/admin/google-analytics", { cookie: adminCookie });
+  check("Admin Google Analytics endpoint returns setup or report data safely",
+    (googleAnalytics.status === 200 && typeof googleAnalytics.data.configured === "boolean") ||
+    (googleAnalytics.status === 502 && googleAnalytics.data.configured === true && googleAnalytics.data.error),
+    JSON.stringify(googleAnalytics.data));
+  const dealPriceRemove = await call("PATCH", `/api/admin/products/${dealListingId}`, {
+    cookie: adminCookie, body: { deal_price: null, deal_ends_at: null }
+  });
+  check("Deal price removable on edit", dealPriceRemove.status === 200 && !dealPriceRemove.data.product?.deal_price);
 
   const dealSet = await call("PATCH", `/api/admin/products/${createdProductId}`, {
     cookie: adminCookie,
@@ -1267,19 +1390,22 @@ console.log("Orders, coupons, customers, reviews:");
   reviewMediaForm.append("file", new Blob([PNG_1PX], { type: "image/png" }), "review.png");
   reviewMediaForm.append("kind", "review");
   const reviewMediaUpload = await call("POST", "/api/uploads/image", { cookie: sellerCookie, form: reviewMediaForm });
-  const updatedWithMedia = await call("POST", `/api/products/${createdProductId}/reviews`, {
+  check("Review media uploads are disabled", reviewMediaUpload.status === 400 && reviewMediaUpload.data.error === "Review media uploads are disabled");
+  const updatedWithoutMedia = await call("POST", `/api/products/${createdProductId}/reviews`, {
     cookie: sellerCookie,
-    body: { rating: 4, comment: "Updated after a week of wear", media: [{ url: reviewMediaUpload.data.imageUrl, key: reviewMediaUpload.data.imageKey, type: reviewMediaUpload.data.mediaType }] }
+    body: { rating: 4, comment: "Updated after a week of wear" }
   });
-  check("Review image attachments persist in the backend", reviewMediaUpload.status === 200 &&
-    reviewMediaUpload.data.imageKey?.startsWith("reviews/") && updatedWithMedia.status === 200 &&
-    updatedWithMedia.data.my_review?.media?.length === 1);
+  const reviewWithMediaField = await call("POST", `/api/products/${createdProductId}/reviews`, {
+    cookie: sellerCookie,
+    body: { rating: 4, comment: "Updated after a week of wear", media: [] }
+  });
+  check("Review API rejects media attachments", reviewWithMediaField.status === 400 && reviewWithMediaField.data.error === "Review media uploads are disabled");
 
   const sorted = await call("GET", `/api/products/${createdProductId}/reviews`, { cookie: sellerCookie });
   check("Verified reviews sort before unverified", sorted.data.reviews.length === 2 &&
     sorted.data.reviews[0].verified === 1 && sorted.data.reviews[1].verified === 0);
 
-  const updated = updatedWithMedia;
+  const updated = updatedWithoutMedia;
   check("Second review updates the same one", updated.status === 200 && updated.data.count === 2 && updated.data.average === 2.5);
 
   const myReviews = await call("GET", "/api/my/reviews", { cookie: sellerCookie });
@@ -1345,6 +1471,13 @@ console.log("Admin session (whitelisted email):");
   const scope = await call("GET", "/api/products?scope=admin", { cookie: adminCookie });
   check("Admin scope lists all products", scope.status === 200 && scope.data.products.some(p => p.id === createdProductId));
 
+  const taxSettings = await call("GET", "/api/admin/tax-settings", { cookie: adminCookie });
+  const taxReport = await call("GET", "/api/admin/tax-compliance", { cookie: adminCookie });
+  check("Admin GST & HSN workspace returns protected settings and sales data", taxSettings.status === 200 &&
+    taxSettings.data.settings && taxReport.status === 200 && taxReport.data.settings &&
+    Array.isArray(taxReport.data.products) && Array.isArray(taxReport.data.sales) &&
+    taxReport.data.summary && typeof taxReport.data.summary.tax_amount === "number");
+
   const sendReview = await call("PATCH", `/api/admin/products/${createdProductId}`, { cookie: adminCookie, body: { status: "review" } });
   check("Admin sends live listing to review", sendReview.status === 200 && sendReview.data.product?.status === "review");
 
@@ -1361,6 +1494,33 @@ console.log("Admin session (whitelisted email):");
     heroInsights.data.recommendations?.best_selling && heroInsights.data.recommendations?.new_arrivals &&
     heroInsights.data.recommendations?.top_rated && heroInsights.data.recommendations?.top_reviewed &&
     heroInsights.data.recommendations?.low_return_rate);
+  const insightOrders = await call("GET", "/api/orders?scope=admin", { cookie: adminCookie });
+  const insightLines = (insightOrders.data.orders || []).flatMap(order =>
+    (order.items || []).filter(item => item.id === createdProductId).map(item => ({ order, item })));
+  const expectedInsight = insightLines.reduce((summary, { order, item }) => {
+    const quantity = Number(item.quantity || 0);
+    const lineGross = Number(item.price || 0) * quantity;
+    if (order.status !== "cancelled") {
+      const allocatedDiscount = Number(order.subtotal) > 0
+        ? Math.round(Number(order.discount || 0) * lineGross / Number(order.subtotal))
+        : 0;
+      summary.revenue += Math.max(0, lineGross - allocatedDiscount);
+      summary.units += quantity;
+      summary.activeOrders.add(order.id);
+    }
+    summary.orders.add(order.id);
+    if (order.status === "cancelled") summary.cancelled.add(order.id);
+    return summary;
+  }, { revenue: 0, units: 0, activeOrders: new Set(), orders: new Set(), cancelled: new Set() });
+  const createdInsight = heroInsights.data.products?.find(product => product.id === createdProductId);
+  const expectedCancellationRate = expectedInsight.orders.size
+    ? Math.round((expectedInsight.cancelled.size / expectedInsight.orders.size) * 1000) / 10
+    : null;
+  check("Hero insights allocate discounts and cancellation rates correctly",
+    insightOrders.status === 200 && createdInsight?.revenue === expectedInsight.revenue &&
+    createdInsight?.units === expectedInsight.units && createdInsight?.orders === expectedInsight.activeOrders.size &&
+    createdInsight?.cancellation_rate === expectedCancellationRate,
+    JSON.stringify({ expected: { revenue: expectedInsight.revenue, units: expectedInsight.units, orders: expectedInsight.activeOrders.size, cancellation_rate: expectedCancellationRate }, actual: createdInsight }));
   const createdHero = await call("POST", "/api/admin/hero", {
     cookie: adminCookie,
     body: {
@@ -1385,10 +1545,16 @@ console.log("Admin session (whitelisted email):");
   check("Admin deletes a hero slide", removedHero.status === 200);
 
   const originalStorefrontSettings = (await call("GET", "/api/admin/storefront-settings", { cookie: adminCookie })).data;
+  const activeAnnouncementStart = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const futureAnnouncementStart = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const futureAnnouncementEnd = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
   const storefrontUpdate = await call("PUT", "/api/admin/storefront-settings", {
     cookie: adminCookie,
     body: {
-      announcement: { visible: false, text: "Smoke test announcement" },
+      announcement: { visible: false, text: "Smoke test announcement", items: [
+        { id: "smoke-active", text: "Active smoke announcement", starts_at: activeAnnouncementStart, ends_at: futureAnnouncementEnd },
+        { id: "smoke-future", text: "Future smoke announcement", starts_at: futureAnnouncementStart, ends_at: futureAnnouncementEnd }
+      ] },
       fulfillment: { warehouse_address: "Glamia Fulfilment Hub\n12 Smoke Lane\nMumbai 400001" },
       trust_strip: {
         visible: true,
@@ -1401,12 +1567,20 @@ console.log("Admin session (whitelisted email):");
   });
   check("Admin updates announcement and hides one trust item", storefrontUpdate.status === 200 &&
     storefrontUpdate.data.announcement.visible === false &&
+    storefrontUpdate.data.announcement.items?.length === 2 &&
     storefrontUpdate.data.trust_strip.items.find(item => item.id === "cod")?.visible === false &&
     storefrontUpdate.data.fulfillment.warehouse_address.includes("Glamia Fulfilment Hub"));
   const publicStorefrontUpdate = await call("GET", "/api/storefront-settings");
   check("Storefront settings update is public", publicStorefrontUpdate.data.announcement.visible === false &&
+    publicStorefrontUpdate.data.announcement.items?.length === 1 &&
+    publicStorefrontUpdate.data.announcement.items[0]?.text === "Active smoke announcement" &&
     publicStorefrontUpdate.data.trust_strip.items.filter(item => item.visible).length === 2 &&
     !publicStorefrontUpdate.data.fulfillment);
+  const emptyVisibleAnnouncement = await call("PUT", "/api/admin/storefront-settings", {
+    cookie: adminCookie,
+    body: { announcement: { visible: true, text: "" } }
+  });
+  check("Announcement bar cannot be enabled without permanent text", emptyVisibleAnnouncement.status === 400);
   const codDisabled = await call("PUT", "/api/admin/storefront-settings", {
     cookie: adminCookie,
     body: { payments: { cod_enabled: false } }
@@ -1422,7 +1596,7 @@ console.log("Admin session (whitelisted email):");
       name: "COD Toggle Member", phone: "+44 20 7946 0958", line1: "10 Test Street", city: "London", state: "", pin: "SW1A 2AA", country: "United Kingdom"
     } }
   });
-  check("Admin COD toggle blocks new guest and member COD orders", codDisabled.status === 200 &&
+  check("Admin demo-checkout toggle blocks new guest and member demo orders", codDisabled.status === 200 &&
     codDisabled.data.payments?.cod_enabled === false && codBlockedGuest.status === 409 && codBlockedMember.status === 409);
   const codRestored = await call("PUT", "/api/admin/storefront-settings", {
     cookie: adminCookie,
@@ -1438,7 +1612,8 @@ console.log("Admin session (whitelisted email):");
   const backup = await fetch(`${BASE}/api/admin/backup`, { headers: { cookie: adminCookie } });
   const backupBody = await backup.json().catch(() => ({}));
   check("Admin can download a JSON data backup", backup.status === 200 && /attachment/.test(backup.headers.get("content-disposition") || "") &&
-    backupBody.tables?.orders && backupBody.tables?.order_items && backupBody.tables?.coupon_redemptions);
+    backupBody.tables?.orders && backupBody.tables?.order_items && backupBody.tables?.product_sizes && backupBody.tables?.reviews &&
+    backupBody.tables?.storefront_settings && backupBody.tables?.admin_notifications && backupBody.tables?.page_views);
 }
 
 console.log("Cleanup:");

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
-import { money, availableQuantity, sellingPrice } from "../lib/commerce";
+import { money, availableQuantity, formatIST, isPreorder, sellingPrice } from "../lib/commerce";
 import { PhoneField, composePhone, splitPhone } from "./PhoneField";
 
 
@@ -23,7 +23,7 @@ export function CheckoutPage({ cart, products, user, addresses, onNavigate, onOr
   const [liveProducts, setLiveProducts] = useState(products || []);
   const [checking, setChecking] = useState(true);
   const [checkError, setCheckError] = useState("");
-  const [codEnabled, setCodEnabled] = useState(false);
+  const [demoEnabled, setDemoEnabled] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
   const cartIds = JSON.stringify([...new Set(cart.map((item) => item.id))].sort());
 
@@ -45,7 +45,7 @@ export function CheckoutPage({ cart, products, user, addresses, onNavigate, onOr
             return response.json();
           }),
         ]);
-        if (active) { setLiveProducts(catalog.filter(Boolean)); setCodEnabled(settings.payments?.cod_enabled !== false); }
+        if (active) { setLiveProducts(catalog.filter(Boolean)); setDemoEnabled(settings.payments?.cod_enabled !== false); }
       } catch (error) { if (active) setCheckError(error.message); }
       finally { if (active) setChecking(false); }
     }
@@ -68,6 +68,8 @@ export function CheckoutPage({ cart, products, user, addresses, onNavigate, onOr
   const unavailableLines = useMemo(() => lines.filter(({ item, product }) => {
     return !Number.isSafeInteger(item.quantity) || item.quantity < 1 || availableQuantity(product, item.size) < item.quantity;
   }), [lines]);
+  const preorderLines = useMemo(() => lines.filter(({ product }) => isPreorder(product)), [lines]);
+  const preorderReleaseDates = useMemo(() => [...new Set(preorderLines.map(({ product }) => product?.preorder_release_at).filter(Boolean))].map((value) => formatIST(value, { dateStyle: "medium", timeStyle: "short" })), [preorderLines]);
   const total = lines.reduce((sum, line) => sum + sellingPrice(line.product) * line.item.quantity, 0);
   const usingSavedAddress = selectedAddressId !== "new" && savedAddresses.some((address) => address.id === selectedAddressId);
 
@@ -77,7 +79,7 @@ export function CheckoutPage({ cart, products, user, addresses, onNavigate, onOr
 
   async function placeOrder(event) {
     event.preventDefault();
-    if (busy || checking || checkError || !codEnabled || !cart.length) return;
+    if (busy || checking || checkError || !demoEnabled || !cart.length) return;
     setBusy(true);
     setMessage("");
     try {
@@ -89,7 +91,7 @@ export function CheckoutPage({ cart, products, user, addresses, onNavigate, onOr
         method: "POST",
         body: JSON.stringify({
           items: cart.map((item) => ({ id: item.id, quantity: item.quantity, size: item.size || "" })),
-          payment_method: "cod",
+          payment_method: "demo",
           email: user ? undefined : email,
           address: draft,
         }),
@@ -117,15 +119,16 @@ export function CheckoutPage({ cart, products, user, addresses, onNavigate, onOr
           <form className="checkout-form" onSubmit={placeOrder}>
             {!user && <label>Email for order updates<input required type="email" name="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>}
              {usingSavedAddress ? <div className="selected-address-note"><strong>Delivering to {draft.name}</strong><span>{addressLabel(draft)}</span><button type="button" onClick={() => setSelectedAddressId("new")}>Use a different address</button></div> : <><div className="form-row"><label>Full name<input name="name" autoComplete="name" required value={draft.name} onChange={changeField} /></label><PhoneField label="Phone" countryCode={splitPhone(draft.phone).countryCode} number={splitPhone(draft.phone).number} onCountryCodeChange={(value) => setDraft((current) => ({ ...current, phone: composePhone(value, splitPhone(current.phone).number) }))} onNumberChange={(value) => setDraft((current) => ({ ...current, phone: composePhone(splitPhone(current.phone).countryCode, value) }))} required /></div><label>Address line<input name="line1" autoComplete="address-line1" required value={draft.line1} onChange={changeField} /></label><label>Apartment, landmark <span className="form-hint">optional</span><input name="line2" autoComplete="address-line2" value={draft.line2} onChange={changeField} /></label><div className="form-row"><label>City / town<input name="city" autoComplete="address-level2" required value={draft.city} onChange={changeField} /></label><label>State / region<input name="state" autoComplete="address-level1" value={draft.state} onChange={changeField} /></label></div><div className="form-row"><label>Postal / ZIP code<input name="pin" autoComplete="postal-code" value={draft.pin} onChange={changeField} /></label><label>Country<input name="country" autoComplete="country-name" required value={draft.country} onChange={changeField} /></label></div></>}
-            <p className="payment-note">{checking ? "Checking stock and payment availability…" : codEnabled ? "Cash on Delivery" : "Cash on Delivery is currently unavailable. Please contact support for help."}</p>
+            <p className="payment-note">{checking ? "Checking stock and demo payment availability…" : demoEnabled ? "Demo payment · no money will be charged" : "Demo checkout is currently unavailable. Please contact support for help."}</p>
             {checkError && <p className="inline-error" role="alert">{checkError}</p>}
             {message && <p className="inline-note" role="alert">{message}</p>}
             {unavailableLines.length > 0 && <p className="inline-error" role="alert">Some items are no longer available in the requested quantity. Please return to your bag and adjust them.</p>}
-            <button className="primary-action" disabled={busy || checking || !!checkError || !codEnabled || !lines.length || unavailableLines.length}>{busy ? "Placing order…" : `Place order · ${money(total)}`} <span aria-hidden="true">↗</span></button>
+            {preorderLines.length > 0 && <p className="preorder-checkout-note" role="status"><strong>This order includes pre-order item{preorderLines.length === 1 ? "" : "s"}.</strong> {preorderReleaseDates.length ? `Expected release: ${preorderReleaseDates.join(", ")}. ` : "Your reservation will be recorded now. "}No money will be charged — this is demo checkout.</p>}
+            <button className="primary-action" disabled={busy || checking || !!checkError || !demoEnabled || !lines.length || unavailableLines.length}>{busy ? "Placing order…" : `Place demo order · ${money(total)}`} <span aria-hidden="true">↗</span></button>
             <a href="/cart" onClick={(event) => { if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return; event.preventDefault(); onNavigate("/cart"); }}>Return to your bag</a>
           </form>
         </div>
-        <aside className="checkout-summary"><p className="eyebrow">Your order</p>{lines.map(({ item, product }) => product ? <div className="summary-line" key={`${item.id}-${item.size}`}><span>{product.name}{item.size ? ` · ${item.size}` : ""} × {item.quantity}</span><strong>{money(sellingPrice(product) * item.quantity)}</strong></div> : <div className="summary-line checkout-unavailable" key={`${item.id}-${item.size}`}><span>Unavailable item × {item.quantity}</span><strong>Review bag</strong></div>)}<hr /><div className="summary-line total"><span>Total</span><strong>{money(total)}</strong></div></aside>
+        <aside className="checkout-summary"><p className="eyebrow">Your order</p>{lines.map(({ item, product }) => product ? <div className="summary-line" key={`${item.id}-${item.size}`}><span>{product.name}{item.size ? ` · ${item.size}` : ""} × {item.quantity}{isPreorder(product) && <small className="preorder-line-label">Pre-order</small>}</span><strong>{money(sellingPrice(product) * item.quantity)}</strong></div> : <div className="summary-line checkout-unavailable" key={`${item.id}-${item.size}`}><span>Unavailable item × {item.quantity}</span><strong>Review bag</strong></div>)}<hr /><div className="summary-line total"><span>Total</span><strong>{money(total)}</strong></div></aside>
       </section>
     </main>
   );

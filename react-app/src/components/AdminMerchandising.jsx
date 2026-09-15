@@ -14,7 +14,7 @@ const INSIGHT_LABELS = {
 const DEFAULT_TRUST_ITEMS = [
   { id: "shipping", visible: true, title: "Free & Fast Shipping", body: "Complimentary on every order" },
   { id: "returns", visible: true, title: "7-Day Easy Returns", body: "Simple exchanges, no questions" },
-  { id: "cod", visible: true, title: "Cash on Delivery", body: "Or secure UPI & card checkout" },
+  { id: "cod", visible: true, title: "Demo Checkout", body: "No money is charged" },
 ];
 
 function imageFor(product) {
@@ -74,9 +74,12 @@ export function HeroStudioView({ products, categories }) {
   useEffect(() => { if (previewPaused || slides.length < 2) return undefined; const timer = window.setInterval(() => setPreviewIndex((index) => (index + 1) % slides.length), 6000); return () => window.clearInterval(timer); }, [previewPaused, slides.length]);
 
   const previewSlide = slides[previewIndex] || null;
-  const previewProducts = previewSlide?.frames?.length ? previewSlide.frames : selectedProducts.map((id) => liveProducts.find((product) => product.id === id)).filter(Boolean);
-  const previewFrame = previewProducts[0];
-  const previewWords = (previewSlide?.words?.length ? previewSlide.words : form.words.split(",").map((word) => word.trim()).filter(Boolean)).slice(0, 4);
+  const previewUsesForm = Boolean(editingId) || selectedProducts.length > 0;
+  const previewProducts = (previewUsesForm ? selectedProducts.map((id) => liveProducts.find((product) => product.id === id)).filter(Boolean) : previewSlide?.frames || []).slice(0, 3);
+  const previewEyebrow = previewUsesForm ? form.eyebrow : previewSlide?.eyebrow;
+  const previewTitle = previewUsesForm ? form.title : previewSlide?.title;
+  const previewTagline = previewUsesForm ? form.tagline : previewSlide?.tagline;
+  const previewWords = (previewUsesForm ? form.words.split(",").map((word) => word.trim()).filter(Boolean) : previewSlide?.words || []).slice(0, 4);
 
   function changeField(event) {
     const { name, value, type, checked } = event.target;
@@ -97,6 +100,8 @@ export function HeroStudioView({ products, categories }) {
     setEditingId(slide.id);
     setForm({ eyebrow: slide.eyebrow || "The Glamia Edit", title: slide.title || "", tagline: slide.tagline || "", cta_label: slide.cta_label || "Shop the edit", cta_category: slide.cta_category || "", words: (slide.words || []).join(", "), active: Boolean(slide.active), position: String(slide.position ?? "") });
     setSelectedProducts((slide.product_ids || []).filter((id) => liveProductIds.has(id)).slice(0, 3));
+    const slideIndex = slides.findIndex((item) => item.id === slide.id);
+    if (slideIndex >= 0) setPreviewIndex(slideIndex);
     document.getElementById("hero-slide-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -124,11 +129,16 @@ export function HeroStudioView({ products, categories }) {
   return <section className="admin-panel admin-wide-panel merch-workspace">
     <div className="admin-panel-heading"><div><p className="eyebrow">Merchandising</p><h2>Hero Studio</h2><p className="muted">Build the exact carousel shown on the home page using live catalog frames and store signals.</p></div><span>{slides.length} slides</span></div>
     
-    <section className="merch-hero-preview" aria-label="Hero Studio live preview">
-      <div className="merch-preview-copy"><p className="eyebrow">{previewSlide?.eyebrow || form.eyebrow || "The Glamia Edit"}</p><h3>{previewSlide?.title || form.title || "Everyday pieces, beautifully composed."}</h3><p>{previewSlide?.tagline || form.tagline || "Build a considered edit from the products already live in your store."}</p>{previewWords.length > 0 && <div className="merch-preview-words">{previewWords.map((word) => <span key={word}>{word}</span>)}</div>}</div>
-      <div className="merch-preview-stage">{previewFrame && imageFor(previewFrame) ? <img src={imageFor(previewFrame)} alt={previewFrame.name || "Selected hero product"} /> : <div className="merch-preview-placeholder"><span>Select a live product frame below</span></div>}</div>
+    <div className="merch-preview-dock">
+      <div className="merch-preview-heading"><div><p className="eyebrow">Live preview</p><strong>Updates as you edit</strong></div><span>Desktop composition</span></div>
+      <section className="merch-hero-preview" aria-label="Hero Studio live preview">
+      <div className="merch-preview-copy"><p className="eyebrow">{previewEyebrow || "The Glamia Edit"}</p><h3>{previewTitle || "Everyday pieces, beautifully composed."}</h3><p>{previewTagline || "Build a considered edit from the products already live in your store."}</p>{previewWords.length > 0 && <div className="merch-preview-words">{previewWords.map((word) => <span key={word}>{word}</span>)}</div>}</div>
+      <div className={`merch-preview-stage merch-preview-frame-count-${previewProducts.length}`}>{previewProducts.length ? previewProducts.map((product, productIndex) => imageFor(product) ? <div className={`merch-preview-frame merch-preview-frame-${productIndex}`} key={product.id || productIndex}><img src={imageFor(product)} alt={product.name || "Selected hero product"} /></div> : null) : <div className="merch-preview-placeholder"><span>Select 1–3 live product frames below</span></div>}</div>
       <button type="button" className="merch-preview-arrow merch-preview-prev" aria-label="Previous hero slide" onClick={() => { setPreviewPaused(true); setPreviewIndex((index) => slides.length ? (index - 1 + slides.length) % slides.length : 0); }}><Icon name="chevronLeft" /></button><button type="button" className="merch-preview-arrow merch-preview-next" aria-label="Next hero slide" onClick={() => { setPreviewPaused(true); setPreviewIndex((index) => slides.length ? (index + 1) % slides.length : 0); }}><Icon name="chevronRight" /></button>
-    </section>
+      {slides.length > 0 && <div className="merch-preview-progress" role="group" aria-label={`Hero preview slide ${previewIndex + 1} of ${slides.length}`}>{slides.map((slideItem, itemIndex) => <button type="button" key={slideItem.id || itemIndex} className={itemIndex === previewIndex ? "active" : ""} onClick={() => { setPreviewPaused(true); setPreviewIndex(itemIndex); }} aria-label={`Show hero preview slide ${itemIndex + 1}`} />)}</div>}
+      <button type="button" className="merch-preview-pause" onClick={() => setPreviewPaused((paused) => !paused)}>{previewPaused ? "Play preview" : "Pause preview"}</button>
+      </section>
+    </div>
     <div className="merch-studio-grid">
       <form id="hero-slide-form" className="merch-form" onSubmit={submit}>
         <div className="merch-form-heading"><div><p className="eyebrow">{editingId ? "Edit slide" : "New slide"}</p><h3>{editingId ? "Refine this edit" : "Create a hero moment"}</h3></div><span>{selectedProducts.length}/3 frames</span></div>
@@ -143,8 +153,28 @@ export function HeroStudioView({ products, categories }) {
   </section>;
 }
 
+function announcementDateInput(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value).slice(0, 16);
+  const offset = date.getTimezoneOffset();
+  return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16);
+}
+
+function storedAnnouncementDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const date = new Date(text);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : text;
+}
+
+function emptyAnnouncementItem() {
+  return { id: `announcement-${Date.now()}`, text: "", starts_at: "", ends_at: "" };
+}
+
 function normalizeSettings(data) {
-  return { announcement: data.announcement || { visible: true, text: "" }, trust_strip: { visible: data.trust_strip?.visible !== false, items: DEFAULT_TRUST_ITEMS.map((item) => data.trust_strip?.items?.find((entry) => entry.id === item.id) || item) }, fulfillment: data.fulfillment || { warehouse_address: "" }, payments: data.payments || { cod_enabled: true }, support_contact: data.support_contact || { visible: false, country_code: "+91", phone_number: "" }, seo: data.seo || { title: "", description: "", image: "" } };
+  const announcement = data.announcement || {};
+  return { announcement: { visible: Boolean(announcement.visible) && Boolean(String(announcement.text || "").trim()), text: announcement.text || "", items: Array.isArray(announcement.items) ? announcement.items.map((item, index) => ({ id: item.id || `announcement-${index + 1}`, text: item.text || "", starts_at: announcementDateInput(item.starts_at), ends_at: announcementDateInput(item.ends_at) })) : [] }, trust_strip: { visible: data.trust_strip?.visible !== false, items: DEFAULT_TRUST_ITEMS.map((item) => data.trust_strip?.items?.find((entry) => entry.id === item.id) || item) }, fulfillment: data.fulfillment || { warehouse_address: "" }, payments: data.payments || { cod_enabled: true }, support_contact: data.support_contact || { visible: false, country_code: "+91", phone_number: "" }, seo: data.seo || { title: "", description: "", image: "" } };
 }
 
 export function StorefrontSettingsView() {
@@ -156,21 +186,29 @@ export function StorefrontSettingsView() {
   useEffect(() => { let active = true; apiFetch("/api/admin/storefront-settings").then((response) => readResponse(response, "Storefront settings could not be loaded")).then((data) => active && setSettings(normalizeSettings(data))).catch((requestError) => active && setError(requestError.message)); return () => { active = false; }; }, []);
 
   function update(path, value) {
-    setSettings((current) => { const next = structuredClone(current); let target = next; path.slice(0, -1).forEach((key) => { target = target[key]; }); target[path[path.length - 1]] = value; return next; });
+    setSettings((current) => { const next = structuredClone(current); let target = next; path.slice(0, -1).forEach((key) => { target = target[key]; }); target[path[path.length - 1]] = value; if (path.join(".") === "announcement.text" && !String(value || "").trim()) next.announcement.visible = false; return next; });
+  }
+
+  function addAnnouncement() {
+    update(["announcement", "items"], [...(settings.announcement.items || []), emptyAnnouncementItem()]);
+  }
+
+  function removeAnnouncement(index) {
+    update(["announcement", "items"], (settings.announcement.items || []).filter((_, itemIndex) => itemIndex !== index));
   }
 
   async function save(event) {
     event.preventDefault(); setBusy(true); setStatus(""); setError("");
-    try { const response = await apiFetch("/api/admin/storefront-settings", { method: "PUT", body: JSON.stringify(settings) }); const data = await readResponse(response, "Storefront settings could not be saved"); setSettings(normalizeSettings(data)); setStatus("Storefront settings saved."); } catch (requestError) { setError(requestError.message); } finally { setBusy(false); }
+    try { const payload = structuredClone(settings); payload.announcement.items = (payload.announcement.items || []).map((item) => ({ ...item, starts_at: storedAnnouncementDate(item.starts_at), ends_at: storedAnnouncementDate(item.ends_at) })); const response = await apiFetch("/api/admin/storefront-settings", { method: "PUT", body: JSON.stringify(payload) }); const data = await readResponse(response, "Storefront settings could not be saved"); setSettings(normalizeSettings(data)); setStatus("Storefront settings saved."); } catch (requestError) { setError(requestError.message); } finally { setBusy(false); }
   }
 
   if (!settings) return <section className="admin-panel admin-wide-panel"><div className="loading-card">Loading storefront settings…</div></section>;
-  return <section className="admin-panel admin-wide-panel merch-workspace"><div className="admin-panel-heading"><div><p className="eyebrow">Storefront controls</p><h2>Storefront settings</h2><p className="muted">Manage visible promises, fulfilment defaults, COD availability, and homepage metadata without changing the layout.</p></div></div>{(error || status) && <p className={error ? "inline-error" : "inline-note"} role="status">{error || status}</p>}<form className="settings-react-form" onSubmit={save}>
-    <fieldset className="settings-react-block"><legend>Announcement bar</legend><label className="merch-checkbox"><input type="checkbox" checked={settings.announcement.visible} onChange={(event) => update(["announcement", "visible"], event.target.checked)} /> Show announcement bar</label><Field label="Announcement text"><input value={settings.announcement.text} maxLength="160" onChange={(event) => update(["announcement", "text"], event.target.value)} required /></Field></fieldset>
+  return <section className="admin-panel admin-wide-panel storefront-settings-workspace"><div className="admin-panel-heading"><div><p className="eyebrow">Storefront controls</p><h2>Storefront settings</h2><p className="muted">Manage visible promises, fulfilment defaults, demo checkout availability, and homepage metadata without changing the layout.</p></div></div>{(error || status) && <p className={error ? "inline-error" : "inline-note"} role="status">{error || status}</p>}<form className="settings-react-form" onSubmit={save}>
+    <fieldset className="settings-react-block"><legend>Announcement bar</legend><label className="merch-checkbox"><input type="checkbox" checked={settings.announcement.visible} disabled={!String(settings.announcement.text || "").trim()} onChange={(event) => update(["announcement", "visible"], event.target.checked)} /> Show announcement bar</label><Field label="Permanent announcement text"><input value={settings.announcement.text} maxLength="160" onChange={(event) => update(["announcement", "text"], event.target.value)} required /></Field><p className="form-hint">This message always appears first. The bar cannot be enabled without it.</p><div className="announcement-scheduled-list"><div className="announcement-scheduled-heading"><strong>Optional scheduled announcements</strong><span className="form-hint">Shown only during their time window</span></div>{(settings.announcement.items || []).map((item, index) => <article className="announcement-scheduled-item" key={item.id || index}><Field label="Scheduled text"><input value={item.text} maxLength="160" onChange={(event) => update(["announcement", "items", index, "text"], event.target.value)} placeholder="Limited-time drop, offer, or update" /></Field><div className="settings-react-grid"><Field label="Starts"><input type="datetime-local" value={item.starts_at || ""} onChange={(event) => update(["announcement", "items", index, "starts_at"], event.target.value)} /></Field><Field label="Ends"><input type="datetime-local" value={item.ends_at || ""} required={Boolean(item.text || item.starts_at)} onChange={(event) => update(["announcement", "items", index, "ends_at"], event.target.value)} /></Field></div><button type="button" className="text-link" onClick={() => removeAnnouncement(index)}>Remove scheduled announcement</button></article>)}<button type="button" className="secondary-action" onClick={addAnnouncement}>+ Add scheduled announcement</button></div></fieldset>
     <fieldset className="settings-react-block"><legend>Trust strip</legend><label className="merch-checkbox"><input type="checkbox" checked={settings.trust_strip.visible} onChange={(event) => update(["trust_strip", "visible"], event.target.checked)} /> Show trust strip</label><p className="form-hint">Hide individual promises while keeping the template intact; remaining items reflow automatically.</p><div className="trust-react-grid">{settings.trust_strip.items.map((item, index) => <article className="trust-react-item" key={item.id}><label className="merch-checkbox"><input type="checkbox" checked={item.visible} onChange={(event) => update(["trust_strip", "items", index, "visible"], event.target.checked)} /> Show {item.id} promise</label><Field label="Title"><input value={item.title} maxLength="70" onChange={(event) => update(["trust_strip", "items", index, "title"], event.target.value)} /></Field><Field label="Supporting text"><input value={item.body} maxLength="120" onChange={(event) => update(["trust_strip", "items", index, "body"], event.target.value)} /></Field></article>)}</div></fieldset>
-     <div className="settings-react-grid"><fieldset className="settings-react-block"><legend>Payment availability</legend><label className="merch-checkbox"><input type="checkbox" checked={settings.payments.cod_enabled} onChange={(event) => update(["payments", "cod_enabled"], event.target.checked)} /> Allow Cash on Delivery</label><p className="form-hint">When disabled, new COD orders are blocked. Existing orders stay unchanged.</p></fieldset><fieldset className="settings-react-block"><legend>Fulfilment defaults</legend><Field label="Warehouse / seller address · Ship From"><textarea rows="5" maxLength="320" value={settings.fulfillment.warehouse_address} onChange={(event) => update(["fulfillment", "warehouse_address"], event.target.value)} placeholder="Glamia Fulfilment Hub&#10;12 Fashion Street&#10;Mumbai, Maharashtra 400001" /></Field><p className="form-hint">This address appears on newly generated shipping labels.</p></fieldset></div>
+     <div className="settings-react-grid"><fieldset className="settings-react-block"><legend>Demo payment availability</legend><label className="merch-checkbox"><input type="checkbox" checked={settings.payments.cod_enabled} onChange={(event) => update(["payments", "cod_enabled"], event.target.checked)} /> Allow demo checkout</label><p className="form-hint">Demo orders never charge money. When disabled, new demo orders are blocked; existing orders stay unchanged.</p></fieldset><fieldset className="settings-react-block"><legend>Fulfilment defaults</legend><Field label="Warehouse / seller address · Ship From"><textarea rows="5" maxLength="320" value={settings.fulfillment.warehouse_address} onChange={(event) => update(["fulfillment", "warehouse_address"], event.target.value)} placeholder="Glamia Fulfilment Hub&#10;12 Fashion Street&#10;Mumbai, Maharashtra 400001" /></Field><p className="form-hint">This address appears on newly generated shipping labels.</p></fieldset></div>
      <fieldset className="settings-react-block"><legend>Customer contact</legend><label className="merch-checkbox"><input type="checkbox" checked={settings.support_contact.visible} onChange={(event) => update(["support_contact", "visible"], event.target.checked)} /> Show support mobile number on Contact us page</label><PhoneField label="Support mobile number" countryCode={settings.support_contact.country_code} number={settings.support_contact.phone_number} onCountryCodeChange={(value) => update(["support_contact", "country_code"], value)} onNumberChange={(value) => update(["support_contact", "phone_number"], value)} required={settings.support_contact.visible} /><p className="form-hint">The number stays hidden from shoppers until this switch is enabled. Email support remains support@glamiastore.com.</p></fieldset>
     <fieldset className="settings-react-block"><legend>SEO &amp; sharing</legend><div className="settings-react-grid"><Field label="Homepage title"><input maxLength="120" value={settings.seo.title} onChange={(event) => update(["seo", "title"], event.target.value)} /></Field><Field label="Social sharing image URL"><input type="url" maxLength="500" value={settings.seo.image} onChange={(event) => update(["seo", "image"], event.target.value)} placeholder="https://…" /></Field><Field wide label="Homepage description"><textarea rows="3" maxLength="220" value={settings.seo.description} onChange={(event) => update(["seo", "description"], event.target.value)} /></Field></div></fieldset>
-    {(error || status) && <p className={error ? "inline-error" : "inline-note"} role="status">{error || status}</p>}<div className="form-actions"><button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving…" : "Save storefront settings"} <span aria-hidden="true">↗</span></button></div>
+<div className="form-actions"><button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving…" : "Save storefront settings"} <span aria-hidden="true">↗</span></button></div>
   </form></section>;
 }

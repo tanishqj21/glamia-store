@@ -5,13 +5,31 @@ const DAILY_UPLOAD_LIMIT = 50 * 1024 * 1024;
 const GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const DEMO_ADMIN_EMAIL = "demo-admin@glamia.local";
 const LOW_STOCK_THRESHOLD = 15;
+const CANCELLATION_WINDOW_DAYS = 2;
 const RETURN_WINDOW_DAYS = 7;
+const R2_CLEANUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const R2_CLEANUP_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
 let googleKeysCache = { keys: null, expiresAt: 0 };
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMITS = new Map([
+  ["/api/auth/google", 20],
+  ["/api/orders", 30],
+  ["/api/order-tracking", 20],
+  ["/api/coupons/validate", 60],
+  ["/api/uploads/image", 30],
+  ["/api/support/tickets", 30],
+  ["/api/cart-events", 120],
+  ["/api/wishlist-events", 120]
+]);
+// Fallback only for local startup/migration failures. Production traffic uses
+// the shared D1 bucket below so limits apply across Worker isolates.
 const requestRateBuckets = new Map();
 let productEnrichmentCache = { expiresAt: 0, entries: new Map() };
 const invalidateProductEnrichment = () => {
   productEnrichmentCache = { expiresAt: 0, entries: new Map() };
 };
+let googleAnalyticsTokenCache = { accessToken: "", expiresAt: 0, clientEmail: "" };
 
 const seedProducts = [
   ["seed-ivory-linen-shirt", "seed@glamia.local", "Ivory Linen Resort Shirt", "Men", "North Loom", 1899, 2799, 38, 4.6, "live", 1, "Ivory", ["S", "M", "L", "XL"], "https://images.unsplash.com/photo-1516826957135-700dedea698c?auto=format&fit=crop&w=900&q=82", "A breathable linen shirt with a relaxed resort collar, mother-of-pearl buttons, and a soft garment-washed finish.", "Pure Linen"],
@@ -30,6 +48,13 @@ export default {
       if (request.method === "GET" && url.pathname === "/demo-admin") return withSecurityHeaders(await loginAsDemoAdmin(request, env, true));
       if (request.method === "GET" && url.pathname === "/sitemap.xml") return withSecurityHeaders(await getSitemap(request, env));
       if (request.method === "GET" && url.pathname === "/robots.txt") return withSecurityHeaders(await getRobots(request));
+      // Tax reference data is generated into the public asset bundle from the
+      // supplied HSN/SAC and GST state workbooks. Let these JSON files reach
+      // the asset handler before the public-page/SEO router evaluates them as
+      // application routes.
+      if (request.method === "GET" && url.pathname.startsWith("/data/tax/")) {
+        return withSecurityHeaders(await env.ASSETS.fetch(request));
+      }
       if (url.pathname.startsWith("/api/")) {
         const cacheTtl = publicApiCacheTtl(request, url);
         const db = cacheTtl && typeof env.DB?.withSession === "function"
@@ -48,11 +73,29 @@ export default {
       const status = error.status || 500;
       return withSecurityHeaders(json({ error: status >= 500 ? "Server error" : (error.message || "Request failed") }, status));
     }
+  },
+
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(processDueEmailEvents(env));
+    ctx.waitUntil(runWeeklyR2Cleanup(env));
   }
 };
 
 function slugifyName(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function productUrlSlug(value, fallback = "collection") {
+  return slugifyName(value) || fallback;
+}
+
+function canonicalProductPath(product) {
+  const id = String(product?.id || "").trim();
+  const nameSlug = productUrlSlug(product?.name, id || "item");
+  const suffix = id ? `-${id.toLowerCase()}` : "";
+  // The complete stable id is always present. It prevents a future rename or
+  // same-name re-edit from taking over an existing product URL.
+  return `/${productUrlSlug(product?.category)}/${productUrlSlug(product?.subcategory)}/${nameSlug}${suffix}`;
 }
 
 /* Order numbers: GM-<DDMMYYYY IST>-<product initials>-<5-digit sequence>,
@@ -86,9 +129,9 @@ function buildOrderNumber(initials, sequence) {
   return `GM-${istDateString()}-${initials}-${tail}`;
 }
 
-const DEFAULT_PAGE_DESCRIPTION = "Shop curated apparel and accessories from independent ateliers — free and fast shipping across India, cash on delivery available.";
+const DEFAULT_PAGE_DESCRIPTION = "Shop curated apparel and accessories from independent ateliers — free and fast shipping across India, demo checkout available.";
 
-const CRAWLER_UA = /Googlebot|Bingbot|Yandex|DuckDuckBot|Baiduspider|facebookexternalhit|Facebot|Twitterbot|LinkedInBot|Slackbot|WhatsApp|TelegramBot|Applebot|PetalBot|SemrushBot|AhrefsBot|MJ12bot|GPTBot|ClaudeBot|PerplexityBot|ImagesiftBot/i;
+const CRAWLER_UA = /Googlebot|Google-InspectionTool|Bingbot|Yandex|DuckDuckBot|Baiduspider|facebookexternalhit|Facebot|Twitterbot|LinkedInBot|Slackbot|WhatsApp|TelegramBot|Applebot|PetalBot|SemrushBot|AhrefsBot|MJ12bot|GPTBot|ClaudeBot|PerplexityBot|ImagesiftBot/i;
 
 function absoluteImageUrl(value, origin) {
   const src = String(value || "").trim();
@@ -105,16 +148,111 @@ function currentSellingPrice(product) {
   return deal > 0 && starts <= now && ends > now ? deal : Number(product.price || 0);
 }
 
+async function getPublicCatalogRows(env, category = "") {
+  try {
+    const categoryFilter = category ? "AND LOWER(TRIM(p.category)) = LOWER(TRIM(?))" : "";
+    const statement = env.DB.prepare(`
+      SELECT p.id, p.name, p.category, p.subcategory, p.brand, p.price, p.mrp, p.color,
+        p.description, p.image_url, p.thumbnail_url, p.deal_starts_at,
+        p.deal_ends_at, p.deal_price, p.created_at, p.updated_at,
+        (SELECT COALESCE(SUM(oi.quantity), 0)
+          FROM order_items oi JOIN orders o ON o.id = oi.order_id
+          WHERE oi.product_id = p.id AND o.status != 'cancelled') AS sold_total
+      FROM products p
+      WHERE p.status = 'live' ${categoryFilter}
+      ORDER BY p.created_at DESC
+      LIMIT 100
+    `);
+    const result = category ? await statement.bind(category).all() : await statement.all();
+    return { available: true, rows: result.results || [] };
+  } catch {
+    return { available: false, rows: [] };
+  }
+}
+
+function catalogBotContent(title, description, rows, origin) {
+  const links = rows.map(row => {
+    const image = absoluteImageUrl(row.thumbnail_url || row.image_url, origin);
+    const price = currentSellingPrice(row);
+    return `<li>${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(row.name)}" width="120" height="150" />` : ""}<a href="${canonicalProductPath(row)}">${escapeHtml(row.name)}</a><span>${escapeHtml(row.brand || "Glamia")} · ${escapeHtml(row.category || "Apparel")} · ${escapeHtml(row.subcategory || "Collection")} · ₹${Number(price).toLocaleString("en-IN")}</span></li>`;
+  }).join("");
+  return `<main class="catalog-page"><p class="eyebrow">Glamia collection</p><h1>${escapeHtml(title)}</h1><p class="catalog-description">${escapeHtml(description)}</p>${rows.length ? `<ul class="catalog-bot-list">${links}</ul>` : "<p>Explore the Glamia collection and discover curated pieces from independent ateliers.</p>"}</main>`;
+}
+
+function productBotContent(product, price, images, inStock, relatedRows) {
+  const category = String(product.category || "Apparel").trim();
+  const subcategory = String(product.subcategory || "Collection").trim();
+  const categoryHref = `/category/${encodeURIComponent(category)}`;
+  const subcategoryHref = `${categoryHref}?sub=${encodeURIComponent(subcategory)}`;
+  const sizes = (product.sizes || []).map(value => String(value || "").trim()).filter(Boolean);
+  const availability = product.preorder_enabled ? "Available for pre-order" : inStock ? "In stock" : "Currently out of stock";
+  const description = String(product.description || `${product.name} is a considered ${subcategory.toLowerCase()} piece from ${product.brand || "Glamia"}, selected for everyday comfort and lasting style.`).trim();
+  const specifications = String(product.specifications || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const imageMarkup = images.slice(0, 4).map((image, index) => `<img src="${escapeHtml(image)}" alt="${escapeHtml(`${product.name}${index ? ` — view ${index + 1}` : ""}`)}" width="640" height="800"${index ? ' loading="lazy"' : ""} />`).join("");
+  const details = [
+    ["Category", category],
+    ["Subcategory", subcategory],
+    ["Colour", product.color],
+    ["Material", product.material],
+    ["Available sizes", sizes.join(", ")],
+    ["Availability", availability]
+  ].filter(([, value]) => String(value || "").trim()).map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("");
+  const related = relatedRows.slice(0, 6).map(row => `<li><a href="${canonicalProductPath(row)}">${escapeHtml(row.name)}</a><span>${escapeHtml(row.subcategory || row.category || "Glamia collection")} · ₹${Number(currentSellingPrice(row)).toLocaleString("en-IN")}</span></li>`).join("");
+  const specificationMarkup = specifications.length
+    ? `<section class="seo-product-specifications" aria-labelledby="product-specifications-heading"><h2 id="product-specifications-heading">Product specifications</h2><ul>${specifications.map(line => `<li>${escapeHtml(line)}</li>`).join("")}</ul></section>`
+    : "";
+  return `<main class="page-main seo-product-page"><nav class="seo-breadcrumbs" aria-label="Breadcrumb"><a href="/">Home</a><span aria-hidden="true">›</span><a href="${categoryHref}">${escapeHtml(category)}</a><span aria-hidden="true">›</span><a href="${subcategoryHref}">${escapeHtml(subcategory)}</a><span aria-hidden="true">›</span><span aria-current="page">${escapeHtml(product.name)}</span></nav><article class="detail-page"><div class="detail-gallery">${imageMarkup}</div><div class="detail-copy"><p class="eyebrow">${escapeHtml(product.brand || "Glamia")}</p><h1>${escapeHtml(product.name)}</h1><p class="detail-price">₹${Number(price).toLocaleString("en-IN")}${Number(product.mrp) > price ? ` <del>₹${Number(product.mrp).toLocaleString("en-IN")}</del>` : ""}</p><p class="muted">${escapeHtml(category)} · ${escapeHtml(subcategory)}${product.color ? ` · ${escapeHtml(product.color)}` : ""}${Number(product.rating) > 0 ? ` · ${Number(product.rating)} / 5${Number(product.review_count) > 0 ? ` from ${Number(product.review_count)} review${Number(product.review_count) === 1 ? "" : "s"}` : " rating"}` : ""}</p><p class="detail-description">${escapeHtml(description)}</p><section aria-labelledby="product-details-heading"><h2 id="product-details-heading">Product details</h2><dl class="seo-product-details">${details}</dl></section>${specificationMarkup}<p class="seo-shop-note">Secure demo checkout is available while Glamia completes payment-provider approval. Shipping and return information is shown before an order is placed.</p><p><a href="${subcategoryHref}">Explore more ${escapeHtml(subcategory)}</a> · <a href="/policies">Delivery and return policies</a> · <a href="/support">Customer support</a></p></div></article>${related ? `<section class="seo-related-products" aria-labelledby="related-products-heading"><h2 id="related-products-heading">More from ${escapeHtml(category)}</h2><ul>${related}</ul></section>` : ""}</main>`;
+}
+
+const standalonePolicyPaths = {
+  terms: "/terms-and-conditions",
+  privacy: "/privacy-policy",
+  "refund-cancellation": "/refund-cancellation-policy",
+  returns: "/return-policy",
+  shipping: "/shipping-policy"
+};
+
+function policiesBotContent(selectedId = "") {
+  const sections = [
+    ["terms", "Terms & Conditions", "Glamia’s Platform includes https://glamiastore.com/, its mobile site, and app. By using it, you agree to provide accurate information, follow applicable law, and respect Glamia’s intellectual property. Orders become legally binding once accepted. These terms are governed by the laws of India; the jurisdiction field in the supplied policy document still needs confirmation before production."],
+    ["privacy", "Privacy Policy", "Glamia may collect account, contact, identity, address, order, transaction, preference, and relevant payment information to provide services, support orders, personalise the experience, communicate updates, prevent fraud, and meet legal obligations. Information may be shared with affiliates, sellers, logistics providers, service providers, payment providers, and authorities where lawful. Users can access, update, or request deletion of their information, subject to legal and operational retention needs."],
+    ["refund-cancellation", "Refund & Cancellation Policy", "Cancellation requests should be made within 2 days of the order and may not be accepted after shipping has started or the order is out for delivery. Damaged, defective, or not-as-described items should be reported to customer service within 7 days of receipt. Approved refunds are processed within 14 days."],
+    ["returns", "Return Policy", "Refunds or exchanges may be requested within the first 7 days from purchase. Items should be unused, in the same condition, and in original packaging. Sale items, exempt categories, and exchanges are subject to the eligibility rules shown at purchase and inspection on return."],
+    ["shipping", "Shipping Policy", "Orders are shipped through registered domestic courier and/or speed post services within 14 days from order or payment, or by an agreed delivery date. Delivery is attempted at the address supplied at purchase. Courier delays are outside Glamia’s liability, and seller or Platform shipping charges are not refundable."]
+  ];
+  const selected = sections.find(([id]) => id === selectedId);
+  const visibleSections = selected ? [selected] : sections;
+  const navigation = sections.map(([id, title]) => `<a href="${standalonePolicyPaths[id]}">${escapeHtml(title)}</a>`).join(" · ");
+  const content = visibleSections.map(([id, title, body]) => `<section id="${id}"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p></section>`).join("");
+  return `<main class="info-page policy-seo-page"><p class="eyebrow">Glamia care</p><h1>${escapeHtml(selected ? selected[1] : "Policies, plainly put.")}</h1><p>${escapeHtml(selected ? selected[2] : "Review Glamia’s terms, privacy, refunds, returns, and shipping policies before you shop.")}</p><nav aria-label="Policy sections">${navigation}</nav>${content}<p><a href="/support">Contact Glamia support</a> for help with an order or a policy request.</p></main>`;
+}
+
+function catalogJsonLd(rows, origin) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    itemListElement: rows.map((row, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: row.name,
+      url: `${origin}${canonicalProductPath(row)}`
+    }))
+  };
+}
+
 /* Server-side meta + content for public pages. Every visitor gets real
    Open Graph/Twitter tags, canonical URL and Product JSON-LD in the HTML;
-   known crawlers additionally receive the visible page content pre-rendered
-   inside #root so search engines that do not run JavaScript can index it. */
+   known crawlers receive a self-contained static rendering inside #root so
+   indexing never depends on browser-side API requests. */
 async function renderPublicPage(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
-  const productMatch = path.match(/^\/product\/([^/]+)$/);
+  const legacyProductMatch = path.match(/^\/product\/([^/]+)$/);
+  const seoProductMatch = path.match(/^\/(?!category(?:\/|$)|product(?:\/|$))([^/]+)\/([^/]+)\/([^/]+)$/i);
   const categoryMatch = path.match(/^\/category\/([^/]+)$/);
-  if (path !== "/" && !productMatch && !categoryMatch) return null;
+  const catalogPath = new Set(["/", "/offers", "/just-arrived", "/best-sellers"]);
+  const infoPath = new Set(["/contact", "/support", "/policies", ...Object.values(standalonePolicyPaths)]);
+  if (!catalogPath.has(path) && !infoPath.has(path) && !legacyProductMatch && !seoProductMatch && !categoryMatch) return null;
 
   const shellResponse = await env.ASSETS.fetch(new URL("/index.html", url));
   if (!shellResponse.ok) return null;
@@ -130,12 +268,14 @@ async function renderPublicPage(request, env) {
   let headExtras = "";
   let botContent = "";
 
-  if (productMatch) {
-    const resolvedId = await resolveProductReference(env, decodeURIComponent(productMatch[1]));
+  if (legacyProductMatch || seoProductMatch) {
+    const productReference = decodeURIComponent((seoProductMatch || legacyProductMatch)[seoProductMatch ? 3 : 1]);
+    const pathContext = seoProductMatch ? { category: seoProductMatch[1], subcategory: seoProductMatch[2] } : null;
+    const resolvedId = await resolveProductReference(env, productReference, pathContext);
     const row = resolvedId ? await env.DB.prepare(`${PRODUCT_SELECT}
       WHERE p.id = ? AND p.status = 'live'
       GROUP BY p.id`).bind(resolvedId).first() : null;
-    if (!row) return null;
+    if (!row) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
     const [product] = await withSizeStock(env, [row]);
     const price = currentSellingPrice(product);
     const inStock = (product.sizes || []).length ? Object.values(product.size_stock || {}).some((quantity) => Number(quantity) > 0) : Number(product.stock || 0) > 0;
@@ -144,20 +284,62 @@ async function renderPublicPage(request, env) {
     title = `${product.name} | Glamia`;
     description = String(product.description || `${product.name} — ${product.brand || "Glamia"} curated piece in ${product.color || "a timeless finish"}.`).slice(0, 300);
     ogType = "product";
-    const slug = slugifyName(product.name);
-    const { results: liveRows } = await env.DB.prepare("SELECT id, name FROM products WHERE status = 'live'").all();
-    const slugCounts = new Map();
-    for (const live of liveRows) { const liveSlug = slugifyName(live.name); if (liveSlug) slugCounts.set(liveSlug, (slugCounts.get(liveSlug) || 0) + 1); }
-    canonical = `${origin}/product/${slugCounts.get(slug) > 1 ? `${slug}-${String(product.id).slice(0, 8)}` : slug}`;
-    botContent = `<div class="detail-page"><div class="detail-copy"><p class="eyebrow">${escapeHtml(product.brand || "Glamia")}</p><h1>${escapeHtml(product.name)}</h1><p class="detail-price">₹${Number(price).toLocaleString("en-IN")}${Number(product.mrp) > price ? ` <del>₹${Number(product.mrp).toLocaleString("en-IN")}</del>` : ""}</p><p class="muted">${escapeHtml(product.category || "")}${product.color ? ` · ${escapeHtml(product.color)}` : ""}${Number(product.rating) > 0 ? ` · ${Number(product.rating)} / 5 rating` : ""}</p><p class="detail-description">${escapeHtml(product.description || "")}</p><p><a href="${product.category ? `/category/${encodeURIComponent(product.category)}` : "/best-sellers"}">Browse more${product.category ? ` in ${escapeHtml(product.category)}` : ""}</a></p></div>${ogImage ? `<div class="detail-gallery"><img src="${escapeHtml(ogImage)}" alt="${escapeHtml(product.name)}" /></div>` : ""}</div>`;
-    const jsonLd = { "@context": "https://schema.org", "@type": "Product", name: product.name, description: product.description || undefined, image: images.slice(0, 4), sku: product.id, color: product.color || undefined, brand: { "@type": "Brand", name: product.brand || "Glamia" }, offers: { "@type": "Offer", url: canonical, priceCurrency: "INR", price, availability: inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", itemCondition: "https://schema.org/NewCondition" }, ...(Number(product.rating) > 0 && Number(product.review_count) > 0 ? { aggregateRating: { "@type": "AggregateRating", ratingValue: Number(product.rating), reviewCount: Number(product.review_count) } } : {}) };
+    const canonicalPath = canonicalProductPath(product);
+    canonical = `${origin}${canonicalPath}`;
+    if (path !== canonicalPath) return new Response(null, { status: 301, headers: { Location: canonical, "Cache-Control": "public, max-age=3600" } });
+    const relatedCatalog = isBot ? await getPublicCatalogRows(env, product.category) : { rows: [] };
+    const relatedRows = (relatedCatalog.rows || []).filter(candidate => candidate.id !== product.id);
+    botContent = productBotContent(product, price, images.length ? images : [ogImage].filter(Boolean), inStock, relatedRows);
+    const jsonLd = { "@context": "https://schema.org", "@type": "Product", name: product.name, description: product.description || undefined, image: images.slice(0, 4), sku: product.id, category: [product.category, product.subcategory].filter(Boolean).join(" > ") || undefined, color: product.color || undefined, material: product.material || undefined, brand: { "@type": "Brand", name: product.brand || "Glamia" }, offers: { "@type": "Offer", url: canonical, priceCurrency: "INR", price, availability: product.preorder_enabled ? "https://schema.org/PreOrder" : inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", itemCondition: "https://schema.org/NewCondition" }, ...(Number(product.rating) > 0 && Number(product.review_count) > 0 ? { aggregateRating: { "@type": "AggregateRating", ratingValue: Number(product.rating), reviewCount: Number(product.review_count) } } : {}) };
     headExtras = `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, "\\u003c")}</script>`;
   }
 
   if (categoryMatch) {
     const category = decodeURIComponent(categoryMatch[1]);
-    title = `${category} collection | Glamia`;
-    description = `Shop the ${category} edit — curated pieces from independent ateliers, delivered fast across India.`;
+    const catalog = await getPublicCatalogRows(env, category);
+    if (catalog.available && !catalog.rows.length) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+    const canonicalCategory = catalog.rows[0]?.category || category;
+    title = `${canonicalCategory} collection | Glamia`;
+    description = `Shop the ${canonicalCategory} edit — curated pieces from independent ateliers, delivered fast across India.`;
+    canonical = `${origin}/category/${encodeURIComponent(canonicalCategory)}`;
+    botContent = catalogBotContent(`${canonicalCategory} collection`, description, catalog.rows.slice(0, 24), origin);
+    headExtras = `<script type="application/ld+json">${JSON.stringify(catalogJsonLd(catalog.rows.slice(0, 24), origin)).replace(/</g, "\\u003c")}</script>`;
+  }
+
+  if (catalogPath.has(path)) {
+    const catalog = await getPublicCatalogRows(env);
+    let rows = catalog.rows;
+    if (path === "/offers") rows = rows.filter(row => currentSellingPrice(row) < Number(row.mrp || row.price || 0));
+    if (path === "/best-sellers") rows = [...rows].sort((left, right) => Number(right.sold_total || 0) - Number(left.sold_total || 0));
+    if (path === "/") {
+      title = "Glamia — Curated Apparel & Accessories";
+      description = DEFAULT_PAGE_DESCRIPTION;
+      botContent = catalogBotContent("Curated apparel and accessories", description, rows.slice(0, 24), origin);
+    } else {
+      const titles = { "/offers": "Offers", "/just-arrived": "Just arrived", "/best-sellers": "Best sellers" };
+      title = `${titles[path]} | Glamia`;
+      description = `${titles[path]} from Glamia — curated apparel and accessories from independent ateliers, delivered fast across India.`;
+      botContent = catalogBotContent(titles[path], description, rows.slice(0, 24), origin);
+    }
+    headExtras = `<script type="application/ld+json">${JSON.stringify(catalogJsonLd(rows.slice(0, 24), origin)).replace(/</g, "\\u003c")}</script>`;
+  }
+
+  if (infoPath.has(path)) {
+    const info = {
+      "/contact": ["Contact Glamia", "Questions about an order, product, or delivery? Our team is here to help."],
+      "/support": ["Glamia customer support", "Find help with orders, returns, exchanges, delivery, and your account."],
+      "/policies": ["Glamia policies", "Review delivery, returns, exchanges, privacy, and checkout information before you shop."],
+      "/terms-and-conditions": ["Glamia Terms & Conditions", "Read Glamia’s terms for using the website, mobile site, app, and placing orders."],
+      "/privacy-policy": ["Glamia Privacy Policy", "Learn how Glamia collects, uses, shares, protects, and retains personal data."],
+      "/refund-cancellation-policy": ["Glamia Refund & Cancellation Policy", "Review Glamia’s order cancellation, damaged-item, and refund rules."],
+      "/return-policy": ["Glamia Return Policy", "Review Glamia’s return, exchange, eligibility, and inspection rules."],
+      "/shipping-policy": ["Glamia Shipping Policy", "Review Glamia’s shipping methods, delivery timing, delays, and charges."]
+    }[path];
+    title = `${info[0]} | Glamia`;
+    description = info[1];
+    botContent = path === "/policies" || Object.values(standalonePolicyPaths).includes(path)
+      ? policiesBotContent(Object.entries(standalonePolicyPaths).find(([, value]) => value === path)?.[0] || "")
+      : `<main class="info-page"><p class="eyebrow">Glamia</p><h1>${escapeHtml(info[0])}</h1><p>${escapeHtml(info[1])}</p><p><a href="/best-sellers">Browse the collection</a> · <a href="/orders">Track your order</a></p></main>`;
   }
 
   const metaTags = [
@@ -178,18 +360,24 @@ async function renderPublicPage(request, env) {
     .replace(/<title>.*?<\/title>/, `<title>${escapeHtml(title)}</title>`)
     .replace(/<meta name="description" content="[^"]*"\s*\/>/, `<meta name="description" content="${escapeHtml(description)}" />`)
     .replace("</head>", `${metaTags}${headExtras}</head>`);
-  if (isBot && botContent) html = html.replace('<div id="root"></div>', `<div id="root">${botContent}</div>`).replace(/<div id="initial-loader"[\s\S]*?<div id="root"/, '<div id="root"');
+  if (isBot && botContent) {
+    html = html
+      .replace('<div id="root"></div>', `<div id="root">${botContent}</div>`)
+      .replace(/<div id="initial-loader"[\s\S]*?<div id="root"/, '<div id="root"')
+      .replace(/<script[^>]+src="https:\/\/accounts\.google\.com\/gsi\/client"[^>]*><\/script>/i, "")
+      .replace(/<script\s+type="module"[^>]*><\/script>/i, "");
+  }
 
   return new Response(html, { headers: { "Content-Type": "text/html; charset=UTF-8", "Cache-Control": "public, max-age=120, s-maxage=300, stale-while-revalidate=1800" } });
 }
 
 async function getSitemap(request, env) {
   const origin = new URL(request.url).origin.replace(/\/+$/, "");
-  const staticPaths = ["/", "/offers", "/just-arrived", "/best-sellers", "/contact", "/support", "/policies"];
+  const staticPaths = ["/", "/offers", "/just-arrived", "/best-sellers", "/contact", "/support", "/policies", ...Object.values(standalonePolicyPaths)];
   let productRows = [];
   try {
     const result = await env.DB.prepare(`
-      SELECT id, name, category, images_json, image_url, thumbnail_url, updated_at, created_at
+      SELECT id, name, category, subcategory, images_json, image_url, thumbnail_url, updated_at, created_at
       FROM products
       WHERE status = 'live'
       ORDER BY updated_at DESC, created_at DESC
@@ -240,20 +428,12 @@ async function getSitemap(request, env) {
     if (!existing || (lastmod && lastmod > existing.lastmod)) categoryMeta.set(key, { name: category, lastmod });
   }
   for (const meta of categoryMeta.values()) add(`/category/${encodeURIComponent(meta.name)}`, meta.lastmod);
-  const slugCounts = new Map();
-  for (const row of productRows) {
-    const slug = slugifyName(row.name);
-    if (slug) slugCounts.set(slug, (slugCounts.get(slug) || 0) + 1);
-  }
   for (const product of productRows) {
     const id = String(product.id || "").trim();
     if (!id) continue;
-    const slug = slugifyName(product.name);
     const lastmod = formatLastmod(product.updated_at || product.created_at);
     const images = productImages(product);
-    if (!slug) { add(`/product/${id}`, lastmod, images, product.name); continue; }
-    const path = slugCounts.get(slug) > 1 ? `${slug}-${id.slice(0, 8)}` : slug;
-    add(`/product/${path}`, lastmod, images, product.name);
+    add(canonicalProductPath(product), lastmod, images, product.name);
   }
 
   const escapeXml = value => String(value)
@@ -283,8 +463,13 @@ async function getRobots(request) {
     "User-agent: *",
     "Allow: /",
     "Disallow: /admin",
-    "Disallow: /api/",
     "Allow: /api/assets/",
+    "Allow: /api/products",
+    "Allow: /api/hero",
+    "Allow: /api/storefront-settings",
+    "Allow: /api/categories",
+    "Allow: /api/session",
+    "Disallow: /api/",
     "Disallow: /login",
     "Disallow: /profile",
     "Disallow: /address",
@@ -329,25 +514,30 @@ async function cachedPublicApi(request, ctx, ttl, producer) {
 
 async function routeApi(request, env, url, ctx) {
   assertSameOrigin(request, url);
-  enforceRateLimit(request, url);
+  await enforceRateLimit(request, url, env, ctx);
   const user = await currentUser(request, env);
   const path = url.pathname;
 
   if (request.method === "GET" && path === "/api/config") {
-    return json({ googleClientId: env.GOOGLE_CLIENT_ID || "", passwordSignupEnabled: String(env.PASSWORD_SIGNUP_ENABLED).toLowerCase() === "true" });
+    return json({
+      googleClientId: env.GOOGLE_CLIENT_ID || "",
+      googleAnalyticsMeasurementId: env.GA4_MEASUREMENT_ID || "",
+    });
   }
 
   if (request.method === "GET" && path === "/api/session") {
-    return json({ user });
+    const profileStatus = user && user.role !== "admin"
+      ? await getProfileCompletionStatus(env, user)
+      : { profile_complete: true, needs_profile_completion: false };
+    return json({ user, ...profileStatus });
   }
 
   if (request.method === "POST" && path === "/api/auth/signup") {
-    if (String(env.PASSWORD_SIGNUP_ENABLED).toLowerCase() !== "true") return json({ error: "New account signup is currently unavailable. Please sign in with Google." }, 403);
-    return signUpWithPassword(request, env);
+    return json({ error: "Password sign-up is disabled for the demo. Please sign in with Google." }, 410);
   }
 
   if (request.method === "POST" && path === "/api/auth/login") {
-    return loginWithPassword(request, env);
+    return json({ error: "Password sign-in is disabled for the demo. Please sign in with Google." }, 410);
   }
 
   if (request.method === "POST" && path === "/api/auth/google") {
@@ -464,7 +654,7 @@ async function routeApi(request, env, url, ctx) {
   }
 
   if (request.method === "GET" && path === "/api/order-tracking") {
-    return trackPublicOrder(env, url.searchParams.get("order_id"));
+    return trackPublicOrder(env, url.searchParams.get("order_id"), url.searchParams.get("email"));
   }
 
   if (request.method === "POST" && path === "/api/orders") {
@@ -533,13 +723,16 @@ async function routeApi(request, env, url, ctx) {
     return trackWishlistEvent(request, env, user);
   }
 
-  if (request.method === "GET" && path.startsWith("/api/assets/")) {
-    return serveR2Asset(env, path.replace("/api/assets/", ""));
+  if (["GET", "HEAD"].includes(request.method) && path.startsWith("/api/assets/")) {
+    return serveR2Asset(env, path.replace("/api/assets/", ""), request.method === "HEAD");
   }
 
   const productResource = path.match(/^\/api\/products\/([^/]+)$/);
   if (productResource && request.method === "GET") {
-    return getProduct(env, user, decodeURIComponent(productResource[1]));
+    const context = url.searchParams.has("category") || url.searchParams.has("subcategory")
+      ? { category: url.searchParams.get("category") || "", subcategory: url.searchParams.get("subcategory") || "" }
+      : null;
+    return getProduct(env, user, decodeURIComponent(productResource[1]), context);
   }
   if (productResource && request.method === "DELETE") {
     requireUser(user);
@@ -669,6 +862,21 @@ async function routeApi(request, env, url, ctx) {
     return listCustomers(env);
   }
 
+  if (request.method === "GET" && path === "/api/admin/tax-compliance") {
+    requireAdmin(user);
+    return taxComplianceReport(env);
+  }
+
+  if (request.method === "GET" && path === "/api/admin/tax-settings") {
+    requireAdmin(user);
+    return getTaxSettings(env);
+  }
+
+  if (request.method === "PATCH" && path === "/api/admin/tax-settings") {
+    requireAdmin(user);
+    return updateTaxSettings(request, env, user);
+  }
+
   if (request.method === "GET" && path === "/api/admin/support/tickets") {
     requireAdmin(user);
     return listSupportTickets(env, user, "admin");
@@ -682,6 +890,11 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "GET" && path === "/api/admin/dashboard") {
     requireAdmin(user);
     return dashboardStats(env);
+  }
+
+  if (request.method === "GET" && path === "/api/admin/google-analytics") {
+    requireAdmin(user);
+    return googleAnalyticsReport(env);
   }
 
   if (request.method === "GET" && path === "/api/admin/notifications") {
@@ -820,116 +1033,13 @@ async function loginWithGoogle(request, env) {
     await applyReferral(env, user.email, referralCode).catch(() => null);
   }
 
+  const profileStatus = role === "admin"
+    ? { profile_complete: true, needs_profile_completion: false }
+    : await getProfileCompletionStatus(env, user);
   const token = await signSession(user, env);
-  return json({ user }, 200, {
+  return json({ user: { ...user, needs_profile_completion: profileStatus.needs_profile_completion }, ...profileStatus }, 200, {
     "Set-Cookie": makeSessionCookie(request, token)
   });
-}
-
-async function derivePasswordHash(password, salt, iterations = 120000) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
-    key,
-    256
-  );
-  return new Uint8Array(bits);
-}
-
-function randomBytes(length) {
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return bytes;
-}
-
-function constantTimeBytesEqual(left, right) {
-  if (left.length !== right.length) return false;
-  let difference = 0;
-  for (let index = 0; index < left.length; index += 1) difference |= left[index] ^ right[index];
-  return difference === 0;
-}
-
-function normalizePasswordEmail(value) {
-  const email = String(value || "").trim().toLowerCase();
-  if (!isRealCustomerEmail(email)) throw httpError("Enter a valid email address", 400);
-  return email;
-}
-
-function normalizePassword(value) {
-  const password = String(value || "");
-  if (password.length < 8 || password.length > 128) throw httpError("Password must be 8–128 characters", 400);
-  return password;
-}
-
-function normalizeSignupName(value) {
-  const name = String(value || "").trim().replace(/\s+/g, " ");
-  if (!name || name.length > 120 || !/^[\p{L}\p{M}\s.'\-’]+$/u.test(name)) throw httpError("Enter a valid name", 400);
-  return name;
-}
-
-function normalizeSignupDob(value) {
-  const dob = String(value || "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) throw httpError("Enter a valid date of birth", 400);
-  const date = new Date(`${dob}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== dob || date > new Date()) throw httpError("Enter a valid date of birth", 400);
-  return dob;
-}
-
-async function signUpWithPassword(request, env) {
-  const body = await readJson(request);
-  const email = normalizePasswordEmail(body.email);
-  const password = normalizePassword(body.password);
-  const name = normalizeSignupName(body.name);
-  const gender = String(body.gender || "").trim();
-  if (gender && !PROFILE_GENDERS.has(gender)) throw httpError("Choose a valid gender option", 400);
-  const dob = normalizeSignupDob(body.dob);
-  const existing = await env.DB.prepare("SELECT email FROM users WHERE email = ?").bind(email).first();
-  if (existing) throw httpError("An account with this email already exists. Sign in instead.", 409);
-  const salt = randomBytes(16);
-  const iterations = 120000;
-  const hash = await derivePasswordHash(password, salt, iterations);
-  const user = { sub: `password:${crypto.randomUUID()}`, email, name, picture: "", role: "seller" };
-  await env.DB.batch([
-    env.DB.prepare(`INSERT INTO users (email, google_sub, name, role, dob, gender, last_login_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`)
-      .bind(email, user.sub, name, user.role, dob, gender),
-    env.DB.prepare(`INSERT INTO user_credentials (user_email, password_hash, password_salt, password_iterations) VALUES (?, ?, ?, ?)`)
-      .bind(email, base64UrlEncodeBytes(hash), base64UrlEncodeBytes(salt), iterations)
-  ]);
-  const token = await signSession(user, env);
-  return json({ user }, 201, { "Set-Cookie": makeSessionCookie(request, token) });
-}
-
-async function loginWithPassword(request, env) {
-  const body = await readJson(request);
-  const email = normalizePasswordEmail(body.email);
-  const password = normalizePassword(body.password);
-  const row = await env.DB.prepare(`
-    SELECT u.email, u.name, u.picture, u.role, u.dob, u.gender,
-      c.password_hash, c.password_salt, c.password_iterations
-    FROM users u JOIN user_credentials c ON c.user_email = u.email
-    WHERE u.email = ?
-  `).bind(email).first();
-  if (!row) throw httpError("Email or password is incorrect", 401);
-  let valid = false;
-  try {
-    const expected = base64UrlToBytes(row.password_hash);
-    const salt = base64UrlToBytes(row.password_salt);
-    const actual = await derivePasswordHash(password, salt, Number(row.password_iterations) || 120000);
-    valid = constantTimeBytesEqual(actual, expected);
-  } catch {
-    valid = false;
-  }
-  if (!valid) throw httpError("Email or password is incorrect", 401);
-  const user = { sub: `password:${email}`, email, name: row.name || email, picture: row.picture || "", role: adminEmails(env, request).includes(email) ? "admin" : "seller" };
-  await env.DB.prepare("UPDATE users SET last_login_at = CURRENT_TIMESTAMP, role = ? WHERE email = ?").bind(user.role, email).run();
-  const token = await signSession(user, env);
-  return json({ user }, 200, { "Set-Cookie": makeSessionCookie(request, token) });
 }
 
 async function sendAuthEmail(env, user, type) {
@@ -1297,41 +1407,50 @@ async function allProductRows(env) {
   return results;
 }
 
-/* Product URLs are name slugs (/product/night-suit). The reference resolver
-   accepts, in order: exact id (oldest links), <anything>-<full id> (previous
-   slug scheme), the plain slug when unique among live products, and
-   <slug>-<8-char-id> when several live products share a name. */
-async function resolveProductReference(env, reference) {
+/* Product references accept the canonical hierarchical URL's final slug,
+   legacy /product/<slug> links, bare ids, and older slug-id links. The
+   category/subcategory context disambiguates identical names safely. */
+async function resolveProductReference(env, reference, context = null) {
   const value = String(reference || "").trim();
   if (!value) return "";
   const direct = await env.DB.prepare("SELECT id FROM products WHERE id = ?").bind(value).first();
   if (direct) return String(direct.id);
-  if (!value.includes("-")) return "";
-  const suffix = await env.DB.prepare("SELECT id FROM products WHERE instr(?, '-' || id) > 0 ORDER BY LENGTH(id) DESC LIMIT 1").bind(value).first();
-  if (suffix) return String(suffix.id);
-  const { results } = await env.DB.prepare("SELECT id, name FROM products WHERE status = 'live'").all();
+  const { results } = await env.DB.prepare("SELECT id, name, category, subcategory FROM products WHERE status = 'live'").all();
   const candidates = results
-    .map(row => ({ id: String(row.id), slug: slugifyName(row.name) }))
+    .map(row => ({ id: String(row.id), slug: slugifyName(row.name), category: productUrlSlug(row.category), subcategory: productUrlSlug(row.subcategory) }))
     .filter(row => row.slug);
-  const exact = candidates.filter(row => row.slug === value);
+  const normalizedValue = value.toLowerCase();
+  const exact = candidates.filter(row => row.slug === normalizedValue);
+  const canonical = candidates.filter(row => `${row.slug}-${row.id.toLowerCase()}` === normalizedValue);
+  if (canonical.length === 1) return canonical[0].id;
+  // Keep the short-id form compatible with the first rollout of this URL
+  // system, so links shared during that window still reach the right item.
+  const shortened = candidates.filter(row => `${row.slug}-${row.id.slice(0, 8).toLowerCase()}` === normalizedValue);
+  if (shortened.length === 1) return shortened[0].id;
+  const contextMatches = context
+    ? candidates.filter(row => row.slug === normalizedValue && row.category === productUrlSlug(context.category) && row.subcategory === productUrlSlug(context.subcategory))
+    : [];
+  if (contextMatches.length === 1) return contextMatches[0].id;
   if (exact.length === 1) return exact[0].id;
-  const shortened = candidates.find(row => `${row.slug}-${row.id.slice(0, 8)}` === value);
-  if (shortened) return shortened.id;
   // Tolerate links saved under an older name: <old-slug>-<8-char-id> resolves
   // while the trailing id chunk still identifies the listing.
-  const tail = value.slice(value.lastIndexOf("-") + 1);
-  if (tail.length === 8 && value.includes("-")) {
-    const prefix = value.slice(0, value.length - 9);
-    const renamed = candidates.find(row => row.id.slice(0, 8) === tail && (row.slug === prefix || row.slug.startsWith(`${prefix}-`) || prefix.startsWith(row.slug)));
-    if (renamed) return renamed.id;
+  for (const candidate of candidates) {
+    for (const token of [candidate.id.toLowerCase(), candidate.id.slice(0, 8).toLowerCase()]) {
+      if (!token || !normalizedValue.endsWith(`-${token}`)) continue;
+      const prefix = normalizedValue.slice(0, -(token.length + 1));
+      if (candidate.slug === prefix || candidate.slug.startsWith(`${prefix}-`) || prefix.startsWith(candidate.slug)) return candidate.id;
+    }
   }
-  return exact.length > 1 ? exact[0].id : "";
+  // Never guess when a plain name is shared by multiple live listings. The
+  // canonical URL always carries the stable id suffix, so an ambiguous alias
+  // must fail rather than exposing the wrong product.
+  return "";
 }
 
-async function getProduct(env, user, reference) {
+async function getProduct(env, user, reference, context = null) {
   const canManage = user?.role === "admin";
   const sellerEmail = String(user?.email || "").toLowerCase();
-  const resolvedId = await resolveProductReference(env, reference);
+  const resolvedId = await resolveProductReference(env, reference, context);
   if (!resolvedId) return json({ error: "Product not found" }, 404);
   const row = await env.DB.prepare(`${PRODUCT_SELECT}
     WHERE p.id = ? AND (p.status = 'live' OR ? = 1 OR LOWER(p.seller_email) = ?)
@@ -1416,6 +1535,34 @@ async function listHeroSlides(env, admin = false) {
 function heroText(value, fallback, max) {
   const text = String(value ?? "").trim();
   return (text || fallback).slice(0, max);
+}
+
+function announcementText(value, fallback = "") {
+  return String(value === undefined || value === null ? fallback : value).trim().slice(0, 160);
+}
+
+function normalizeAnnouncementItems(value, strict = false) {
+  if (!Array.isArray(value)) return [];
+  const items = [];
+  for (const [index, item] of value.slice(0, 10).entries()) {
+    const text = announcementText(item?.text);
+    const startsAt = String(item?.starts_at ?? item?.startsAt ?? "").trim();
+    const endsAt = String(item?.ends_at ?? item?.endsAt ?? "").trim();
+    if (!text && !startsAt && !endsAt) continue;
+    const startMs = startsAt ? Date.parse(startsAt) : 0;
+    const endMs = endsAt ? Date.parse(endsAt) : NaN;
+    if (!text || !endsAt || !Number.isFinite(endMs) || (startsAt && !Number.isFinite(startMs)) || (startsAt && endMs <= startMs)) {
+      if (strict) throw httpError(`Scheduled announcement ${index + 1} needs text, a valid start time, and an end time after it`, 400);
+      continue;
+    }
+    items.push({
+      id: String(item?.id || `announcement-${index + 1}`).trim().slice(0, 100),
+      text,
+      starts_at: startsAt,
+      ends_at: endsAt
+    });
+  }
+  return items;
 }
 
 function heroProductIds(body) {
@@ -1511,9 +1658,17 @@ async function heroInsights(env) {
     env.DB.prepare(`
       SELECT oi.product_id,
         SUM(CASE WHEN o.status != 'cancelled' THEN oi.quantity ELSE 0 END) AS units,
-        SUM(CASE WHEN o.status != 'cancelled' THEN oi.unit_price * oi.quantity ELSE 0 END) AS revenue,
-        SUM(CASE WHEN o.status != 'cancelled' THEN 1 ELSE 0 END) AS orders,
-        SUM(CASE WHEN o.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
+        SUM(CASE WHEN o.status != 'cancelled' THEN
+          CASE WHEN o.subtotal > 0
+            THEN MAX(0, oi.unit_price * oi.quantity - CAST(ROUND(
+              COALESCE(o.discount, 0) * 1.0 * (oi.unit_price * oi.quantity) / o.subtotal
+            ) AS INTEGER))
+            ELSE oi.unit_price * oi.quantity
+          END
+          ELSE 0 END) AS revenue,
+        COUNT(DISTINCT CASE WHEN o.status != 'cancelled' THEN o.id END) AS orders,
+        COUNT(DISTINCT CASE WHEN o.status = 'cancelled' THEN o.id END) AS cancelled,
+        COUNT(DISTINCT o.id) AS total_orders
       FROM order_items oi
       JOIN orders o ON o.id = oi.order_id
       GROUP BY oi.product_id
@@ -1530,12 +1685,14 @@ async function heroInsights(env) {
     entry.revenue = Number(row.revenue || 0);
     entry.orders = Number(row.orders || 0);
     entry.cancelled = Number(row.cancelled || 0);
+    entry.total_orders = Number(row.total_orders || 0);
   }
   for (const row of cartRows.results) ensure(row.product_id).cart_adds += Number(row.quantity) || 1;
   for (const row of wishRows.results) ensure(row.product_id).wishlists += 1;
   const enriched = products.map(product => {
     const m = metrics[product.id] || ensure(product.id);
     const orderCount = m.orders;
+    const totalOrderCount = m.total_orders || orderCount + m.cancelled;
     return {
       id: product.id,
       name: product.name,
@@ -1551,7 +1708,7 @@ async function heroInsights(env) {
       orders: orderCount,
       cart_adds: m.cart_adds,
       wishlists: m.wishlists,
-      cancellation_rate: orderCount ? Math.round((m.cancelled / orderCount) * 1000) / 10 : null
+      cancellation_rate: totalOrderCount ? Math.round((m.cancelled / totalOrderCount) * 1000) / 10 : null
     };
   });
   const by = (compare, limit = 6) => [...enriched].sort(compare).slice(0, limit);
@@ -1579,14 +1736,15 @@ async function heroInsights(env) {
 const STOREFRONT_DEFAULTS = {
   announcement: {
     visible: true,
-    text: "Complimentary shipping across India · Cash on Delivery available"
+    text: "Complimentary shipping across India · Demo checkout available",
+    items: []
   },
   trust_strip: {
     visible: true,
     items: [
       { id: "shipping", visible: true, title: "Free & Fast Shipping", body: "Complimentary on every order" },
       { id: "returns", visible: true, title: "7-Day Easy Returns", body: "Simple exchanges, no questions" },
-      { id: "cod", visible: true, title: "Cash on Delivery", body: "Or secure UPI & card checkout" }
+      { id: "cod", visible: true, title: "Demo Checkout", body: "No money is charged" }
     ]
   },
   fulfillment: {
@@ -1614,9 +1772,13 @@ function parseSettingObject(value) {
 async function storefrontSettingsObject(env, includePrivate = false) {
   const { results } = await env.DB.prepare("SELECT setting_key, value_json FROM storefront_settings").all();
   const raw = Object.fromEntries(results.map(row => [row.setting_key, parseSettingObject(row.value_json)]));
+  const announcementTextValue = announcementText(raw.announcement?.text, STOREFRONT_DEFAULTS.announcement.text);
+  const allAnnouncementItems = normalizeAnnouncementItems(raw.announcement?.items);
+  const now = Date.now();
   const announcement = {
-    visible: raw.announcement?.visible === undefined ? STOREFRONT_DEFAULTS.announcement.visible : Boolean(raw.announcement.visible),
-    text: heroText(raw.announcement?.text, STOREFRONT_DEFAULTS.announcement.text, 160)
+    visible: (raw.announcement?.visible === undefined ? STOREFRONT_DEFAULTS.announcement.visible : Boolean(raw.announcement.visible)) && Boolean(announcementTextValue),
+    text: announcementTextValue,
+    items: includePrivate ? allAnnouncementItems : allAnnouncementItems.filter(item => (!item.starts_at || Date.parse(item.starts_at) <= now) && Date.parse(item.ends_at) > now)
   };
   const rawItems = Array.isArray(raw.trust_strip?.items) ? raw.trust_strip.items : [];
   const items = STOREFRONT_DEFAULTS.trust_strip.items.map(defaultItem => {
@@ -1680,9 +1842,13 @@ async function updateStorefrontSettings(request, env) {
     ? body.support_contact
     : current.support_contact;
   const nextSeo = body.seo && typeof body.seo === "object" ? body.seo : current.seo;
+  const announcementTextValue = announcementText(nextAnnouncement.text, current.announcement.text);
+  const announcementVisible = nextAnnouncement.visible === undefined ? current.announcement.visible : Boolean(nextAnnouncement.visible);
+  if (announcementVisible && !announcementTextValue) throw httpError("Add permanent announcement text before showing the announcement bar", 400);
   const announcement = {
-    visible: nextAnnouncement.visible === undefined ? current.announcement.visible : Boolean(nextAnnouncement.visible),
-    text: heroText(nextAnnouncement.text, current.announcement.text, 160)
+    visible: announcementVisible && Boolean(announcementTextValue),
+    text: announcementTextValue,
+    items: normalizeAnnouncementItems(nextAnnouncement.items === undefined ? current.announcement.items : nextAnnouncement.items, true)
   };
   const submittedItems = Array.isArray(nextTrust.items) ? nextTrust.items : current.trust_strip.items;
   const trustItems = STOREFRONT_DEFAULTS.trust_strip.items.map(defaultItem => {
@@ -1864,6 +2030,26 @@ async function profilePhones(env, email, legacyPhone = "") {
   const countryCode = String(legacyPhone).trim().startsWith("+") && digits.length > 10 ? `+${digits.slice(0, digits.length - 10)}` : "+91";
   const phoneNumber = countryCode === "+91" ? digits.slice(-10) : digits.slice(countryCode.length - 1);
   return [{ id: "legacy-primary", label: "", country_code: countryCode, phone_number: phoneNumber, phone: formatPhone(countryCode, phoneNumber), is_primary: true }];
+}
+
+function validProfileDob(value) {
+  const dob = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) return false;
+  const parsed = new Date(`${dob}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === dob && parsed <= new Date();
+}
+
+function profileIsComplete(row) {
+  const firstName = String(row?.first_name || "").trim();
+  const lastName = String(row?.last_name || "").trim();
+  const phoneDigits = String(row?.phone || "").replace(/\D/g, "");
+  return Boolean(firstName && lastName && phoneDigits.length >= 4 && phoneDigits.length <= 20 && validProfileDob(row?.dob) && PROFILE_GENDERS.has(String(row?.gender || "").trim()));
+}
+
+async function getProfileCompletionStatus(env, user) {
+  const row = await profileRow(env, user.email);
+  const complete = profileIsComplete(row);
+  return { profile_complete: complete, needs_profile_completion: !complete };
 }
 
 async function getProfile(env, user) {
@@ -2255,7 +2441,8 @@ function sanitizeVariants(variants) {
     images: (variant.images || []).map(image => String(image || "").trim()).filter(Boolean).slice(0, MAX_VARIANT_IMAGES),
     image_keys: (variant.image_keys || []).map(key => String(key || "").trim()).filter(Boolean).slice(0, MAX_VARIANT_IMAGES),
     thumbnail_images: (variant.thumbnail_images || []).map(image => String(image || "").trim()).filter(Boolean).slice(0, MAX_VARIANT_IMAGES),
-    thumbnail_keys: (variant.thumbnail_keys || []).map(key => String(key || "").trim()).filter(Boolean).slice(0, MAX_VARIANT_IMAGES)
+    thumbnail_keys: (variant.thumbnail_keys || []).map(key => String(key || "").trim()).filter(Boolean).slice(0, MAX_VARIANT_IMAGES),
+    thumbnail_source_url: String(variant.thumbnail_source_url || "").trim()
   }));
 }
 
@@ -2281,15 +2468,40 @@ function normalizePreorderConfig(input = {}, current = {}) {
   return { preorder_enabled: enabled ? 1 : 0, preorder_release_at: releaseAt, preorder_limit: limit };
 }
 
+function normalizeTaxConfig(input = {}, current = {}) {
+  const code = String(input.hsn_sac_code === undefined ? (current.hsn_sac_code || "") : (input.hsn_sac_code || ""))
+    .trim().toUpperCase().slice(0, 20);
+  const typeValue = String(input.hsn_sac_type === undefined ? (current.hsn_sac_type || "HSN") : (input.hsn_sac_type || "HSN"))
+    .trim().toUpperCase();
+  if (!['HSN', 'SAC'].includes(typeValue)) throw httpError("Tax code type must be HSN or SAC", 400);
+  const rateInput = input.gst_rate === undefined ? current.gst_rate : input.gst_rate;
+  let rate = null;
+  if (rateInput !== null && rateInput !== undefined && String(rateInput).trim() !== "") {
+    rate = Number(rateInput);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) throw httpError("GST rate must be between 0 and 100", 400);
+    rate = Math.round(rate * 100) / 100;
+  }
+  const inclusiveInput = input.gst_tax_inclusive === undefined ? current.gst_tax_inclusive : input.gst_tax_inclusive;
+  const inclusive = inclusiveInput === undefined || inclusiveInput === null
+    ? 1
+    : (inclusiveInput === true || inclusiveInput === 1 || inclusiveInput === "1" || inclusiveInput === "true" ? 1 : 0);
+  return { hsn_sac_code: code, hsn_sac_type: typeValue, gst_rate: rate, gst_tax_inclusive: inclusive };
+}
+
 function productInsertStatement(env, entry) {
   return env.DB.prepare(`
     INSERT INTO products (
       id, seller_email, name, category, brand, price, mrp, stock, rating, status, featured,
       color, sizes_json, image_url, image_key, images_json, image_keys_json, thumbnail_url, thumbnail_key,
-      thumbnail_images_json, thumbnail_keys_json, material, description, variants_json, variant_group,
+      thumbnail_images_json, thumbnail_keys_json, thumbnail_source_url, material, description, specifications, variants_json, variant_group,
       subcategory, size_chart_url, cost_price, reorder_point, preorder_enabled, preorder_release_at,
-      preorder_limit, preorder_sold
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      preorder_limit, preorder_sold, hsn_sac_code, hsn_sac_type, gst_rate, gst_tax_inclusive
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?
+    )
   `).bind(
     entry.id,
     entry.sellerEmail,
@@ -2312,9 +2524,11 @@ function productInsertStatement(env, entry) {
     entry.thumbnailKeys[0] || null,
     JSON.stringify(entry.thumbnailImages),
     JSON.stringify(entry.thumbnailKeys),
+    entry.thumbnailSourceUrl || entry.images[0] || "",
     entry.material,
     entry.description,
-    "[]",
+    entry.specifications || "",
+    JSON.stringify(entry.variants || []),
     entry.variantGroup,
     entry.subcategory || "",
     entry.sizeChartUrl || null,
@@ -2323,7 +2537,11 @@ function productInsertStatement(env, entry) {
     entry.preorderEnabled ? 1 : 0,
     entry.preorderReleaseAt || null,
     entry.preorderLimit ?? null,
-    0
+    0,
+    entry.hsnSacCode || "",
+    entry.hsnSacType || "HSN",
+    entry.gstRate ?? null,
+    entry.gstTaxInclusive ?? 1
   );
 }
 
@@ -2338,6 +2556,8 @@ async function createProduct(request, env, user) {
   const imageKeys = keysFromImages(images);
   const thumbnailImages = Array.isArray(product.thumbnail_urls) ? product.thumbnail_urls.map(image => String(image || "").trim()).filter(Boolean) : [];
   const thumbnailKeys = Array.isArray(product.thumbnail_keys) ? product.thumbnail_keys.map(key => String(key || "").trim()).filter(Boolean) : [];
+  const requestedThumbnailSource = String(product.thumbnail_source_url || "").trim();
+  const thumbnailSourceUrl = images.includes(requestedThumbnailSource) ? requestedThumbnailSource : images[0];
   const variants = sanitizeVariants(product.variants);
   const groupId = variants.length ? crypto.randomUUID() : null;
   const mainId = crypto.randomUUID();
@@ -2350,6 +2570,7 @@ async function createProduct(request, env, user) {
   const costPrice = product.cost_price === undefined || product.cost_price === "" ? 0 : validateStock(product.cost_price, "Cost price");
   const reorderPoint = product.reorder_point === undefined || product.reorder_point === "" ? 15 : validateStock(product.reorder_point, "Reorder point");
   const preorder = normalizePreorderConfig(product);
+  const tax = normalizeTaxConfig(product);
   if (costPrice > Number(product.price)) return json({ error: "Cost price cannot exceed the selling price" }, 400);
 
   const entries = [{
@@ -2368,10 +2589,13 @@ async function createProduct(request, env, user) {
     sizes: product.sizes,
     images,
     imageKeys,
+    thumbnailSourceUrl,
     thumbnailImages: thumbnailImages.length ? thumbnailImages : [images[0]],
     thumbnailKeys: thumbnailKeys.length ? thumbnailKeys : [imageKeys[0] || ""].filter(Boolean),
     material: product.material,
     description: product.description,
+    specifications: product.specifications || "",
+    variants,
     variantGroup: groupId,
     subcategory,
     sizeChartUrl,
@@ -2379,7 +2603,11 @@ async function createProduct(request, env, user) {
     reorderPoint,
     preorderEnabled: preorder.preorder_enabled,
     preorderReleaseAt: preorder.preorder_release_at,
-    preorderLimit: preorder.preorder_limit
+    preorderLimit: preorder.preorder_limit,
+    hsnSacCode: tax.hsn_sac_code,
+    hsnSacType: tax.hsn_sac_type,
+    gstRate: tax.gst_rate,
+    gstTaxInclusive: tax.gst_tax_inclusive
   }];
 
   const createdVariants = [];
@@ -2401,10 +2629,14 @@ async function createProduct(request, env, user) {
       sizes: variant.sizes,
       images: variant.images,
       imageKeys: keysFromImages(variant.images),
+      thumbnailSourceUrl: variant.thumbnail_source_url && variant.images.includes(variant.thumbnail_source_url)
+        ? variant.thumbnail_source_url
+        : variant.images[0],
       thumbnailImages: variant.thumbnail_images.length ? variant.thumbnail_images : [variant.images[0]].filter(Boolean),
       thumbnailKeys: variant.thumbnail_keys.length ? variant.thumbnail_keys : [keysFromImages(variant.images)[0] || ""].filter(Boolean),
       material: product.material,
       description: product.description,
+      specifications: product.specifications || "",
       variantGroup: groupId,
       subcategory,
       sizeChartUrl,
@@ -2412,7 +2644,11 @@ async function createProduct(request, env, user) {
       reorderPoint,
       preorderEnabled: preorder.preorder_enabled,
       preorderReleaseAt: preorder.preorder_release_at,
-      preorderLimit: preorder.preorder_limit
+      preorderLimit: preorder.preorder_limit,
+      hsnSacCode: tax.hsn_sac_code,
+      hsnSacType: tax.hsn_sac_type,
+      gstRate: tax.gst_rate,
+      gstTaxInclusive: tax.gst_tax_inclusive
     });
     createdVariants.push(id);
   }
@@ -2457,6 +2693,9 @@ async function updateProduct(request, env, id, adminUser = null) {
   const hasPreorderEdit = ["preorder_enabled", "preorder_release_at", "preorder_limit"].some(field => body[field] !== undefined);
   if (hasPreorderEdit) Object.assign(next, normalizePreorderConfig(body, current));
 
+  const hasTaxEdit = ["hsn_sac_code", "hsn_sac_type", "gst_rate", "gst_tax_inclusive"].some(field => body[field] !== undefined);
+  if (hasTaxEdit) Object.assign(next, normalizeTaxConfig(body, current));
+
   if (body.deal_ends_at !== undefined) {
     if (body.deal_ends_at === null || body.deal_ends_at === "") {
       next.deal_ends_at = null;
@@ -2488,14 +2727,18 @@ async function updateProduct(request, env, id, adminUser = null) {
     }
   }
 
-  const catalogFields = ["name", "category", "brand", "price", "mrp", "color", "material", "sizes", "description", "images", "thumbnail_urls", "thumbnail_keys", "subcategory", "size_chart_url", "cost_price", "reorder_point"];
+    const catalogFields = ["name", "category", "brand", "price", "mrp", "color", "material", "sizes", "description", "specifications", "images", "thumbnail_urls", "thumbnail_keys", "thumbnail_source_url", "subcategory", "size_chart_url", "cost_price", "reorder_point", "variants"];
   const hasCatalogEdit = catalogFields.some(field => body[field] !== undefined);
   if (hasCatalogEdit) {
     let currentImages = [];
     try { currentImages = JSON.parse(current.images_json || "[]"); } catch {}
     if (!currentImages.length && current.image_url) currentImages = [current.image_url];
-    const imageInput = body.images ?? currentImages;
-    const mergedImages = Array.isArray(imageInput) ? imageInput.map(image => String(image || "").trim()) : imageInput;
+    const imageInput = body.images === undefined
+      ? currentImages
+      : Array.isArray(body.images)
+        ? body.images
+        : String(body.images || "").split(/\r?\n/);
+    const mergedImages = Array.isArray(imageInput) ? imageInput.map(image => String(image || "").trim()).filter(Boolean) : imageInput;
     let currentThumbImages = [];
     try { currentThumbImages = JSON.parse(current.thumbnail_images_json || "[]"); } catch {}
     if (!currentThumbImages.length && current.thumbnail_url) currentThumbImages = [current.thumbnail_url];
@@ -2507,6 +2750,10 @@ async function updateProduct(request, env, id, adminUser = null) {
     const mergedThumbnailKeys = Array.isArray(body.thumbnail_keys)
       ? body.thumbnail_keys.map(key => String(key || "").trim()).filter(Boolean)
       : (body.images !== undefined ? [] : currentThumbKeys);
+    const requestedThumbnailSource = String(body.thumbnail_source_url ?? current.thumbnail_source_url ?? "").trim();
+    const thumbnailSourceUrl = Array.isArray(mergedImages) && mergedImages.includes(requestedThumbnailSource)
+      ? requestedThumbnailSource
+      : (Array.isArray(mergedImages) ? mergedImages[0] || "" : "");
     const merged = {
       name: body.name ?? current.name,
       category: body.category ?? current.category,
@@ -2518,10 +2765,13 @@ async function updateProduct(request, env, id, adminUser = null) {
       material: body.material ?? current.material,
       sizes: body.sizes ?? jsonArray(current.sizes_json),
       description: body.description ?? current.description,
+      specifications: body.specifications ?? current.specifications ?? "",
+      variants: body.variants !== undefined ? sanitizeVariants(body.variants) : jsonArray(current.variants_json),
       images: mergedImages,
       image_keys: Array.isArray(mergedImages) ? keysFromImages(mergedImages) : [],
       thumbnail_images: mergedThumbnailImages,
       thumbnail_keys: mergedThumbnailKeys,
+      thumbnail_source_url: thumbnailSourceUrl,
       subcategory: body.subcategory !== undefined ? String(body.subcategory || "").trim() : (current.subcategory || ""),
       size_chart_url: body.size_chart_url !== undefined ? String(body.size_chart_url || "").trim() : (current.size_chart_url || "")
     };
@@ -2564,6 +2814,8 @@ async function updateProduct(request, env, id, adminUser = null) {
       color: merged.color,
       material: merged.material,
       description: merged.description,
+      specifications: merged.specifications,
+      variants_json: JSON.stringify(merged.variants),
       sizes_json: JSON.stringify(merged.sizes),
       image_url: merged.images[0],
       image_key: merged.image_keys[0] || null,
@@ -2573,6 +2825,7 @@ async function updateProduct(request, env, id, adminUser = null) {
       thumbnail_key: merged.thumbnail_keys[0] || null,
       thumbnail_images_json: JSON.stringify(merged.thumbnail_images),
       thumbnail_keys_json: JSON.stringify(merged.thumbnail_keys),
+      thumbnail_source_url: merged.thumbnail_source_url,
       size_chart_url: merged.size_chart_url,
       subcategory: merged.subcategory,
       cost_price: merged.cost_price,
@@ -2596,19 +2849,21 @@ async function updateProduct(request, env, id, adminUser = null) {
   const updateStatement = env.DB.prepare(`
     UPDATE products SET
       name = ?, category = ?, brand = ?, price = ?, mrp = ?, stock = ?, color = ?, material = ?,
-      description = ?, sizes_json = ?, image_url = ?, image_key = ?, images_json = ?,
-      image_keys_json = ?, thumbnail_url = ?, thumbnail_key = ?, thumbnail_images_json = ?, thumbnail_keys_json = ?,
+      description = ?, specifications = ?, sizes_json = ?, image_url = ?, image_key = ?, images_json = ?,
+      image_keys_json = ?, thumbnail_url = ?, thumbnail_key = ?, thumbnail_images_json = ?, thumbnail_keys_json = ?, thumbnail_source_url = ?,
       variants_json = ?, status = ?, featured = ?, deal_ends_at = ?,
       deal_starts_at = ?, deal_price = ?, size_chart_url = ?, subcategory = ?, cost_price = ?, reorder_point = ?,
-      preorder_enabled = ?, preorder_release_at = ?, preorder_limit = ?, updated_at = CURRENT_TIMESTAMP
+      preorder_enabled = ?, preorder_release_at = ?, preorder_limit = ?, hsn_sac_code = ?, hsn_sac_type = ?,
+      gst_rate = ?, gst_tax_inclusive = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
     next.name, next.category, next.brand, next.price, next.mrp, next.stock, next.color, next.material,
-    next.description, next.sizes_json, next.image_url, next.image_key, next.images_json,
-    next.image_keys_json, next.thumbnail_url ?? null, next.thumbnail_key ?? null, next.thumbnail_images_json ?? "[]", next.thumbnail_keys_json ?? "[]",
+    next.description, next.specifications ?? "", next.sizes_json, next.image_url, next.image_key, next.images_json,
+    next.image_keys_json, next.thumbnail_url ?? null, next.thumbnail_key ?? null, next.thumbnail_images_json ?? "[]", next.thumbnail_keys_json ?? "[]", next.thumbnail_source_url ?? "",
     next.variants_json, next.status, next.featured, next.deal_ends_at ?? null,
     next.deal_starts_at ?? null, next.deal_price ?? null, next.size_chart_url ?? null, next.subcategory ?? "", next.cost_price ?? 0,
-    next.reorder_point ?? 15, next.preorder_enabled ? 1 : 0, next.preorder_release_at ?? null, next.preorder_limit ?? null, id
+    next.reorder_point ?? 15, next.preorder_enabled ? 1 : 0, next.preorder_release_at ?? null, next.preorder_limit ?? null,
+    next.hsn_sac_code ?? "", next.hsn_sac_type ?? "HSN", next.gst_rate ?? null, next.gst_tax_inclusive ? 1 : 0, id
   );
   const updateStatements = sizePlan ? [...sizePlan.statements] : [];
   if (current.variant_group && body.status !== undefined) {
@@ -2782,10 +3037,12 @@ async function trackWishlistEvent(request, env, user) {
 }
 
 async function dashboardStats(env) {
-  const [salesResult, cartResult, wishResult, productResult, customerResult, orderCount, returnCount, stateOrdersResult, hourOrdersResult, recoveryResult, codResult, funnelResult, viewsTotalResult, viewsByDayResult, viewsByPathResult, viewsByReferrerResult, viewsByDeviceResult, viewsByCountryResult] = await Promise.all([
+  const [salesResult, cartResult, wishResult, productResult, customerResult, orderCount, returnCount, stateOrdersResult, hourOrdersResult, recoveryResult, codResult, funnelResult, viewsTotalResult, viewsByDayResult, viewsByPathResult, viewsByReferrerResult, viewsByDeviceResult, viewsByCountryResult, viewsByHourResult, viewsByDayHourResult] = await Promise.all([
     env.DB.prepare(`
       SELECT oi.product_id,
-        SUM(oi.unit_price * oi.quantity) AS revenue,
+        SUM(MAX(0, oi.unit_price * oi.quantity - CAST(ROUND(
+          COALESCE(o.discount, 0) * 1.0 * (oi.unit_price * oi.quantity) / NULLIF(o.subtotal, 0)
+        ) AS INTEGER))) AS revenue,
         SUM(oi.quantity) AS units,
         COUNT(DISTINCT oi.order_id) AS orders
       FROM order_items oi
@@ -2808,7 +3065,7 @@ async function dashboardStats(env) {
       WHERE status != 'cancelled' AND customer_email != ''
       GROUP BY customer_email
     `).all(),
-    env.DB.prepare("SELECT COUNT(*) AS count FROM orders").first(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM orders WHERE status != 'cancelled'").first(),
     env.DB.prepare("SELECT COUNT(*) AS count FROM return_requests WHERE status IN ('refunded', 'completed')").first(),
     env.DB.prepare(`
       SELECT
@@ -2844,7 +3101,14 @@ async function dashboardStats(env) {
           MAX(ca.created_at) AS last_activity,
           SUM(ca.quantity) AS units_added,
           COUNT(DISTINCT ca.product_id) AS product_count,
-          COALESCE(SUM(ca.quantity * p.price), 0) AS estimated_value,
+          COALESCE(SUM(ca.quantity * CASE
+            WHEN p.deal_price > 0
+              AND (p.deal_starts_at IS NULL OR datetime(p.deal_starts_at) <= CURRENT_TIMESTAMP)
+              AND p.deal_ends_at IS NOT NULL
+              AND datetime(p.deal_ends_at) > CURRENT_TIMESTAMP
+            THEN p.deal_price
+            ELSE p.price
+          END), 0) AS estimated_value,
           GROUP_CONCAT(DISTINCT p.name) AS products
         FROM cart_adds ca
         JOIN products p ON p.id = ca.product_id
@@ -2866,7 +3130,7 @@ async function dashboardStats(env) {
       SELECT COUNT(*) AS total,
         SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
       FROM orders
-      WHERE LOWER(COALESCE(payment_method, 'cod')) = 'cod'
+      WHERE LOWER(COALESCE(payment_method, 'cod')) IN ('cod', 'demo')
     `).first()
     , env.DB.prepare(`
       WITH cart_customers AS (
@@ -2883,10 +3147,10 @@ async function dashboardStats(env) {
         ) THEN 1 ELSE 0 END) AS purchasing_customers
       FROM cart_customers
     `).first(),
-    env.DB.prepare("SELECT COUNT(*) AS views FROM page_views WHERE created_at >= datetime('now', '-30 days')").first(),
+    env.DB.prepare("SELECT COUNT(*) AS views FROM page_views WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days')").first(),
     env.DB.prepare(`
       WITH RECURSIVE days(day) AS (
-        SELECT date('now', '+5 hours', '+30 minutes', '-13 days')
+        SELECT date('now', '+5 hours', '+30 minutes', '-29 days')
         UNION ALL SELECT date(day, '+1 day') FROM days WHERE day < date('now', '+5 hours', '+30 minutes')
       )
       SELECT days.day,
@@ -2897,10 +3161,35 @@ async function dashboardStats(env) {
       GROUP BY days.day
       ORDER BY days.day ASC
     `).all(),
-    env.DB.prepare("SELECT path, COUNT(*) AS views FROM page_views WHERE created_at >= datetime('now', '-30 days') GROUP BY path ORDER BY views DESC LIMIT 8").all(),
-    env.DB.prepare("SELECT referrer_host AS source, COUNT(*) AS views FROM page_views WHERE created_at >= datetime('now', '-30 days') AND referrer_host != '' GROUP BY referrer_host ORDER BY views DESC LIMIT 8").all(),
-    env.DB.prepare("SELECT device, COUNT(*) AS views FROM page_views WHERE created_at >= datetime('now', '-30 days') GROUP BY device ORDER BY views DESC").all(),
-    env.DB.prepare("SELECT country, COUNT(*) AS views FROM page_views WHERE created_at >= datetime('now', '-30 days') AND country != '' GROUP BY country ORDER BY views DESC LIMIT 8").all()
+    env.DB.prepare("SELECT path, COUNT(*) AS views FROM page_views WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days') GROUP BY path ORDER BY views DESC LIMIT 8").all(),
+    env.DB.prepare("SELECT referrer_host AS source, COUNT(*) AS views FROM page_views WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days') AND referrer_host != '' GROUP BY referrer_host ORDER BY views DESC LIMIT 8").all(),
+    env.DB.prepare("SELECT device, COUNT(*) AS views FROM page_views WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days') GROUP BY device ORDER BY views DESC").all(),
+    env.DB.prepare("SELECT country, COUNT(*) AS views FROM page_views WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days') AND country != '' GROUP BY country ORDER BY views DESC LIMIT 8").all(),
+    env.DB.prepare(`
+      WITH RECURSIVE hours(hour) AS (
+        SELECT 0
+        UNION ALL
+        SELECT hour + 1 FROM hours WHERE hour < 23
+      )
+      SELECT hours.hour,
+        COUNT(pv.id) AS views
+      FROM hours
+      LEFT JOIN page_views pv
+        ON date(pv.created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days')
+        AND CAST(strftime('%H', datetime(pv.created_at, '+5 hours', '+30 minutes')) AS INTEGER) = hours.hour
+      GROUP BY hours.hour
+      ORDER BY hours.hour ASC
+    `).all(),
+    env.DB.prepare(`
+      SELECT
+        date(created_at, '+5 hours', '+30 minutes') AS day,
+        CAST(strftime('%H', datetime(created_at, '+5 hours', '+30 minutes')) AS INTEGER) AS hour,
+        COUNT(*) AS views
+      FROM page_views
+      WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days')
+      GROUP BY day, hour
+      ORDER BY day ASC, hour ASC
+    `).all()
   ]);
   const products = productResult.results.map(formatProduct);
 
@@ -3022,6 +3311,8 @@ async function dashboardStats(env) {
     visitors: {
       total_30d: Number(viewsTotalResult?.views || 0),
       by_day: viewsByDayResult.results.map(row => ({ day: row.day, views: Number(row.views || 0) })),
+      by_hour: viewsByHourResult.results.map(row => ({ hour: Number(row.hour || 0), views: Number(row.views || 0) })),
+      by_day_hour: viewsByDayHourResult.results.map(row => ({ day: row.day, hour: Number(row.hour || 0), views: Number(row.views || 0) })),
       top_pages: viewsByPathResult.results.map(row => ({ path: row.path, views: Number(row.views || 0) })),
       referrers: viewsByReferrerResult.results.map(row => ({ source: row.source || "direct", views: Number(row.views || 0) })),
       devices: viewsByDeviceResult.results.map(row => ({ device: row.device || "desktop", views: Number(row.views || 0) })),
@@ -3045,30 +3336,260 @@ async function dashboardStats(env) {
   });
 }
 
+function googleAnalyticsCredentials(env) {
+  const propertyId = String(env.GA4_PROPERTY_ID || "")
+    .trim()
+    .replace(/^properties\//i, "");
+  let clientEmail = String(env.GA4_CLIENT_EMAIL || "").trim();
+  let privateKey = String(env.GA4_PRIVATE_KEY || "").trim();
+
+  // Supporting the original service-account JSON export makes local setup
+  // less error-prone while keeping the private key server-side.
+  if ((!clientEmail || !privateKey) && env.GA4_SERVICE_ACCOUNT_JSON) {
+    try {
+      const serviceAccount = JSON.parse(String(env.GA4_SERVICE_ACCOUNT_JSON));
+      clientEmail ||= String(serviceAccount.client_email || "").trim();
+      privateKey ||= String(serviceAccount.private_key || "").trim();
+    } catch {
+      // The normal missing/invalid configuration response below is clearer
+      // than leaking a JSON parsing error to the admin UI.
+    }
+  }
+
+  const missing = [];
+  if (!/^\d+$/.test(propertyId)) missing.push("GA4_PROPERTY_ID");
+  if (!clientEmail) missing.push("GA4_CLIENT_EMAIL");
+  if (!privateKey) missing.push("GA4_PRIVATE_KEY");
+  return { configured: missing.length === 0, missing, propertyId, clientEmail, privateKey };
+}
+
+function pemToDer(privateKey) {
+  const body = String(privateKey)
+    .replace(/\\n/g, "\n")
+    .replace(/-----BEGIN PRIVATE KEY-----/g, "")
+    .replace(/-----END PRIVATE KEY-----/g, "")
+    .replace(/\s+/g, "");
+  return base64UrlToBytes(body);
+}
+
+async function googleAnalyticsAccessToken(credentials) {
+  const now = Math.floor(Date.now() / 1000);
+  if (googleAnalyticsTokenCache.clientEmail === credentials.clientEmail &&
+      googleAnalyticsTokenCache.expiresAt > now + 60) {
+    return googleAnalyticsTokenCache.accessToken;
+  }
+
+  const header = base64UrlEncode(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = base64UrlEncode(JSON.stringify({
+    iss: credentials.clientEmail,
+    scope: "https://www.googleapis.com/auth/analytics.readonly",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600
+  }));
+  const unsignedToken = `${header}.${claims}`;
+  const signingKey = await crypto.subtle.importKey(
+    "pkcs8",
+    pemToDer(credentials.privateKey),
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    signingKey,
+    new TextEncoder().encode(unsignedToken)
+  );
+  const assertion = `${unsignedToken}.${base64UrlEncodeBytes(new Uint8Array(signature))}`;
+  const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion
+    }).toString()
+  });
+  const tokenData = await tokenResponse.json().catch(() => ({}));
+  if (!tokenResponse.ok || !tokenData.access_token) {
+    const detail = String(tokenData.error_description || tokenData.error || "request rejected").slice(0, 160);
+    throw new Error(`Google Analytics authentication failed: ${detail}`);
+  }
+  googleAnalyticsTokenCache = {
+    accessToken: tokenData.access_token,
+    expiresAt: now + Math.min(Number(tokenData.expires_in || 3600), 3600),
+    clientEmail: credentials.clientEmail
+  };
+  return tokenData.access_token;
+}
+
+async function runGoogleAnalyticsReport(credentials, accessToken, requestBody) {
+  const response = await fetch(`https://analyticsdata.googleapis.com/v1beta/properties/${credentials.propertyId}:runReport`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(requestBody)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = String(data.error?.message || data.error?.status || "request rejected").slice(0, 220);
+    throw new Error(`Google Analytics report failed: ${detail}`);
+  }
+  return data;
+}
+
+function googleAnalyticsMetric(row, index) {
+  const value = Number(row?.metricValues?.[index]?.value || 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function googleAnalyticsDimension(row, index) {
+  return String(row?.dimensionValues?.[index]?.value || "").trim();
+}
+
+async function googleAnalyticsReport(env) {
+  const credentials = googleAnalyticsCredentials(env);
+  if (!credentials.configured) {
+    return json({
+      source: "google_analytics_4",
+      configured: false,
+      property_id: credentials.propertyId || null,
+      missing: credentials.missing,
+      setup: "Add the Google Analytics 4 property ID and read-only service-account credentials to the Worker environment."
+    });
+  }
+
+  try {
+    const accessToken = await googleAnalyticsAccessToken(credentials);
+    const dateRanges = [{ startDate: "30daysAgo", endDate: "yesterday" }];
+    const [summaryReport, dailyReport, pagesReport, channelsReport, devicesReport] = await Promise.all([
+      runGoogleAnalyticsReport(credentials, accessToken, {
+        dateRanges,
+        metrics: [
+          { name: "activeUsers" },
+          { name: "newUsers" },
+          { name: "sessions" },
+          { name: "screenPageViews" },
+          { name: "bounceRate" },
+          { name: "engagementRate" }
+        ]
+      }),
+      runGoogleAnalyticsReport(credentials, accessToken, {
+        dateRanges,
+        dimensions: [{ name: "date" }],
+        metrics: [{ name: "activeUsers" }, { name: "sessions" }, { name: "screenPageViews" }],
+        orderBys: [{ dimension: { dimensionName: "date" } }],
+        keepEmptyRows: true,
+        limit: 31
+      }),
+      runGoogleAnalyticsReport(credentials, accessToken, {
+        dateRanges,
+        dimensions: [{ name: "pagePath" }],
+        metrics: [{ name: "screenPageViews" }, { name: "activeUsers" }, { name: "sessions" }],
+        orderBys: [{ metric: { metricName: "screenPageViews" }, desc: true }],
+        limit: 8
+      }),
+      runGoogleAnalyticsReport(credentials, accessToken, {
+        dateRanges,
+        dimensions: [{ name: "sessionDefaultChannelGroup" }],
+        metrics: [{ name: "sessions" }, { name: "activeUsers" }],
+        orderBys: [{ metric: { metricName: "sessions" }, desc: true }],
+        limit: 8
+      }),
+      runGoogleAnalyticsReport(credentials, accessToken, {
+        dateRanges,
+        dimensions: [{ name: "deviceCategory" }],
+        metrics: [{ name: "activeUsers" }, { name: "sessions" }],
+        orderBys: [{ metric: { metricName: "activeUsers" }, desc: true }],
+        limit: 6
+      })
+    ]);
+
+    const summaryRow = summaryReport.rows?.[0] || {};
+    const daily = (dailyReport.rows || []).map((row) => ({
+      date: googleAnalyticsDimension(row, 0),
+      active_users: googleAnalyticsMetric(row, 0),
+      sessions: googleAnalyticsMetric(row, 1),
+      page_views: googleAnalyticsMetric(row, 2)
+    })).sort((a, b) => a.date.localeCompare(b.date));
+    const topPages = (pagesReport.rows || []).map((row) => ({
+      path: googleAnalyticsDimension(row, 0) || "/",
+      page_views: googleAnalyticsMetric(row, 0),
+      active_users: googleAnalyticsMetric(row, 1),
+      sessions: googleAnalyticsMetric(row, 2)
+    })).sort((a, b) => b.page_views - a.page_views);
+    const channels = (channelsReport.rows || []).map((row) => ({
+      channel: googleAnalyticsDimension(row, 0) || "Unassigned",
+      sessions: googleAnalyticsMetric(row, 0),
+      active_users: googleAnalyticsMetric(row, 1)
+    })).sort((a, b) => b.sessions - a.sessions);
+    const devices = (devicesReport.rows || []).map((row) => ({
+      device: googleAnalyticsDimension(row, 0) || "Unknown",
+      active_users: googleAnalyticsMetric(row, 0),
+      sessions: googleAnalyticsMetric(row, 1)
+    })).sort((a, b) => b.active_users - a.active_users);
+
+    return json({
+      source: "google_analytics_4",
+      configured: true,
+      property_id: credentials.propertyId,
+      fetched_at: new Date().toISOString(),
+      period: { start: "30 days ago", end: "yesterday" },
+      summary: {
+        active_users: googleAnalyticsMetric(summaryRow, 0),
+        new_users: googleAnalyticsMetric(summaryRow, 1),
+        sessions: googleAnalyticsMetric(summaryRow, 2),
+        page_views: googleAnalyticsMetric(summaryRow, 3),
+        bounce_rate: googleAnalyticsMetric(summaryRow, 4),
+        engagement_rate: googleAnalyticsMetric(summaryRow, 5)
+      },
+      daily,
+      top_pages: topPages,
+      channels,
+      devices
+    });
+  } catch (error) {
+    console.error("Google Analytics report unavailable", error?.message || error);
+    return json({
+      source: "google_analytics_4",
+      configured: true,
+      property_id: credentials.propertyId,
+      error: String(error?.message || "Google Analytics is unavailable").slice(0, 240)
+    }, 502);
+  }
+}
+
 async function uploadImage(request, env, user) {
   const form = await readFormData(request);
   const file = form.get("file");
   if (!file || typeof file === "string") return json({ error: "Missing image file" }, 400);
-  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm"]);
-  if (!allowedTypes.has(file.type)) return json({ error: "Upload a JPEG, PNG, WebP, GIF, MP4, or WebM file" }, 400);
-  const isThumbnail = form.get("kind") === "product-thumbnail";
-  const isVideo = file.type.startsWith("video/");
-  if (isThumbnail && isVideo) return json({ error: "Product thumbnails must be image files" }, 400);
-  if (file.size > (isThumbnail ? 1 : isVideo ? 15 : 5) * 1024 * 1024) return json({ error: `${isThumbnail ? "Thumbnail" : isVideo ? "Video" : "Image"} must be ${isThumbnail ? "1MB" : isVideo ? "15MB" : "5MB"} or smaller` }, 400);
+  const uploadKind = String(form.get("kind") || "").trim().toLowerCase();
+  if (uploadKind === "review") return json({ error: "Review media uploads are disabled" }, 400);
+  const adminUpload = adminEmails(env, request).includes(String(user?.email || "").trim().toLowerCase());
+  // Every non-review asset is part of the product/admin media workflow. Keep
+  // the legacy empty kind unlimited as well so older listing screens do not
+  // unexpectedly hit the customer upload budget.
+  const productUpload = uploadKind !== "review";
+  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+  if (!allowedTypes.has(file.type)) return json({ error: "Upload a JPEG, PNG, WebP, or GIF image" }, 400);
+  const isThumbnail = uploadKind === "product-thumbnail";
+  if (file.size > (isThumbnail ? 1 : 5) * 1024 * 1024) return json({ error: `${isThumbnail ? "Thumbnail" : "Image"} must be ${isThumbnail ? "1MB" : "5MB"} or smaller` }, 400);
   if (!(await hasValidFileSignature(file, file.type))) return json({ error: "The uploaded file content does not match its type" }, 400);
 
   const extension = file.type.split("/")[1]?.replace("jpeg", "jpg") || "bin";
-  const kind = form.get("kind") === "review" ? "reviews" : isThumbnail ? "products/thumbs" : "products";
+  const kind = isThumbnail ? "products/thumbs" : "products";
   const ownerKey = await hashIdentifier(user.email);
   const key = `${kind}/${ownerKey}/${crypto.randomUUID()}.${extension}`;
-  await reserveUploadQuota(env, user.email, file.size);
+  const quotaRequired = !adminUpload && !productUpload;
+  if (quotaRequired) await reserveUploadQuota(env, user.email, file.size);
   try {
     await env.PRODUCT_IMAGES.put(key, file, {
       httpMetadata: { contentType: file.type },
       customMetadata: { uploadedBy: user.email }
     });
   } catch (error) {
-    await releaseUploadQuota(env, user.email, file.size).catch(() => null);
+    if (quotaRequired) await releaseUploadQuota(env, user.email, file.size).catch(() => null);
     throw error;
   }
   return json({ imageUrl: `/api/assets/${key}`, imageKey: key, mediaType: file.type });
@@ -3082,8 +3603,6 @@ async function hasValidFileSignature(file, type) {
   if (type === "image/jpeg") return startsWith([0xff, 0xd8, 0xff]);
   if (type === "image/gif") return text(0, 6) === "GIF87a" || text(0, 6) === "GIF89a";
   if (type === "image/webp") return text(0, 4) === "RIFF" && text(8, 12) === "WEBP";
-  if (type === "video/mp4") return text(4, 8) === "ftyp";
-  if (type === "video/webm") return startsWith([0x1a, 0x45, 0xdf, 0xa3]);
   return false;
 }
 
@@ -3103,7 +3622,7 @@ async function releaseUploadQuota(env, email, bytes) {
     .bind(bytes, String(email).toLowerCase(), usageDate).run();
 }
 
-async function serveR2Asset(env, rawKey) {
+async function serveR2Asset(env, rawKey, headOnly = false) {
   let key = rawKey;
   try {
     key = decodeURIComponent(rawKey);
@@ -3115,8 +3634,9 @@ async function serveR2Asset(env, rawKey) {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
+  headers.set("content-length", String(object.size));
   headers.set("cache-control", "public, max-age=31536000, immutable");
-  return new Response(object.body, { headers });
+  return new Response(headOnly ? null : object.body, { headers });
 }
 
 async function hasPurchasedProduct(env, email, productId) {
@@ -3281,7 +3801,7 @@ async function updateAdminNotification(request, env, id) {
 
 async function listReviews(env, productId, user) {
   const { results } = await env.DB.prepare(
-    "SELECT id, product_id, user_email, user_name, rating, comment, media_json, status, verified, created_at FROM reviews WHERE product_id = ? AND status = 'visible' ORDER BY verified DESC, created_at DESC"
+    "SELECT id, product_id, user_email, user_name, rating, comment, status, verified, created_at FROM reviews WHERE product_id = ? AND status = 'visible' ORDER BY verified DESC, created_at DESC"
   ).bind(productId).all();
   const count = results.length;
   const average = count ? Math.round((results.reduce((sum, r) => sum + r.rating, 0) / count) * 10) / 10 : 0;
@@ -3292,7 +3812,6 @@ async function listReviews(env, productId, user) {
       user_name: row.user_name,
       rating: row.rating,
       comment: row.comment,
-      media: parseReviewMedia(row.media_json),
       status: row.status,
       verified: Number(row.verified || 0),
       created_at: row.created_at
@@ -3303,31 +3822,19 @@ async function listReviews(env, productId, user) {
   if (user) {
     response.has_purchased = await hasPurchasedProduct(env, user.email, productId);
     response.my_review = await env.DB.prepare(
-      "SELECT id, rating, comment, media_json, status, verified FROM reviews WHERE product_id = ? AND user_email = ?"
+      "SELECT id, rating, comment, status, verified FROM reviews WHERE product_id = ? AND user_email = ?"
     ).bind(productId, user.email).first() || null;
-    if (response.my_review) response.my_review.media = parseReviewMedia(response.my_review.media_json);
   }
   return json(response);
 }
 
 async function upsertReview(request, env, user, productId) {
   const body = await readJson(request);
+  if (body?.media !== undefined) throw httpError("Review media uploads are disabled", 400);
   const rating = Math.floor(Number(body.rating));
   const comment = String(body.comment || "").trim();
-  const media = Array.isArray(body.media) ? body.media.slice(0, 3).map(entry => ({
-    url: String(entry?.url || "").trim(),
-    key: String(entry?.key || "").trim(),
-    type: String(entry?.type || "").trim().toLowerCase()
-  })).filter(entry => entry.url && entry.key && ["image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm"].includes(entry.type)) : [];
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw httpError("Rating must be 1-5", 400);
   if (comment.length < 3 || comment.length > 500) throw httpError("Review must be 3-500 characters", 400);
-  if (Array.isArray(body.media) && body.media.length > 3) throw httpError("Attach no more than 3 photos or videos", 400);
-  const ownerKey = await hashIdentifier(user.email);
-  const legacyOwnerPrefix = `reviews/${user.email}/`;
-  const currentOwnerPrefix = `reviews/${ownerKey}/`;
-  if (media.some(entry => (!(entry.key.startsWith(currentOwnerPrefix) || entry.key.startsWith(legacyOwnerPrefix))) || !entry.url.startsWith("/api/assets/"))) {
-    throw httpError("Review media must be uploaded through Glamia", 400);
-  }
   const product = await env.DB.prepare("SELECT id, name FROM products WHERE id = ?").bind(productId).first();
   if (!product) return json({ error: "Product not found" }, 404);
   const verified = (await hasPurchasedProduct(env, user.email, productId)) ? 1 : 0;
@@ -3335,16 +3842,15 @@ async function upsertReview(request, env, user, productId) {
     .bind(productId, user.email).first();
   const reviewId = existing?.id || crypto.randomUUID();
   await env.DB.prepare(`
-    INSERT INTO reviews (id, product_id, user_email, user_name, rating, comment, media_json, status, verified)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'visible', ?)
+    INSERT INTO reviews (id, product_id, user_email, user_name, rating, comment, status, verified)
+    VALUES (?, ?, ?, ?, ?, ?, 'visible', ?)
     ON CONFLICT(product_id, user_email) DO UPDATE SET
       rating = excluded.rating,
       comment = excluded.comment,
-      media_json = excluded.media_json,
       user_name = excluded.user_name,
       verified = excluded.verified,
       created_at = CURRENT_TIMESTAMP
-  `).bind(reviewId, productId, user.email, user.name || user.email, rating, comment, JSON.stringify(media), verified).run();
+  `).bind(reviewId, productId, user.email, user.name || user.email, rating, comment, verified).run();
   await createAdminNotification(env, {
     type: "new_review",
     title: existing ? "Rating updated" : "New review received",
@@ -3458,25 +3964,15 @@ function formatReviewRow(row) {
     user_name: row.user_name,
     rating: row.rating,
     comment: row.comment,
-    media: parseReviewMedia(row.media_json),
     status: row.status || "visible",
     verified: Boolean(row.verified),
     created_at: row.created_at
   };
 }
 
-function parseReviewMedia(value) {
-  try {
-    const media = JSON.parse(value || "[]");
-    return Array.isArray(media) ? media : [];
-  } catch {
-    return [];
-  }
-}
-
 async function listMyReviews(env, user) {
   const { results } = await env.DB.prepare(`
-    SELECT r.id, r.product_id, r.user_email, r.user_name, r.rating, r.comment, r.media_json, r.status, r.created_at,
+    SELECT r.id, r.product_id, r.user_email, r.user_name, r.rating, r.comment, r.status, r.created_at,
       p.name AS product_name, p.image_url AS product_image
     FROM reviews r
     LEFT JOIN products p ON p.id = r.product_id
@@ -3488,7 +3984,7 @@ async function listMyReviews(env, user) {
 
 async function listAllReviews(env) {
   const { results } = await env.DB.prepare(`
-    SELECT r.id, r.product_id, r.user_email, r.user_name, r.rating, r.comment, r.media_json, r.status, r.created_at,
+    SELECT r.id, r.product_id, r.user_email, r.user_name, r.rating, r.comment, r.status, r.created_at,
       p.name AS product_name, p.image_url AS product_image
     FROM reviews r
     LEFT JOIN products p ON p.id = r.product_id
@@ -3509,6 +4005,11 @@ async function moderateReview(request, env, id) {
 async function deleteReview(env, id) {
   await env.DB.prepare("DELETE FROM reviews WHERE id = ?").bind(id).run();
   return json({ ok: true });
+}
+
+function formatPaymentMethod(value) {
+  const normalized = String(value || "demo").trim().toLowerCase();
+  return ["cod", "demo"].includes(normalized) ? "demo" : normalized;
 }
 
 function formatOrder(row) {
@@ -3536,8 +4037,9 @@ function formatOrder(row) {
     coupon_code: row.coupon_code,
     total: row.total,
     status: row.status,
-    payment_method: row.payment_method || "cod",
+    payment_method: formatPaymentMethod(row.payment_method),
     payment_status: row.payment_status || "pending",
+    tracking_token: row.tracking_token || "",
     tracking_number: row.tracking_number || "",
     order_type: row.order_type || "standard",
     replacement_for_order_id: row.replacement_for_order_id || null,
@@ -3559,7 +4061,7 @@ async function listOrders(env, user, scope) {
     requireAdmin(user);
     const { results } = await env.DB.prepare(`
       SELECT id, order_number, customer_email, customer_name, items_json, subtotal, discount,
-        coupon_code, total, status, payment_method, payment_status, tracking_number,
+        coupon_code, total, status, payment_method, payment_status, tracking_token, tracking_number,
         order_type, replacement_for_order_id, replacement_request_id, shipping_json,
         created_at, updated_at
       FROM orders
@@ -3573,23 +4075,26 @@ async function listOrders(env, user, scope) {
   return json({ orders: results.map(formatOrder) });
 }
 
-async function trackPublicOrder(env, rawOrderId) {
+async function trackPublicOrder(env, rawOrderId, rawEmail) {
   const orderId = String(rawOrderId || "").trim();
+  const email = String(rawEmail || "").trim().toLowerCase();
   if (!orderId || orderId.length > 100) return json({ error: "Enter an order ID to track" }, 400);
+  if (email.length > 254) return json({ error: "Enter a valid email address" }, 400);
   const row = await env.DB.prepare(`
     SELECT id, order_number, items_json, status, payment_method, tracking_number,
       order_type, created_at, updated_at
     FROM orders
-    WHERE order_number = ? OR id = ?
+    WHERE tracking_token = ?
+      OR ((order_number = ? OR id = ?) AND customer_email = ?)
     LIMIT 1
-  `).bind(orderId, orderId).first();
+  `).bind(orderId, orderId, orderId, email).first();
   if (!row) return json({ error: "We could not find an order with that ID" }, 404);
   let rawItems = [];
   try { rawItems = JSON.parse(row.items_json || "[]"); } catch { rawItems = []; }
   return json({ order: {
     order_number: row.order_number || fallbackOrderNumber(row),
     status: row.status || "pending",
-    payment_method: row.payment_method || "cod",
+    payment_method: formatPaymentMethod(row.payment_method),
     tracking_number: row.tracking_number || "",
     order_type: row.order_type || "standard",
     created_at: row.created_at,
@@ -3671,15 +4176,14 @@ async function createOrder(request, env, user) {
     country: normalizedAddress.country
   };
 
-  const paymentMethod = ["cod", "upi", "card"].includes(body.payment_method) ? body.payment_method : "cod";
-  if (paymentMethod === "cod") {
-    const storefront = await storefrontSettingsObject(env);
-    if (!storefront.payments.cod_enabled) {
-      throw httpError("Cash on Delivery is currently unavailable. Please choose another payment method.", 409);
-    }
+  const requestedPaymentMethod = String(body.payment_method || "demo").trim().toLowerCase();
+  if (requestedPaymentMethod && !["demo", "cod"].includes(requestedPaymentMethod)) {
+    throw httpError("Only demo payments are available right now. No money will be charged.", 400);
   }
-  if (!user && paymentMethod !== "cod") {
-    throw httpError("Demo guest checkout is available for Cash on Delivery only", 401);
+  const paymentMethod = "demo";
+  const storefront = await storefrontSettingsObject(env);
+  if (!storefront.payments.cod_enabled) {
+    throw httpError("Demo checkout is currently unavailable. Please contact support for help.", 409);
   }
   const customerEmail = user
     ? String(user.email || "").trim().toLowerCase()
@@ -3687,7 +4191,8 @@ async function createOrder(request, env, user) {
   if (!user && (customerEmail.length > 254 || !isRealCustomerEmail(customerEmail))) {
     throw httpError("Enter a valid email for order confirmation and delivery updates", 400);
   }
-  const paymentStatus = paymentMethod === "cod" ? "pending" : "paid";
+  const paymentStatus = "demo";
+  const trackingToken = crypto.randomUUID().replace(/-/g, "");
 
   const [catalog, sizeRowsByProduct] = await Promise.all([
     loadLiveProductsById(env, requested),
@@ -3739,7 +4244,11 @@ async function createOrder(request, env, user) {
       color: row.color,
       image: row.image_url,
       preorder: Boolean(row.preorder_enabled),
-      preorder_release_at: row.preorder_release_at || null
+      preorder_release_at: row.preorder_release_at || null,
+      hsn_sac_code: row.hsn_sac_code || "",
+      hsn_sac_type: row.hsn_sac_type || "HSN",
+      gst_rate: row.gst_rate === null || row.gst_rate === undefined ? null : Number(row.gst_rate),
+      gst_tax_inclusive: row.gst_tax_inclusive === undefined ? true : Boolean(row.gst_tax_inclusive)
     });
   }
 
@@ -3820,10 +4329,10 @@ async function createOrder(request, env, user) {
     `).bind(sizeAdjustmentsJson, sizeAdjustmentsJson));
   }
   checkoutStatements.push(env.DB.prepare(`
-      INSERT INTO orders (id, order_number, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_status, shipping_json, order_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+      INSERT INTO orders (id, order_number, tracking_token, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_status, shipping_json, order_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
     `).bind(
-      id, orderNumber, customerEmail, customerName, JSON.stringify(items), subtotal, discount,
+      id, orderNumber, trackingToken, customerEmail, customerName, JSON.stringify(items), subtotal, discount,
       couponCode, total, paymentMethod, paymentStatus, JSON.stringify(address), orderType
     ));
 
@@ -3837,12 +4346,14 @@ async function createOrder(request, env, user) {
   }));
   checkoutStatements.push(env.DB.prepare(`
     INSERT INTO order_items
-      (id, order_id, product_id, product_name, unit_price, quantity, size, variant, color, image_url)
+      (id, order_id, product_id, product_name, unit_price, quantity, size, variant, color, image_url,
+       hsn_sac_code, hsn_sac_type, gst_rate, gst_tax_inclusive)
     SELECT
       json_extract(value, '$.lineId'), ?, json_extract(value, '$.id'), json_extract(value, '$.name'),
       CAST(json_extract(value, '$.price') AS INTEGER), CAST(json_extract(value, '$.quantity') AS INTEGER),
       json_extract(value, '$.size'), json_extract(value, '$.variant'), json_extract(value, '$.color'),
-      json_extract(value, '$.image')
+      json_extract(value, '$.image'), json_extract(value, '$.hsn_sac_code'), json_extract(value, '$.hsn_sac_type'),
+      CAST(json_extract(value, '$.gst_rate') AS REAL), CAST(json_extract(value, '$.gst_tax_inclusive') AS INTEGER)
     FROM json_each(?)
   `).bind(id, JSON.stringify(orderItemRows)));
 
@@ -3910,6 +4421,10 @@ async function cancelOwnOrder(request, env, user, id) {
   if (!["pending", "confirmed"].includes(current.status)) {
     return json({ error: "This order can no longer be cancelled. Please request a return instead." }, 409);
   }
+  const createdAt = Date.parse(current.created_at || "");
+  if (Number.isFinite(createdAt) && Date.now() - createdAt > CANCELLATION_WINDOW_DAYS * 24 * 60 * 60 * 1000) {
+    return json({ error: `This order is outside the ${CANCELLATION_WINDOW_DAYS}-day cancellation window. Please request a return instead.` }, 409);
+  }
   const results = await env.DB.batch([
     env.DB.prepare(`
       INSERT OR IGNORE INTO order_stock_releases (order_id)
@@ -3933,6 +4448,9 @@ async function cancelOwnOrder(request, env, user, id) {
     dedupeKey: `cancelled-order:${id}`,
     orderId: id
   }).catch(() => null);
+  if (Number(results[1]?.meta?.changes || 0) === 1) {
+    await sendOrderEmail(env, updated, "cancelled");
+  }
   return json({ order: formatOrder(updated) });
 }
 
@@ -3954,8 +4472,8 @@ async function createReturnRequest(request, env, user, orderId) {
   const order = await env.DB.prepare("SELECT * FROM orders WHERE id = ? AND customer_email = ?")
     .bind(orderId, String(user.email || "").trim().toLowerCase()).first();
   if (!order) return json({ error: "Order not found" }, 404);
-  if (order.payment_method === "cod" && refundDestination === "original") {
-    return json({ error: "Cash-on-delivery refunds are available only as Glamia store credits" }, 400);
+  if (["cod", "demo"].includes(order.payment_method) && refundDestination === "original") {
+    return json({ error: "Demo-payment refunds are available only as Glamia store credits" }, 400);
   }
   if (order.status !== "delivered") return json({ error: "Returns and refunds open after delivery" }, 409);
   const deliveredAt = new Date(order.updated_at || order.created_at).getTime();
@@ -4026,7 +4544,9 @@ async function createReturnRequest(request, env, user, orderId) {
     order_id: orderId, type: requestedType, refund_destination: refundDestination,
     exchange_product_id: exchangeProductId || null, exchange_to_size: exchangeToSize || null
   });
-  return json({ request: await getReturnRequest(env, id), replacement_order: replacementOrder }, 201);
+  const createdRequest = await getReturnRequest(env, id);
+  await sendReturnEmail(env, createdRequest, "requested");
+  return json({ request: createdRequest, replacement_order: replacementOrder }, 201);
 }
 
 async function createReplacementOrder(env, originalOrder, exchangeItem, replacementSize, requestId) {
@@ -4047,14 +4567,15 @@ async function createReplacementOrder(env, originalOrder, exchangeItem, replacem
   const id = crypto.randomUUID();
   const sequence = await nextOrderSequence(env);
   const orderNumber = buildOrderNumber(productNameInitials(item.name), sequence);
+  const trackingToken = crypto.randomUUID().replace(/-/g, "");
   const reservation = { id: crypto.randomUUID(), productId: product.id, size: replacementSize, quantity };
   const statements = [
     env.DB.prepare(`
       INSERT INTO orders
-        (id, order_number, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_status, shipping_json, order_type, replacement_for_order_id, replacement_request_id)
-      VALUES (?, ?, ?, ?, ?, 0, 0, NULL, 0, 'pending', 'replacement', 'not_required', ?, 'replacement', ?, ?)
+        (id, order_number, tracking_token, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_status, shipping_json, order_type, replacement_for_order_id, replacement_request_id)
+      VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, 0, 'pending', 'replacement', 'not_required', ?, 'replacement', ?, ?)
     `).bind(
-      id, orderNumber, originalOrder.customer_email, originalOrder.customer_name,
+      id, orderNumber, trackingToken, originalOrder.customer_email, originalOrder.customer_name,
       JSON.stringify([item]), originalOrder.shipping_json || null,
       originalOrder.id, requestId
     ),
@@ -4165,15 +4686,29 @@ async function listReturns(env, user, scope) {
 async function updateReturnRequest(request, env, user, id) {
   const body = await readJson(request);
   const status = String(body.status || "").trim().toLowerCase();
-  if (!["requested", "approved", "rejected", "received", "refunded", "completed", "cancelled"].includes(status)) {
+  const returnStatuses = ["requested", "approved", "rejected", "received", "refunded", "completed", "cancelled"];
+  if (!returnStatuses.includes(status)) {
     return json({ error: "Invalid after-sales status" }, 400);
   }
   const current = await env.DB.prepare("SELECT * FROM return_requests WHERE id = ?").bind(id).first();
   if (!current) return json({ error: "After-sales request not found" }, 404);
+  const allowedTransitions = {
+    requested: new Set(["approved", "rejected", "cancelled"]),
+    approved: new Set(["received", "refunded", "rejected", "cancelled"]),
+    received: new Set(["refunded", "rejected", "cancelled"]),
+    refunded: new Set(["completed"]),
+    rejected: new Set(),
+    completed: new Set(),
+    cancelled: new Set()
+  };
+  if (status !== current.status && !allowedTransitions[current.status]?.has(status)) {
+    return json({ error: `Cannot move an after-sales request from ${current.status} to ${status}` }, 409);
+  }
+  if (status === current.status) return json({ request: await getReturnRequest(env, id) });
   const notes = String(body.notes ?? current.notes ?? "").trim().slice(0, 1000);
   const order = current.order_id ? await env.DB.prepare("SELECT total, payment_method FROM orders WHERE id = ?").bind(current.order_id).first() : null;
   const orderTotal = Math.max(0, Math.floor(Number(order?.total) || 0));
-  const refundDestination = order?.payment_method === "cod" ? "store_credit" : (current.refund_destination || "original");
+  const refundDestination = ["cod", "demo"].includes(order?.payment_method) ? "store_credit" : (current.refund_destination || "original");
   const refundAmount = body.refund_amount === "" || body.refund_amount === null || body.refund_amount === undefined
     ? Math.max(0, Math.floor(Number(current.refund_amount) || orderTotal))
     : Math.floor(Number(body.refund_amount));
@@ -4185,15 +4720,18 @@ async function updateReturnRequest(request, env, user, id) {
     .bind(status, notes, refundAmount, processedAt, refundDestination, id)];
   if (status === "refunded" && current.status !== "refunded" && refundDestination === "store_credit") {
     const customerEmail = String(current.customer_email || "").trim().toLowerCase();
-    statements.push(env.DB.prepare(`INSERT INTO store_credit_accounts (user_email, balance, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(user_email) DO UPDATE SET balance = store_credit_accounts.balance + excluded.balance, updated_at = CURRENT_TIMESTAMP`)
-      .bind(customerEmail, refundAmount));
-    statements.push(env.DB.prepare("INSERT INTO store_credit_ledger (id, user_email, amount, kind, description, order_id) VALUES (?, ?, ?, 'refund', ?, ?)")
-      .bind(crypto.randomUUID(), customerEmail, refundAmount, `Refund credit for ${current.order_id}`, current.order_id));
+    statements.push(env.DB.prepare("INSERT OR IGNORE INTO store_credit_ledger (id, user_email, amount, kind, description, order_id, return_request_id) VALUES (?, ?, ?, 'refund', ?, ?, ?)")
+      .bind(crypto.randomUUID(), customerEmail, refundAmount, `Refund credit for ${current.order_id}`, current.order_id, id));
+    statements.push(env.DB.prepare(`INSERT INTO store_credit_accounts (user_email, balance, updated_at)
+      SELECT ?, COALESCE(SUM(amount), 0), CURRENT_TIMESTAMP FROM store_credit_ledger WHERE user_email = ?
+      ON CONFLICT(user_email) DO UPDATE SET balance = excluded.balance, updated_at = CURRENT_TIMESTAMP`)
+      .bind(customerEmail, customerEmail));
   }
   await env.DB.batch(statements);
   await writeAuditLog(env, user.email, "update_return_request", "return_request", id, { from: current.status, to: status });
-  return json({ request: await getReturnRequest(env, id) });
+  const updatedRequest = await getReturnRequest(env, id);
+  await sendReturnEmail(env, updatedRequest, status);
+  return json({ request: updatedRequest });
 }
 
 async function getLoyalty(env, user) {
@@ -4262,11 +4800,12 @@ async function deleteRestockSubscription(request, env, user) {
 
 async function healthCheck(env) {
   const started = Date.now();
+  const emailConfigured = Boolean(String(env.BREVO_API_KEY || "").trim() && String(env.BREVO_FROM_EMAIL || "").trim());
   try {
     const row = await env.DB.prepare("SELECT 1 AS ok").first();
-    return json({ ok: row?.ok === 1, service: "glamia", database: "ok", checked_at: new Date().toISOString(), latency_ms: Date.now() - started });
+    return json({ ok: row?.ok === 1, service: "glamia", database: "ok", email_delivery: emailConfigured ? "configured" : "not_configured", checked_at: new Date().toISOString(), latency_ms: Date.now() - started });
   } catch {
-    return json({ ok: false, service: "glamia", database: "unavailable", checked_at: new Date().toISOString() }, 503);
+    return json({ ok: false, service: "glamia", database: "unavailable", email_delivery: emailConfigured ? "configured" : "not_configured", checked_at: new Date().toISOString() }, 503);
   }
 }
 
@@ -4386,7 +4925,14 @@ async function updateSupportTicket(request, env, user, id) {
 }
 
 async function exportBackup(env, adminUser) {
-  const tables = ["users", "products", "orders", "order_items", "inventory_reservations", "order_stock_releases", "coupons", "coupon_email_targets", "coupon_redemptions", "user_addresses", "return_requests", "store_credit_accounts", "store_credit_ledger", "referral_codes", "referral_rewards", "support_tickets", "support_messages", "product_questions", "email_delivery_log", "admin_audit_log"];
+  const tables = [
+    "users", "products", "product_sizes", "reviews", "hero_slides", "categories", "subcategories",
+    "storefront_settings", "orders", "order_items", "inventory_reservations", "order_stock_releases",
+    "coupons", "coupon_email_targets", "coupon_redemptions", "user_addresses", "profile_phones",
+    "return_requests", "store_credit_accounts", "store_credit_ledger", "referral_codes", "referral_rewards",
+    "support_tickets", "support_messages", "product_questions", "restock_subscriptions", "email_delivery_log",
+    "admin_notifications", "admin_audit_log", "cart_adds", "wishlist_adds", "upload_usage", "page_views", "counters"
+  ];
   const backup = { generated_at: new Date().toISOString(), tables: {} };
   const tableResults = await env.DB.batch(tables.map(table => env.DB.prepare(`SELECT * FROM ${table}`)));
   tables.forEach((table, index) => { backup.tables[table] = tableResults[index].results || []; });
@@ -4444,8 +4990,12 @@ async function updateOrderStatus(request, env, id, adminUser = null) {
       dedupeKey: `cancelled-order:${id}`,
       orderId: id
     }).catch(() => null);
+    await sendOrderEmail(env, updated, "cancelled");
   }
-  if (nextStatus === "delivered" && !current.delivery_email_sent_at) {
+  if (nextStatus === "shipped" && current.status !== "shipped") {
+    await sendOrderEmail(env, updated, "shipped");
+  }
+  if (nextStatus === "delivered" && current.status !== "delivered" && !current.delivery_email_sent_at) {
     const deliverySent = await sendOrderEmail(env, updated, "delivery");
     if (deliverySent) {
       await env.DB.prepare("UPDATE orders SET delivery_email_sent_at = CURRENT_TIMESTAMP WHERE id = ?")
@@ -4456,46 +5006,64 @@ async function updateOrderStatus(request, env, id, adminUser = null) {
 }
 
 async function sendOrderEmail(env, row, type) {
-  const apiKey = String(env.BREVO_API_KEY || "").trim();
   const fromEmail = String(env.BREVO_FROM_EMAIL || "").trim();
   const recipient = String(row?.customer_email || "").trim();
-  if (!apiKey || !fromEmail || !isRealCustomerEmail(recipient)) return false;
+  if (!isRealCustomerEmail(recipient)) return false;
 
+  const emailType = ["confirmation", "shipped", "delivery", "cancelled"].includes(type) ? type : "confirmation";
   const order = formatOrder(row);
-  const isDelivery = type === "delivery";
+  const isReplacement = order.order_type === "replacement";
+  const isPreorder = order.order_type === "preorder" || order.items.some(item => item.preorder);
+  const orderLabel = isReplacement ? "replacement order" : "order";
   const itemLines = order.items.map(item => {
     const selection = [item.size, item.variant, item.color].filter(Boolean).join(" · ");
     const details = selection ? ` (${selection})` : "";
     return `${item.name}${details} · Qty ${item.quantity} · ${formatInr(item.price * item.quantity)}`;
   });
   const firstName = String(order.customer_name || "there").trim().split(/\s+/)[0] || "there";
-  const subject = isDelivery
-    ? `Your Glamia ${order.order_type === "replacement" ? "replacement order" : "order"} ${order.order_number} has been delivered`
-    : `${order.order_type === "replacement" ? "Replacement order" : "Order"} ${order.order_number} confirmed · Glamia`;
-  const eventLabel = isDelivery
-    ? `Your ${order.order_type === "replacement" ? "replacement product order" : "order"} has been delivered`
-    : order.order_type === "replacement" ? "Your replacement product order is confirmed" : "Thank you for your order";
-  const eventTime = isDelivery ? order.updated_at : order.created_at;
+  const subject = {
+    confirmation: `${isReplacement ? "Replacement order" : "Order"} ${order.order_number} received · Glamia`,
+    shipped: `Your Glamia ${orderLabel} ${order.order_number} is on the way`,
+    delivery: `Your Glamia ${orderLabel} ${order.order_number} has been delivered`,
+    cancelled: `Your Glamia ${orderLabel} ${order.order_number} was cancelled`
+  }[emailType];
+  const eventLabel = {
+    confirmation: isReplacement ? "Your replacement product order is ready" : "Thank you for your order",
+    shipped: `Your ${orderLabel} is on the way`,
+    delivery: `Your ${orderLabel} has been delivered`,
+    cancelled: `Your ${orderLabel} has been cancelled`
+  }[emailType];
+  const eventTime = emailType === "confirmation" ? order.created_at : order.updated_at;
   const shipping = order.shipping || {};
   const shippingLine = [shipping.line1, shipping.line2, shipping.city, shipping.state, shipping.pin, shipping.country || "India"]
     .filter(Boolean).join(", ");
+  const trackingLine = order.tracking_number ? `Tracking number: ${order.tracking_number}` : "";
+  const preorderLine = isPreorder ? "This order includes a pre-order item. We’ll keep you updated as it moves toward dispatch." : "";
+  const statusLine = emailType === "cancelled"
+    ? "If you did not request this cancellation, please contact Glamia support."
+    : emailType === "shipped" && !trackingLine
+      ? "Your tracking details will be shared as soon as they are available."
+      : "";
   const htmlItems = order.items.map(item => {
     const selection = [item.size, item.variant, item.color].filter(Boolean).join(" · ");
     return `<li><strong>${escapeHtml(item.name)}</strong>${selection ? ` · ${escapeHtml(selection)}` : ""} · Qty ${Number(item.quantity) || 0} · ${formatInr(item.price * item.quantity)}</li>`;
   }).join("");
-  const htmlContent = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#241f18;line-height:1.6"><h1 style="letter-spacing:.18em">GLAMIA</h1><p>Hi ${escapeHtml(firstName)},</p><h2>${escapeHtml(eventLabel)}</h2><p>Order <strong>${escapeHtml(order.order_number)}</strong> · ${escapeHtml(formatOrderDate(eventTime))}</p><ul>${htmlItems}</ul><p>Subtotal: ${formatInr(order.subtotal)}<br>Discount: ${formatInr(order.discount)}<br><strong>Total: ${formatInr(order.total)}</strong></p><p>Payment: ${escapeHtml(String(order.payment_method || "cod").toUpperCase())}</p>${shippingLine ? `<p>Delivery address: ${escapeHtml(shippingLine)}</p>` : ""}<p>Warmly,<br>Team Glamia</p></body></html>`;
+  const htmlContent = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#241f18;line-height:1.6"><h1 style="letter-spacing:.18em">GLAMIA</h1><p>Hi ${escapeHtml(firstName)},</p><h2>${escapeHtml(eventLabel)}</h2><p>Order <strong>${escapeHtml(order.order_number)}</strong> · ${escapeHtml(formatOrderDate(eventTime))}</p>${statusLine ? `<p>${escapeHtml(statusLine)}</p>` : ""}${trackingLine ? `<p>${escapeHtml(trackingLine)}</p>` : ""}${preorderLine ? `<p>${escapeHtml(preorderLine)}</p>` : ""}<ul>${htmlItems}</ul><p>Subtotal: ${formatInr(order.subtotal)}<br>Discount: ${formatInr(order.discount)}<br><strong>Total: ${formatInr(order.total)}</strong></p><p>Payment: ${escapeHtml(formatPaymentMethod(order.payment_method).toUpperCase())}</p>${shippingLine ? `<p>Delivery address: ${escapeHtml(shippingLine)}</p>` : ""}<p>Warmly,<br>Team Glamia</p></body></html>`;
   const textContent = [
     `Hi ${firstName},`,
     "",
     eventLabel,
     `Order ${order.order_number} · ${formatOrderDate(eventTime)}`,
+    statusLine,
+    trackingLine,
+    preorderLine,
     "",
     ...itemLines,
     "",
     `Subtotal: ${formatInr(order.subtotal)}`,
     `Discount: ${formatInr(order.discount)}`,
     `Total: ${formatInr(order.total)}`,
-    `Payment: ${String(order.payment_method || "cod").toUpperCase()}`,
+    `Payment: ${formatPaymentMethod(order.payment_method).toUpperCase()}`,
     shippingLine ? `Delivery address: ${shippingLine}` : "",
     "",
     "Warmly,",
@@ -4503,7 +5071,8 @@ async function sendOrderEmail(env, row, type) {
   ].filter(Boolean).join("\n");
 
   return deliverBrevoEmail(env, {
-    eventType: isDelivery ? "order-delivered" : "order-confirmation",
+    eventType: `order-${emailType}`,
+    dedupeKey: `order:${order.id}:${emailType}`,
     recipient,
     userEmail: recipient,
     orderId: order.id,
@@ -4517,13 +5086,80 @@ async function sendOrderEmail(env, row, type) {
   });
 }
 
-async function deliverBrevoEmail(env, { eventType, recipient, userEmail = null, orderId = null, payload, existingId = null }) {
-  const id = existingId || crypto.randomUUID();
-  if (!existingId) {
-    await env.DB.prepare(`INSERT INTO email_delivery_log (id, event_type, recipient, order_id, user_email, payload_json, status, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)`)
-      .bind(id, eventType, recipient, orderId, userEmail, JSON.stringify(payload)).run().catch(() => null);
+async function sendReturnEmail(env, returnRequest, status) {
+  const fromEmail = String(env.BREVO_FROM_EMAIL || "").trim();
+  const recipient = String(returnRequest?.customer_email || returnRequest?.order?.customer_email || "").trim();
+  if (!isRealCustomerEmail(recipient) || !returnRequest?.id) return false;
+
+  const requestType = returnRequest.type === "exchange" ? "exchange" : "return/refund";
+  const orderNumber = returnRequest.order?.order_number || returnRequest.order_id || "your order";
+  const statusCopy = {
+    requested: "We’ve received your request and our team will review it shortly.",
+    approved: "Your request has been approved. We’ll share the next steps shortly.",
+    rejected: "We’re unable to approve this request. Please contact Glamia support if you need help.",
+    received: "We’ve received the returned item and will complete the next step shortly.",
+    refunded: returnRequest.refund_destination === "store_credit"
+      ? `A store credit of ${formatInr(returnRequest.refund_amount)} has been added to your Glamia account.`
+      : `Your refund of ${formatInr(returnRequest.refund_amount)} has been marked for processing.`,
+    completed: "Your after-sales request is now complete.",
+    cancelled: "Your after-sales request has been cancelled."
+  }[status] || "Your after-sales request has been updated.";
+  const firstName = String(returnRequest.order?.customer_name || recipient).trim().split(/\s+/)[0] || "there";
+  const subject = `Glamia ${requestType} update for ${orderNumber} · ${status}`;
+  const eventLabel = `${requestType[0].toUpperCase()}${requestType.slice(1)} request · ${status}`;
+  const eventTime = returnRequest.updated_at || returnRequest.created_at;
+  const notes = String(returnRequest.notes || "").trim();
+  const htmlContent = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#241f18;line-height:1.6"><h1 style="letter-spacing:.18em">GLAMIA</h1><p>Hi ${escapeHtml(firstName)},</p><h2>${escapeHtml(eventLabel)}</h2><p>Order <strong>${escapeHtml(orderNumber)}</strong> · ${escapeHtml(formatOrderDate(eventTime))}</p><p>${escapeHtml(statusCopy)}</p>${notes ? `<p>Note from Glamia: ${escapeHtml(notes)}</p>` : ""}<p>Warmly,<br>Team Glamia</p></body></html>`;
+  const textContent = [
+    `Hi ${firstName},`,
+    "",
+    eventLabel,
+    `Order ${orderNumber} · ${formatOrderDate(eventTime)}`,
+    "",
+    statusCopy,
+    notes ? `Note from Glamia: ${notes}` : "",
+    "",
+    "Warmly,",
+    "Team Glamia"
+  ].filter(Boolean).join("\n");
+
+  return deliverBrevoEmail(env, {
+    eventType: `return-${status}`,
+    dedupeKey: `return:${returnRequest.id}:${status}`,
+    recipient,
+    userEmail: recipient,
+    orderId: returnRequest.order_id || returnRequest.order?.id || null,
+    payload: {
+      sender: { name: env.BREVO_FROM_NAME || "Glamia", email: fromEmail },
+      to: [{ email: recipient, name: returnRequest.order?.customer_name || recipient }],
+      subject,
+      htmlContent,
+      textContent
+    }
+  });
+}
+
+async function deliverBrevoEmail(env, { eventType, dedupeKey = null, recipient, userEmail = null, orderId = null, payload, existingId = null }) {
+  let id = existingId;
+  let current = existingId
+    ? await env.DB.prepare("SELECT * FROM email_delivery_log WHERE id = ?").bind(existingId).first().catch(() => null)
+    : null;
+  if (!id && dedupeKey) {
+    current = await env.DB.prepare("SELECT * FROM email_delivery_log WHERE dedupe_key = ?").bind(dedupeKey).first().catch(() => null);
+    if (current?.status === "sent") return true;
+    id = current?.id || null;
   }
-  const current = existingId ? await env.DB.prepare("SELECT attempts FROM email_delivery_log WHERE id = ?").bind(id).first() : null;
+  if (!id) {
+    id = crypto.randomUUID();
+    await env.DB.prepare(`INSERT INTO email_delivery_log (id, event_type, dedupe_key, recipient, order_id, user_email, payload_json, status, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)`)
+      .bind(id, eventType, dedupeKey, recipient, orderId, userEmail, JSON.stringify(payload)).run().catch(() => null);
+    if (dedupeKey) {
+      current = await env.DB.prepare("SELECT * FROM email_delivery_log WHERE dedupe_key = ?").bind(dedupeKey).first().catch(() => null);
+      if (current) id = current.id;
+    }
+  }
+  if (!current) current = await env.DB.prepare("SELECT * FROM email_delivery_log WHERE id = ?").bind(id).first().catch(() => null);
+  if (current?.status === "sent") return true;
   const attempts = Number(current?.attempts || 0) + 1;
   const apiKey = String(env.BREVO_API_KEY || "").trim();
   const fromEmail = String(env.BREVO_FROM_EMAIL || "").trim();
@@ -4558,6 +5194,116 @@ async function deliverBrevoEmail(env, { eventType, recipient, userEmail = null, 
   }
 }
 
+async function processDueEmailEvents(env) {
+  const { results } = await env.DB.prepare(`
+    SELECT * FROM email_delivery_log
+    WHERE status IN ('pending', 'failed')
+      AND attempts < 5
+      AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= CURRENT_TIMESTAMP)
+    ORDER BY created_at ASC
+    LIMIT 20
+  `).all().catch(() => ({ results: [] }));
+  for (const row of results || []) {
+    let payload;
+    try { payload = JSON.parse(row.payload_json); } catch { continue; }
+    await deliverBrevoEmail(env, {
+      eventType: row.event_type,
+      dedupeKey: row.dedupe_key || null,
+      recipient: row.recipient,
+      userEmail: row.user_email,
+      orderId: row.order_id,
+      payload,
+      existingId: row.id
+    });
+  }
+}
+
+function addR2References(value, references) {
+  if (value === null || value === undefined) return;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text.startsWith("/api/assets/")) {
+      try { references.add(decodeURIComponent(text.replace("/api/assets/", ""))); } catch {}
+    } else if (/^(products|reviews)\//.test(text)) {
+      references.add(text);
+    }
+    if ((text.startsWith("[") && text.endsWith("]")) || (text.startsWith("{") && text.endsWith("}"))) {
+      try { addR2References(JSON.parse(text), references); } catch {}
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry) => addR2References(entry, references));
+    return;
+  }
+  if (typeof value === "object") Object.values(value).forEach((entry) => addR2References(entry, references));
+}
+
+async function referencedR2Keys(env) {
+  const references = new Set();
+  // These are the tables that can currently store product/review media. Scan
+  // every column, including JSON and legacy key columns, so future media
+  // fields do not silently turn into cleanup candidates.
+  for (const table of ["products", "reviews", "product_questions", "hero_slides", "storefront_settings"]) {
+    const result = await env.DB.prepare(`SELECT * FROM ${table}`).all().catch(() => ({ results: [] }));
+    for (const row of result.results || []) addR2References(row, references);
+  }
+  return references;
+}
+
+async function orphanR2Keys(env, references, now) {
+  const orphanKeys = [];
+  let scanned = 0;
+  for (const prefix of R2_CLEANUP_PREFIXES) {
+    let cursor;
+    do {
+      const page = await env.PRODUCT_IMAGES.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) });
+      for (const object of page.objects || []) {
+        scanned += 1;
+        if (references.has(object.key)) continue;
+        const uploadedAt = object.uploaded ? new Date(object.uploaded).getTime() : NaN;
+        // A grace period prevents an image uploaded during an unfinished
+        // listing edit from being deleted before the admin can save it.
+        if (!Number.isFinite(uploadedAt) || now - uploadedAt < R2_CLEANUP_GRACE_MS) continue;
+        orphanKeys.push(object.key);
+      }
+      cursor = page.truncated ? page.cursor : null;
+    } while (cursor);
+  }
+  return { orphanKeys: [...new Set(orphanKeys)], scanned };
+}
+
+async function runWeeklyR2Cleanup(env) {
+  const taskKey = "r2-orphan-cleanup";
+  const now = Date.now();
+  const leaseUntil = now + 30 * 60 * 1000;
+  try {
+    const claim = await env.DB.prepare(`
+      INSERT INTO maintenance_tasks (task_key, last_run_at, lease_until)
+      VALUES (?, NULL, ?)
+      ON CONFLICT(task_key) DO UPDATE SET lease_until = excluded.lease_until
+      WHERE (last_run_at IS NULL OR last_run_at <= ?)
+        AND (lease_until IS NULL OR lease_until <= ?)
+    `).bind(taskKey, leaseUntil, now - R2_CLEANUP_INTERVAL_MS, now).run();
+    if (Number(claim.meta?.changes || 0) !== 1) return;
+
+    const references = await referencedR2Keys(env);
+    const { orphanKeys, scanned } = await orphanR2Keys(env, references, now);
+    for (let index = 0; index < orphanKeys.length; index += 1000) {
+      await env.PRODUCT_IMAGES.delete(orphanKeys.slice(index, index + 1000));
+    }
+    await env.DB.prepare("UPDATE maintenance_tasks SET last_run_at = ?, lease_until = NULL WHERE task_key = ?")
+      .bind(now, taskKey).run();
+    console.log("Weekly R2 orphan cleanup completed", { scanned, referenced: references.size, deleted: orphanKeys.length });
+  } catch (error) {
+    // A missing migration should never affect storefront traffic. Once the
+    // migration is applied, the next five-minute cron tick will retry.
+    await env.DB.prepare("UPDATE maintenance_tasks SET lease_until = NULL WHERE task_key = ?")
+      .bind(taskKey).run().catch(() => null);
+    console.error("Weekly R2 orphan cleanup unavailable", error?.message || error);
+  }
+}
+
 async function listEmailEvents(env) {
   const { results } = await env.DB.prepare("SELECT id, event_type, recipient, order_id, status, attempts, provider_id, last_error, next_attempt_at, created_at, sent_at FROM email_delivery_log ORDER BY created_at DESC LIMIT 200").all();
   return json({ events: results });
@@ -4570,7 +5316,7 @@ async function retryEmailEvent(env, id, user) {
   if (Number(row.attempts || 0) >= 5) return json({ error: "This email has reached its retry limit" }, 409);
   let payload;
   try { payload = JSON.parse(row.payload_json); } catch { return json({ error: "Email payload is invalid" }, 500); }
-  const sent = await deliverBrevoEmail(env, { eventType: row.event_type, recipient: row.recipient, userEmail: row.user_email, orderId: row.order_id, payload, existingId: id });
+  const sent = await deliverBrevoEmail(env, { eventType: row.event_type, dedupeKey: row.dedupe_key || null, recipient: row.recipient, userEmail: row.user_email, orderId: row.order_id, payload, existingId: id });
   await writeAuditLog(env, user.email, "retry_email", "email_delivery", id, { sent });
   return json({ ok: sent, status: sent ? "sent" : "failed" });
 }
@@ -4599,6 +5345,226 @@ async function listCustomers(env) {
     ORDER BY u.created_at DESC
   `).all();
   return json({ customers: results });
+}
+
+function taxStateKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function classifyTaxState(state, settings) {
+  const saleState = String(state || "").trim();
+  const businessState = String(settings?.business_state || "").trim();
+  const businessCode = String(settings?.business_state_code || "").trim();
+  if (!saleState || (!businessState && !businessCode)) return "unclassified";
+  if (taxStateKey(saleState) === taxStateKey(businessState) || saleState === businessCode) return "intra_state";
+  return "inter_state";
+}
+
+function roundTax(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+async function getTaxSettings(env) {
+  const row = await env.DB.prepare("SELECT business_state, business_state_code, gstin, updated_at FROM tax_settings WHERE id = 1").first();
+  return json({ settings: {
+    business_state: row?.business_state || "",
+    business_state_code: row?.business_state_code || "",
+    gstin: row?.gstin || "",
+    updated_at: row?.updated_at || null
+  } });
+}
+
+async function updateTaxSettings(request, env, user) {
+  const body = await readJson(request);
+  const businessState = String(body.business_state || "").trim().slice(0, 100);
+  const businessStateCode = String(body.business_state_code || "").trim().replace(/\D/g, "").slice(0, 2);
+  const gstin = String(body.gstin || "").trim().toUpperCase();
+  if (businessStateCode && !/^\d{2}$/.test(businessStateCode)) return json({ error: "Choose a valid two-digit GST state code" }, 400);
+  if (gstin && !/^\d{2}[A-Z0-9]{13}$/.test(gstin)) return json({ error: "GSTIN must contain 15 letters or numbers" }, 400);
+  await env.DB.prepare(`
+    INSERT INTO tax_settings (id, business_state, business_state_code, gstin, updated_at)
+    VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET
+      business_state = excluded.business_state,
+      business_state_code = excluded.business_state_code,
+      gstin = excluded.gstin,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(businessState, businessStateCode, gstin).run();
+  await writeAuditLog(env, user.email, "update_tax_settings", "tax_settings", "1", {
+    business_state: businessState,
+    business_state_code: businessStateCode,
+    gstin_configured: Boolean(gstin)
+  });
+  return getTaxSettings(env);
+}
+
+async function taxComplianceReport(env) {
+  const [settingsRow, productResult, orderResult] = await Promise.all([
+    env.DB.prepare("SELECT business_state, business_state_code, gstin, updated_at FROM tax_settings WHERE id = 1").first(),
+    env.DB.prepare(`
+      SELECT id, name, category, subcategory, color, price, status,
+        hsn_sac_code, hsn_sac_type, gst_rate, gst_tax_inclusive, created_at
+      FROM products
+      ORDER BY created_at DESC, id DESC
+    `).all(),
+    env.DB.prepare(`
+      SELECT o.id, o.order_number, o.created_at, o.subtotal, o.discount, o.total,
+        o.payment_method, o.shipping_json, o.items_json,
+        oi.product_id, oi.product_name, oi.unit_price, oi.quantity, oi.size, oi.color,
+        oi.hsn_sac_code AS line_hsn_sac_code, oi.hsn_sac_type AS line_hsn_sac_type,
+        oi.gst_rate AS line_gst_rate, oi.gst_tax_inclusive AS line_gst_tax_inclusive,
+        p.name AS catalog_name, p.category, p.subcategory,
+        p.hsn_sac_code AS catalog_hsn_sac_code, p.hsn_sac_type AS catalog_hsn_sac_type,
+        p.gst_rate AS catalog_gst_rate, p.gst_tax_inclusive AS catalog_gst_tax_inclusive
+      FROM orders o
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN products p ON p.id = oi.product_id
+      WHERE o.status != 'cancelled'
+      ORDER BY o.created_at DESC, o.id DESC
+      LIMIT 5000
+    `).all()
+  ]);
+
+  const settings = {
+    business_state: settingsRow?.business_state || "",
+    business_state_code: settingsRow?.business_state_code || "",
+    gstin: settingsRow?.gstin || "",
+    updated_at: settingsRow?.updated_at || null
+  };
+  const products = (productResult.results || []).map(row => ({
+    id: row.id,
+    name: row.name,
+    category: row.category || "",
+    subcategory: row.subcategory || "",
+    color: row.color || "",
+    price: Number(row.price || 0),
+    status: row.status || "",
+    hsn_sac_code: row.hsn_sac_code || "",
+    hsn_sac_type: row.hsn_sac_type || "HSN",
+    gst_rate: row.gst_rate === null || row.gst_rate === undefined ? null : Number(row.gst_rate),
+    gst_tax_inclusive: row.gst_tax_inclusive === undefined ? true : Boolean(row.gst_tax_inclusive),
+    created_at: row.created_at || null
+  }));
+  const productsById = new Map(products.map(product => [String(product.id), product]));
+  const groupedOrders = new Map();
+  for (const row of orderResult.results || []) {
+    if (!groupedOrders.has(row.id)) groupedOrders.set(row.id, { row, items: [] });
+    if (row.product_id) groupedOrders.get(row.id).items.push(row);
+  }
+  for (const order of groupedOrders.values()) {
+    if (order.items.length) continue;
+    let rawItems = [];
+    try { rawItems = JSON.parse(order.row.items_json || "[]"); } catch {}
+    order.items = rawItems.map(item => {
+      const product = productsById.get(String(item.id || ""));
+      return {
+        product_id: item.id,
+        product_name: item.name || item.product_name || product?.name || item.id || "Product",
+        unit_price: item.price ?? product?.price ?? 0,
+        quantity: item.quantity,
+        size: item.size || "",
+        color: item.color || product?.color || "",
+        category: product?.category || "",
+        subcategory: product?.subcategory || "",
+        line_hsn_sac_code: item.hsn_sac_code || "",
+        line_hsn_sac_type: item.hsn_sac_type || "HSN",
+        line_gst_rate: item.gst_rate ?? null,
+        line_gst_tax_inclusive: item.gst_tax_inclusive === undefined ? true : item.gst_tax_inclusive,
+        catalog_hsn_sac_code: product?.hsn_sac_code || "",
+        catalog_hsn_sac_type: product?.hsn_sac_type || "HSN",
+        catalog_gst_rate: product?.gst_rate ?? null,
+        catalog_gst_tax_inclusive: product?.gst_tax_inclusive === undefined ? true : product.gst_tax_inclusive
+      };
+    });
+  }
+
+  const sales = [];
+  const totals = { gross_sales: 0, taxable_value: 0, tax_amount: 0, cgst: 0, sgst: 0, igst: 0 };
+  for (const order of groupedOrders.values()) {
+    let shipping = {};
+    try { shipping = JSON.parse(order.row.shipping_json || "{}"); } catch {}
+    const classification = classifyTaxState(shipping.state, settings);
+    const orderSubtotal = Math.max(0, Number(order.row.subtotal || 0));
+    const orderDiscount = Math.max(0, Number(order.row.discount || 0));
+    const lines = order.items.map(item => {
+      const quantity = Math.max(1, Number(item.quantity) || 1);
+      const gross = Math.max(0, Number(item.unit_price || 0) * quantity);
+      const discountShare = orderSubtotal > 0 ? Math.min(gross, orderDiscount * (gross / orderSubtotal)) : 0;
+      const net = Math.max(0, gross - discountShare);
+      const code = String(item.line_hsn_sac_code || item.catalog_hsn_sac_code || "").trim().toUpperCase();
+      const type = String(item.line_hsn_sac_type || item.catalog_hsn_sac_type || "HSN").trim().toUpperCase() === "SAC" ? "SAC" : "HSN";
+      const rateValue = item.line_gst_rate !== null && item.line_gst_rate !== undefined ? item.line_gst_rate : item.catalog_gst_rate;
+      const rate = rateValue === null || rateValue === undefined || rateValue === "" ? null : Number(rateValue);
+      const inclusive = item.line_gst_tax_inclusive === undefined || item.line_gst_tax_inclusive === null
+        ? Boolean(item.catalog_gst_tax_inclusive)
+        : Boolean(item.line_gst_tax_inclusive);
+      const taxable = rate === null || !Number.isFinite(rate) ? 0 : inclusive ? net / (1 + rate / 100) : net;
+      const tax = rate === null || !Number.isFinite(rate) ? 0 : inclusive ? net - taxable : taxable * rate / 100;
+      const line = {
+        product_id: item.product_id || "",
+        product_name: item.product_name || item.catalog_name || "Product",
+        category: item.category || "",
+        subcategory: item.subcategory || "",
+        code,
+        code_type: type,
+        quantity,
+        gross_value: roundTax(gross),
+        taxable_value: roundTax(taxable),
+        tax_amount: roundTax(tax),
+        gst_rate: Number.isFinite(rate) ? rate : null,
+        tax_status: !code ? "missing_code" : !Number.isFinite(rate) ? "missing_rate" : "ready"
+      };
+      return line;
+    });
+    const taxableValue = roundTax(lines.reduce((sum, line) => sum + line.taxable_value, 0));
+    const taxAmount = roundTax(lines.reduce((sum, line) => sum + line.tax_amount, 0));
+    const cgst = classification === "intra_state" ? roundTax(taxAmount / 2) : 0;
+    const sgst = classification === "intra_state" ? roundTax(taxAmount - cgst) : 0;
+    const igst = classification === "inter_state" ? taxAmount : 0;
+    const hasMissing = lines.some(line => line.tax_status !== "ready");
+    sales.push({
+      id: order.row.id,
+      order_number: order.row.order_number || fallbackOrderNumber(order.row),
+      created_at: order.row.created_at,
+      state: shipping.state || "Unknown",
+      state_classification: classification,
+      payment_method: formatPaymentMethod(order.row.payment_method),
+      order_total: Number(order.row.total || 0),
+      taxable_value: taxableValue,
+      tax_amount: taxAmount,
+      cgst,
+      sgst,
+      igst,
+      tax_status: hasMissing ? "needs_setup" : "ready",
+      lines
+    });
+    totals.gross_sales += Number(order.row.total || 0);
+    totals.taxable_value += taxableValue;
+    totals.tax_amount += taxAmount;
+    totals.cgst += cgst;
+    totals.sgst += sgst;
+    totals.igst += igst;
+  }
+  Object.keys(totals).forEach(key => { totals[key] = roundTax(totals[key]); });
+  const mappedProducts = products.filter(product => product.hsn_sac_code && Number.isFinite(product.gst_rate));
+  const summary = {
+    orders: sales.length,
+    gross_sales: totals.gross_sales,
+    taxable_value: totals.taxable_value,
+    tax_amount: totals.tax_amount,
+    cgst: totals.cgst,
+    sgst: totals.sgst,
+    igst: totals.igst,
+    intra_state_orders: sales.filter(sale => sale.state_classification === "intra_state").length,
+    inter_state_orders: sales.filter(sale => sale.state_classification === "inter_state").length,
+    unclassified_orders: sales.filter(sale => sale.state_classification === "unclassified").length,
+    ready_products: mappedProducts.length,
+    missing_code_products: products.filter(product => !product.hsn_sac_code).length,
+    missing_rate_products: products.filter(product => product.hsn_sac_code && !Number.isFinite(product.gst_rate)).length,
+    hsn_products: products.filter(product => product.hsn_sac_type !== "SAC").length,
+    sac_products: products.filter(product => product.hsn_sac_type === "SAC").length
+  };
+  return json({ settings, products, sales, summary, generated_at: new Date().toISOString() });
 }
 
 /* Coupon scoping: 'all', 'category' (scope_value = category/subcategory name) or 'product' (scope_value = product id). */
@@ -5005,7 +5971,7 @@ function validateImageUrl(value, label = "Image", optional = false) {
   if (url.startsWith("/api/assets/")) return url;
   try {
     const parsed = new URL(url);
-    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error();
+    if (parsed.protocol !== "https:") throw new Error();
   } catch {
     throw httpError(`${label} URL is invalid`, 400);
   }
@@ -5113,6 +6079,7 @@ function formatProduct(row) {
     size_chart_url: row.size_chart_url || null,
     subcategory: row.subcategory || "",
     material: row.material || "",
+    specifications: row.specifications || "",
     sizes: jsonArray(row.sizes_json),
     image: row.image_url,
     image_url: row.image_url,
@@ -5121,11 +6088,16 @@ function formatProduct(row) {
     thumbnail: thumbnails[0] || row.image_url || "",
     thumbnail_url: row.thumbnail_url || thumbnails[0] || row.image_url || "",
     thumbnail_key: row.thumbnail_key || null,
+    thumbnail_source_url: row.thumbnail_source_url || images[0] || "",
     thumbnail_images: thumbnails,
     variants,
     description: row.description,
     cost_price: Number(row.cost_price || 0),
     reorder_point: Number(row.reorder_point ?? 15),
+    hsn_sac_code: row.hsn_sac_code || "",
+    hsn_sac_type: row.hsn_sac_type || "HSN",
+    gst_rate: row.gst_rate === null || row.gst_rate === undefined ? null : Number(row.gst_rate),
+    gst_tax_inclusive: row.gst_tax_inclusive === undefined ? true : Boolean(row.gst_tax_inclusive),
     created_at: row.created_at
   };
 }
@@ -5162,6 +6134,8 @@ function formatProductCard(row) {
     deal_price: row.deal_price || null,
     preorder_enabled: Boolean(row.preorder_enabled),
     preorder_release_at: row.preorder_release_at || null,
+    preorder_limit: row.preorder_limit === null || row.preorder_limit === undefined ? null : Number(row.preorder_limit),
+    preorder_sold: Number(row.preorder_sold || 0),
     reorder_point: Number(row.reorder_point ?? 15),
     created_at: row.created_at,
     compact: true
@@ -5284,30 +6258,56 @@ function assertSameOrigin(request, url) {
   }
 }
 
-function enforceRateLimit(request, url) {
-  const limits = new Map([
-    ["/api/auth/google", 20],
-    ["/api/auth/signup", 10],
-    ["/api/auth/login", 30],
-    ["/api/orders", 30],
-    ["/api/coupons/validate", 60],
-    ["/api/uploads/image", 30],
-    ["/api/support/tickets", 30],
-    ["/api/cart-events", 120],
-    ["/api/wishlist-events", 120]
-  ]);
-  const limit = limits.get(url.pathname);
+async function enforceRateLimit(request, url, env, ctx) {
+  const limit = RATE_LIMITS.get(url.pathname);
   if (!limit) return;
+  const ip = request.headers.get("CF-Connecting-IP") || "local";
+  const key = `${url.pathname}:${await hashIdentifier(ip)}`;
+  const now = Date.now();
+  try {
+    const bucket = await env.DB.prepare(`
+      INSERT INTO request_rate_limits (bucket_key, window_started_at, request_count)
+      VALUES (?, ?, 1)
+      ON CONFLICT(bucket_key) DO UPDATE SET
+        window_started_at = CASE
+          WHEN excluded.window_started_at - request_rate_limits.window_started_at >= ?
+          THEN excluded.window_started_at
+          ELSE request_rate_limits.window_started_at
+        END,
+        request_count = CASE
+          WHEN excluded.window_started_at - request_rate_limits.window_started_at >= ?
+          THEN 1
+          ELSE request_rate_limits.request_count + 1
+        END,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING window_started_at, request_count
+    `).bind(key, now, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_WINDOW_MS).first();
+    if (Number(bucket?.request_count || 0) > limit) throw httpError("Too many requests. Please try again shortly.", 429);
+    if (Number(bucket?.request_count) === 1 && ctx?.waitUntil) {
+      ctx.waitUntil(env.DB.prepare("DELETE FROM request_rate_limits WHERE window_started_at < ?")
+        .bind(now - RATE_LIMIT_WINDOW_MS * 2).run().catch(() => {}));
+    }
+    return;
+  } catch (error) {
+    if (error?.status === 429) throw error;
+    // Keep local development usable before migrations are applied. The
+    // deployed Worker should always have the D1 table from the migration.
+  }
+
+  enforceRateLimitInMemory(request, url, limit);
+}
+
+function enforceRateLimitInMemory(request, url, limit) {
   const ip = request.headers.get("CF-Connecting-IP") || "local";
   const key = `${ip}:${url.pathname}`;
   const now = Date.now();
   if (requestRateBuckets.size > 5000) {
     for (const [bucketKey, bucket] of requestRateBuckets) {
-      if (now - bucket.started > 120_000) requestRateBuckets.delete(bucketKey);
+      if (now - bucket.started > RATE_LIMIT_WINDOW_MS * 2) requestRateBuckets.delete(bucketKey);
     }
   }
   const bucket = requestRateBuckets.get(key) || { started: now, count: 0 };
-  if (now - bucket.started > 60_000) {
+  if (now - bucket.started > RATE_LIMIT_WINDOW_MS) {
     bucket.started = now;
     bucket.count = 0;
   }
@@ -5377,10 +6377,11 @@ function withSecurityHeaders(response) {
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   headers.set("X-Permitted-Cross-Domain-Policies", "none");
   headers.set("X-Frame-Options", "DENY");
-  headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'sha256-On1TqejLHzYPtlgCG4EQtHKn2f1u8Plk+C210XpYbec=' https://accounts.google.com; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://images.unsplash.com; media-src 'self' blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com; frame-src https://accounts.google.com; form-action 'self'");
+  headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'sha256-On1TqejLHzYPtlgCG4EQtHKn2f1u8Plk+C210XpYbec=' https://accounts.google.com https://www.googletagmanager.com; style-src 'self' 'sha256-RU4sU0AaS8IBGZx8XrGt/pa9A5SLA3dQszGeqT5L3Kw=' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com; frame-src https://accounts.google.com; form-action 'self'");
   headers.set("Strict-Transport-Security", "max-age=31536000");
-  if (!headers.has("Cache-Control") && headers.get("Content-Type")?.includes("application/json")) {
-    headers.set("Cache-Control", "no-store");
+  if (headers.get("Content-Type")?.includes("application/json")) {
+    headers.set("X-Robots-Tag", "noindex, nofollow");
+    if (!headers.has("Cache-Control")) headers.set("Cache-Control", "no-store");
   }
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
@@ -5408,8 +6409,17 @@ async function writeAuditLog(env, adminEmail, action, entityType, entityId, deta
   try {
     await env.DB.prepare(`INSERT INTO admin_audit_log (id, admin_email, action, entity_type, entity_id, details_json) VALUES (?, ?, ?, ?, ?, ?)`)
       .bind(crypto.randomUUID(), String(adminEmail || "").toLowerCase(), action, entityType, entityId || null, JSON.stringify(details)).run();
-  } catch {
-    // Audit logging must never break a successful customer action.
+    return true;
+  } catch (error) {
+    // Audit logging must never break a successful customer action, but a
+    // failed write must remain visible in Worker logs for alerting/diagnosis.
+    console.error("audit_log_write_failed", {
+      action,
+      entity_type: entityType,
+      entity_id: entityId || null,
+      error: String(error?.message || error || "Unknown audit log error").slice(0, 300)
+    });
+    return false;
   }
 }
 

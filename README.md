@@ -18,8 +18,8 @@ The brand mark opens the home page (there is no Store tab). The design theme is 
 - **Share button** — on each product page: opens the native share sheet on phones (`navigator.share`), otherwise copies the product link to the clipboard (async Clipboard API with an `execCommand` fallback).
 
 - **Header** — category nav with active underline (left), centered GLAMIA wordmark, live **search bar**, wishlist, theme toggle, and cart with count badge (right); an announcement bar sits above.
-- **Home** — auto-rotating **hero carousel** (per-category "Explore" slides with product frames, arrows, and dots), a trust strip (free shipping / 7-day returns / COD), a centered **New In** row, a full-width editorial promo banner, shop-by-category tiles, then the live catalog with **category/price filters and sorting** in a sticky Refine sidebar.
-- **Product cards** — discount badge, wishlist heart, hover **quick-add bar** (always visible on touch), image swap on hover.
+- **Home** — auto-rotating **hero carousel** (per-category "Explore" slides with product frames, arrows, and dots), a trust strip (free shipping / 7-day returns / demo checkout), a centered **New In** row, a full-width editorial promo banner, shop-by-category tiles, then the live catalog with **category/price filters and sorting** in a sticky Refine sidebar.
+- **Product cards** — discount badge, wishlist heart, hover **quick-add bar** (always visible on touch), image swap on hover, and clear **Pre-order** labels for reserved stock.
 - **Verified-purchase reviews** — reviews are purchase-gated, and every review card carries a **✓ Verified purchase** badge.
 - **Related products** — "You may also like" on product pages (same category, excluding the current listing and its colourway siblings).
 - **Deals with countdowns** — admins attach a manual end time to any listing (Admin → Deals); the home page shows a **Deals Ending Soon** section with per-product live countdowns that auto-expire.
@@ -30,7 +30,7 @@ The brand mark opens the home page (there is no Store tab). The design theme is 
 - **Wishlist** — ♥ any product (header heart icon); saved per account in the browser.
 - **Login / signup** — modal with **Continue with Google** or **Continue as guest** (one Google account covers sign-up and sign-in).
 - **Cart** — quantity controls, coupon codes (`GLAMIA10` 10% off, `FLAT200` ₹200 off seeded), then Proceed to Checkout.
-- **Checkout & payments** — pick a saved address (or add one inline), choose **COD, UPI, or Card**. Card/UPI are simulated and marked `paid`; COD orders stay `pending`. Card details never leave the browser.
+- **Checkout & payments** — pick a saved address (or add one inline), reserve eligible **pre-order** pieces, then place a clearly labelled **Demo payment** order. Pre-order release dates and remaining reservation capacity are shown where configured. No money is charged and no real payment method is accepted until a payment gateway is integrated.
 - **Address management** — Address Book with multiple addresses, set-default, edit, delete; used at checkout.
 - **Order history & tracking** — every order with payment status, coupon, delivery address, and a **tracking timeline** (Order placed → Confirmed → Shipped → Delivered).
 - **Order numbers** — `GM-DDMMYYYY-XXX-NNNNN` (e.g. `GM-12092026-MSW-00001`): IST order date, initials of the first item's product name (up to three letters), and a globally sequential counter stored atomically in D1 (migration `0050`). Gaps can appear if a checkout fails after the number is taken; historical orders placed before the change keep their old numbers.
@@ -50,12 +50,12 @@ Admins additionally get the Admin console tab (products, inventory, orders, cust
 Reach it from the header **Admin** tab or the user dropdown. Sections:
 
 - **Dashboard** — total sales, order count, average order value, low-stock count, a 7-day revenue chart, and recent orders.
-- **Add Product** — the listing form: category, subcategory, brand, price/MRP, material, details, **4–6 images** (R2 upload or URL; first image is the thumbnail), **per-size stock** (add each size with its own quantity — the total is computed), and **colourways**: each colourway (own colour, per-size stock, and **4–8 images**) is published as a **standalone linked listing** that inherits the parent's name, brand, price, and description. Linked listings share a variant group: the catalog shows one card per colour (with the colour under the name and sibling swatches), product pages have a "More colours" navigator, and **status changes (Go Live / Hold / Archive) apply to the whole group** while stock is managed per colourway and per size. Editing a listing edits just that colourway.
+- **Add Product** — the listing form: category, subcategory, brand, price/MRP, material, details, **4–6 images** (R2 upload or URL with a preview for every image; admins can move any image to the first or last position and select a separate thumbnail), **per-size stock** (add each size with its own quantity — the total is computed), optional **pre-order** release date and reservation limit, and **colourways**: each colourway (own colour, per-size stock, and **4–8 images**) is published as a **standalone linked listing** that inherits the parent's name, brand, price, and description. Linked listings share a variant group: the catalog shows one card per colour (with the colour under the name and sibling swatches), product pages have a "More colours" navigator, and **status changes (Go Live / Hold / Archive) apply to the whole group** while stock is managed per colourway and per size. Editing a listing edits just that colourway.
 - **All Products** — the full catalog with filters (Live / On hold / Archived) and per-product actions: **Go Live**, **Put on Hold**, **Archive**/Restore, Feature/Unfeature, Edit, Delete. Admins can export CSV or XLSX and apply bulk status updates.
 - **Inventory** — per-product stock with inline edit and low-stock highlighting (archived listings excluded). Listings with size rows show **per-size stock inputs**; sold-out sizes render crossed-out and unselectable on the product page.
 - **Orders** — every order with items, coupon, total, and a status dropdown (pending → confirmed → shipped → delivered / cancelled); returns/refunds track eligibility, refund amount, notes, and processing time.
 - **Customers** — all signed-in accounts with DOB/phone, join date, order count, and lifetime spend.
-- **Reviews** — customers can submit a 1–5 star rating, written feedback, and up to three product photos or short videos; admins can hide/unhide or delete reviews. Hidden reviews disappear from product pages and ratings.
+- **Reviews** — customers can submit a 1–5 star rating and written feedback; admins can hide/unhide or delete reviews. Hidden reviews disappear from product pages and ratings.
 - **Coupons** — create percent or flat-₹ codes with mixed category/product targeting, selected customer emails, start/end times, total and per-account usage limits, optional minimum cart values, maximum discount caps, and delete them.
 - **Returns & refunds** — review customer after-sales requests and move them through requested, approved, received, refunded, completed, rejected, or cancelled.
 - **System health** — check D1 health, inspect Brevo email delivery attempts, retry failed email events, and download a JSON data backup.
@@ -120,7 +120,31 @@ npx wrangler vectorize create glamia-product-search --dimensions 384 --metric co
 
 ```bash
 npx wrangler secret put SESSION_SECRET
+npx wrangler secret put BREVO_API_KEY
 ```
+
+Verify `support@glamiastore.com` (or the approved sender domain) in Brevo before setting `BREVO_API_KEY`. The Worker records every transactional email attempt in D1, retries transient failures automatically every five minutes, and exposes failed events for manual retry in Admin → System health.
+
+5b. (Optional) Connect Google Analytics 4 to Admin → Dashboard. In Google Cloud, enable the Google Analytics Data API and create a service account. Add that service account email as a **Viewer** in the GA4 property’s Property access management, then set the property ID and service-account credentials locally in `.dev.vars`:
+
+```dotenv
+GA4_MEASUREMENT_ID=G-XXXXXXXXXX
+GA4_PROPERTY_ID=123456789
+GA4_CLIENT_EMAIL=analytics-reader@your-project.iam.gserviceaccount.com
+GA4_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n
+```
+
+`GA4_MEASUREMENT_ID` is the public web data-stream ID (the value beginning with `G-`), so keep it in the `vars` section of `wrangler.jsonc`; do not store it as a secret. The React storefront loads the Google tag from `/api/config` and records client-side page views when visitors move between routes. Admin routes are excluded from Google Analytics traffic.
+
+For the deployed Worker, store the values as secrets instead of committing them:
+
+```bash
+npx wrangler secret put GA4_PROPERTY_ID
+npx wrangler secret put GA4_CLIENT_EMAIL
+npx wrangler secret put GA4_PRIVATE_KEY
+```
+
+The dashboard reads the last 30 complete days through the read-only `runReport` endpoint. If these values are not configured, the existing first-party visitor analytics continue to work and the Google Analytics panel shows a setup prompt.
 
 6. Deploy:
 
@@ -128,12 +152,16 @@ npx wrangler secret put SESSION_SECRET
 npm run deploy
 ```
 
+## Production Cutover Rule
+
+Before the final production-ready deployment, explicitly confirm a clean start. Clear demo/customer data such as Google-authenticated users, sessions, carts, wishlists, orders, reviews, support conversations, analytics, and other test records. Preserve only the product listings created for the production catalog, including their approved product media and inventory details. Do not perform this reset during ordinary demo deployments. Keep checkout in Demo mode until Razorpay confirms production access and the live payment integration has been separately verified.
+
 ## What Is Protected
 
 - Any verified Google account can sign in and publish listings; guests browse without an account.
 - Only emails in `ADMIN_EMAILS` receive `admin` role; the role is re-derived from the whitelist on every request. The Admin Panel (approve/feature/delete anything, reset demo) only renders for admins, and its endpoints enforce it server-side.
 - Sellers can delete only their own listings; deleting a listing removes its R2 images.
-- Uploaded product images are stored in R2 and served through `/api/assets/:key`.
+- Uploaded product images are stored in R2 and served through `/api/assets/:key`. A scheduled Worker maintenance scan runs weekly (using the existing cron trigger), preserves every R2 key referenced by products, variants, reviews, and storefront data, and removes only unreferenced `products/` or `reviews/` objects older than a seven-day grace period. Branding assets outside those prefixes are not touched.
 - Sessions are HMAC-signed HttpOnly cookies (7-day expiry); a tampered or stale signature is rejected.
 - Mutating API requests reject a mismatched `Origin`, sensitive endpoints have a lightweight per-IP rate limit, and all Worker/asset responses include baseline security headers.
 - Email attempts are recorded in D1 with retry timing and provider errors; admins can retry failed messages from System health.
@@ -158,7 +186,8 @@ npm run deploy
 | DELETE | `/api/products/:id/reviews` | signed-in (delete own review) |
 | GET | `/api/my/reviews` | signed-in (own review history) |
 | GET | `/api/orders` | signed-in (own; `?scope=admin` for all) |
-| POST | `/api/orders` | signed-in (items, coupon, payment method, address) |
+| POST | `/api/orders` | signed-in or guest (items, coupon, demo payment, address) |
+| GET | `/api/order-tracking` | public with order number + checkout email, or opaque tracking token |
 | POST | `/api/orders/:id/cancel` | owner (pending/confirmed orders) |
 | POST | `/api/orders/:id/returns` | owner (delivered orders) |
 | GET | `/api/returns` | signed-in (`?scope=admin` for admins) |
