@@ -10,7 +10,7 @@ const policySections = [
         heading: "About these terms",
         paragraphs: [
           "This electronic record is published in accordance with the Information Technology Act, 2000 and the rules made under it. It applies to https://glamiastore.com/, the Glamia mobile site, and the Glamia app (together, the “Platform”).",
-          "The Platform is owned and operated by Glamia. The registered office listed in the supplied policy document is L-26 A Shastri Nagar. By accessing or using the Platform, you agree to these terms, our policies, and applicable law."
+          "Glamia is a brand name owned and operated by SHREE SHAYAM HOSIERY. In these terms, references to Glamia mean SHREE SHAYAM HOSIERY, the business responsible for the Platform. The registered office listed in the supplied policy document is L-26 A Shastri Nagar. By accessing or using the Platform, you agree to these terms, our policies, and applicable law."
         ]
       },
       {
