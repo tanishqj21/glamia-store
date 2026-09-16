@@ -91,11 +91,14 @@ export default {
           : env.DB;
         const requestEnv = db === env.DB ? env : { ...env, DB: db };
         const response = cacheTtl
-          ? await cachedPublicApi(request, ctx, cacheTtl, () => routeApi(request, requestEnv, url, ctx))
+          ? await cachedPublicResponse(request, ctx, cacheTtl, () => routeApi(request, requestEnv, url, ctx))
           : await routeApi(request, requestEnv, url, ctx);
         return withSecurityHeaders(response);
       }
-      const page = await renderPublicPage(request, env);
+      const pageCacheTtl = publicPageCacheTtl(request, url);
+      const page = pageCacheTtl
+        ? await cachedPublicResponse(request, ctx, pageCacheTtl, () => renderPublicPage(request, env))
+        : await renderPublicPage(request, env);
       if (page) return withSecurityHeaders(page);
       return withSecurityHeaders(await env.ASSETS.fetch(request));
     } catch (error) {
@@ -533,7 +536,22 @@ function publicApiCacheTtl(request, url) {
   return 0;
 }
 
-async function cachedPublicApi(request, ctx, ttl, producer) {
+function publicPageCacheTtl(request, url) {
+  if (request.method !== "GET" || request.headers.get("Cookie") || request.headers.get("Authorization")) return 0;
+  const path = url.pathname;
+  const standaloneInfoPath = [
+    "/contact", "/support", "/policies", "/terms-and-conditions", "/privacy-policy",
+    "/refund-cancellation-policy", "/return-policy", "/shipping-policy"
+  ].includes(path);
+  const isPublicPage = path === "/" || ["/offers", "/just-arrived", "/best-sellers"].includes(path)
+    || /^\/category\/[^/]+$/i.test(path)
+    || /^\/product\/[^/]+$/i.test(path)
+    || /^\/[^/]+\/[^/]+\/[^/]+$/i.test(path)
+    || standaloneInfoPath;
+  return isPublicPage ? 60 : 0;
+}
+
+async function cachedPublicResponse(request, ctx, ttl, producer) {
   const cache = globalThis.caches?.default;
   const cacheKey = new Request(request.url, { method: "GET" });
   if (cache) {
@@ -541,7 +559,7 @@ async function cachedPublicApi(request, ctx, ttl, producer) {
     if (hit) return hit;
   }
   const response = await producer();
-  if (response.status !== 200) return response;
+  if (!response || response.status !== 200) return response;
   const headers = new Headers(response.headers);
   headers.set("Cache-Control", `public, s-maxage=${ttl}, stale-while-revalidate=${Math.max(ttl * 5, 300)}`);
   const cacheable = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
