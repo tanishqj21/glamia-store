@@ -1259,8 +1259,18 @@ export function AdminWorkspace({ route, onNavigate }) {
     };
     loadAdminData().catch(reportError).finally(() => active && setLoadedRoute(route));
     if (!ADMIN_POLL_ROUTES.has(route)) return () => { active = false; };
-    const refreshTimer = window.setInterval(() => loadAdminData().catch(reportError), 30000);
-    return () => { active = false; window.clearInterval(refreshTimer); };
+    const refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === "visible") loadAdminData().catch(reportError);
+    }, 30000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") loadAdminData().catch(reportError);
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      active = false;
+      window.clearInterval(refreshTimer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, [route]);
   function changeProduct(next) { setProducts((current) => current.map((product) => product.id === next.id ? { ...product, ...next } : product)); }
   function changeOrder(next) { setOrders((current) => current.map((order) => order.id === next.id ? { ...order, ...next } : order)); }
