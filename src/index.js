@@ -35,6 +35,9 @@ const RATE_LIMITS = new Map([
 // the shared D1 bucket below so limits apply across Worker isolates.
 const requestRateBuckets = new Map();
 let productEnrichmentCache = { expiresAt: 0, entries: new Map() };
+const PRODUCT_REFERENCE_CACHE_MAX_ENTRIES = 1000;
+const PRODUCT_REFERENCE_CACHE_TTL_MS = 60_000;
+const productReferenceCache = new Map();
 const DASHBOARD_CACHE_TTL_MS = 45_000;
 let dashboardStatsCache = { expiresAt: 0, generation: 0, payload: null };
 let dashboardStatsInFlight = null;
@@ -43,6 +46,7 @@ function invalidateDashboardStats() {
 }
 const invalidateProductEnrichment = () => {
   productEnrichmentCache = { expiresAt: 0, entries: new Map() };
+  productReferenceCache.clear();
   invalidateDashboardStats();
 };
 let googleAnalyticsTokenCache = { accessToken: "", expiresAt: 0, clientEmail: "" };
@@ -1507,8 +1511,22 @@ async function allProductRows(env) {
 async function resolveProductReference(env, reference, context = null) {
   const value = String(reference || "").trim();
   if (!value) return "";
-  const direct = await env.DB.prepare("SELECT id FROM products WHERE id = ?").bind(value).first();
-  if (direct) return String(direct.id);
+  const cacheKey = [value.toLowerCase(), productUrlSlug(context?.category, ""), productUrlSlug(context?.subcategory, "")].join("|");
+  const cached = productReferenceCache.get(cacheKey);
+  if (cached?.expiresAt > Date.now()) return cached.id;
+  if (cached) productReferenceCache.delete(cacheKey);
+  const remember = id => {
+    if (!id) return id;
+    if (productReferenceCache.size >= PRODUCT_REFERENCE_CACHE_MAX_ENTRIES) productReferenceCache.delete(productReferenceCache.keys().next().value);
+    productReferenceCache.set(cacheKey, { id: String(id), expiresAt: Date.now() + PRODUCT_REFERENCE_CACHE_TTL_MS });
+    return String(id);
+  };
+  // Canonical URLs end in the product's complete UUID. Resolve that suffix
+  // directly so a product page does not need to scan every live product.
+  const canonicalId = value.match(/(?:^|-)([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i)?.[1] || "";
+  const direct = await env.DB.prepare("SELECT id FROM products WHERE id = ? OR (? != '' AND lower(id) = ?) LIMIT 1")
+    .bind(value, canonicalId.toLowerCase(), canonicalId.toLowerCase()).first();
+  if (direct) return remember(direct.id);
   const { results } = await env.DB.prepare("SELECT id, name, category, subcategory FROM products WHERE status = 'live'").all();
   const candidates = results
     .map(row => ({ id: String(row.id), slug: slugifyName(row.name), category: productUrlSlug(row.category), subcategory: productUrlSlug(row.subcategory) }))
@@ -1516,23 +1534,23 @@ async function resolveProductReference(env, reference, context = null) {
   const normalizedValue = value.toLowerCase();
   const exact = candidates.filter(row => row.slug === normalizedValue);
   const canonical = candidates.filter(row => `${row.slug}-${row.id.toLowerCase()}` === normalizedValue);
-  if (canonical.length === 1) return canonical[0].id;
+  if (canonical.length === 1) return remember(canonical[0].id);
   // Keep the short-id form compatible with the first rollout of this URL
   // system, so links shared during that window still reach the right item.
   const shortened = candidates.filter(row => `${row.slug}-${row.id.slice(0, 8).toLowerCase()}` === normalizedValue);
-  if (shortened.length === 1) return shortened[0].id;
+  if (shortened.length === 1) return remember(shortened[0].id);
   const contextMatches = context
     ? candidates.filter(row => row.slug === normalizedValue && row.category === productUrlSlug(context.category) && row.subcategory === productUrlSlug(context.subcategory))
     : [];
-  if (contextMatches.length === 1) return contextMatches[0].id;
-  if (exact.length === 1) return exact[0].id;
+  if (contextMatches.length === 1) return remember(contextMatches[0].id);
+  if (exact.length === 1) return remember(exact[0].id);
   // Tolerate links saved under an older name: <old-slug>-<8-char-id> resolves
   // while the trailing id chunk still identifies the listing.
   for (const candidate of candidates) {
     for (const token of [candidate.id.toLowerCase(), candidate.id.slice(0, 8).toLowerCase()]) {
       if (!token || !normalizedValue.endsWith(`-${token}`)) continue;
       const prefix = normalizedValue.slice(0, -(token.length + 1));
-      if (candidate.slug === prefix || candidate.slug.startsWith(`${prefix}-`) || prefix.startsWith(candidate.slug)) return candidate.id;
+      if (candidate.slug === prefix || candidate.slug.startsWith(`${prefix}-`) || prefix.startsWith(candidate.slug)) return remember(candidate.id);
     }
   }
   // Never guess when a plain name is shared by multiple live listings. The
