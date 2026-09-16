@@ -35,8 +35,15 @@ const RATE_LIMITS = new Map([
 // the shared D1 bucket below so limits apply across Worker isolates.
 const requestRateBuckets = new Map();
 let productEnrichmentCache = { expiresAt: 0, entries: new Map() };
+const DASHBOARD_CACHE_TTL_MS = 45_000;
+let dashboardStatsCache = { expiresAt: 0, generation: 0, payload: null };
+let dashboardStatsInFlight = null;
+function invalidateDashboardStats() {
+  dashboardStatsCache = { expiresAt: 0, generation: dashboardStatsCache.generation + 1, payload: null };
+}
 const invalidateProductEnrichment = () => {
   productEnrichmentCache = { expiresAt: 0, entries: new Map() };
+  invalidateDashboardStats();
 };
 let googleAnalyticsTokenCache = { accessToken: "", expiresAt: 0, clientEmail: "" };
 
@@ -3130,7 +3137,32 @@ async function trackWishlistEvent(request, env, user) {
   return json({ ok: true });
 }
 
+/* Dashboard data is global to this store, so a short Worker-local cache avoids
+   rerunning the full analytics fan-out for every admin tab and poll. Mutations
+   invalidate it through invalidateProductEnrichment(), while the generation
+   guard prevents an in-flight pre-mutation result from being cached. */
 async function dashboardStats(env) {
+  const now = Date.now();
+  if (dashboardStatsCache.payload && dashboardStatsCache.expiresAt > now) return json(dashboardStatsCache.payload);
+  const generation = dashboardStatsCache.generation;
+  if (!dashboardStatsInFlight || dashboardStatsInFlight.generation !== generation) {
+    const request = { generation, promise: null };
+    request.promise = buildDashboardStats(env).then((payload) => {
+      if (dashboardStatsCache.generation === generation) {
+        dashboardStatsCache = { expiresAt: Date.now() + DASHBOARD_CACHE_TTL_MS, generation, payload };
+      }
+      if (dashboardStatsInFlight === request) dashboardStatsInFlight = null;
+      return payload;
+    }, (error) => {
+      if (dashboardStatsInFlight === request) dashboardStatsInFlight = null;
+      throw error;
+    });
+    dashboardStatsInFlight = request;
+  }
+  return json(await dashboardStatsInFlight.promise);
+}
+
+async function buildDashboardStats(env) {
   const [salesResult, cartResult, wishResult, productResult, customerResult, orderCount, returnCount, stateOrdersResult, hourOrdersResult, recoveryResult, codResult, funnelResult, viewsTotalResult, viewsByDayResult, viewsByPathResult, viewsByReferrerResult, viewsByDeviceResult, viewsByCountryResult, viewsByHourResult, viewsByDayHourResult] = await Promise.all([
     env.DB.prepare(`
       SELECT oi.product_id,
@@ -3380,7 +3412,7 @@ async function dashboardStats(env) {
   const codCancelled = Number(codResult?.cancelled || 0);
   const trackedCartCustomers = Number(funnelResult?.cart_customers || 0);
   const purchasingCustomers = Number(funnelResult?.purchasing_customers || 0);
-  return json({
+  return {
     byProduct,
     byCategory: Object.values(byCategory).sort((a, b) => b.revenue - a.revenue),
     bySubcategory: Object.values(bySubcategory).sort((a, b) => b.revenue - a.revenue),
@@ -3427,7 +3459,7 @@ async function dashboardStats(env) {
       repeat_customers: customerResult.results.filter(row => Number(row.order_count || 0) > 1).length,
       return_rate: totalOrders ? Math.round((refundedOrCompleted / totalOrders) * 100) : 0
     }
-  });
+  };
 }
 
 function googleAnalyticsCredentials(env) {
