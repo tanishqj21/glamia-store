@@ -115,6 +115,15 @@ const ADMIN_POLL_ROUTES = new Set([
   "/admin/inventory",
 ]);
 
+const ADMIN_CACHE_TTLS = {
+  dashboard: 15000,
+  notifications: 10000,
+  notificationCount: 10000,
+  orders: 15000,
+  products: 30000,
+  categories: 300000,
+};
+
 function AdminShell({ route, onNavigate, notifications = [], unreadCount = null, children }) {
   const unread = unreadCount === null || unreadCount === undefined
     ? notifications.filter((item) => !item.read_at && !item.dismissed_at).length
@@ -1194,7 +1203,7 @@ export function AdminWorkspace({ route, onNavigate }) {
     const needs = ADMIN_SECTION_DATA[route] || {};
     async function loadAdminData() {
       const requestEntries = [];
-      const addRequest = (key, input) => requestEntries.push([key, apiFetch(input)]);
+      const addRequest = (key, input) => requestEntries.push([key, apiFetch(input, { cacheTtl: ADMIN_CACHE_TTLS[key] || 0 })]);
       if (needs.dashboard) addRequest("dashboard", "/api/admin/dashboard");
       if (needs.notifications) addRequest("notifications", "/api/admin/notifications");
       else addRequest("notificationCount", "/api/admin/notifications/count");
@@ -1242,7 +1251,7 @@ export function AdminWorkspace({ route, onNavigate }) {
   function changeOrder(next) { setOrders((current) => current.map((order) => order.id === next.id ? { ...order, ...next } : order)); }
   function changeNotifications(update) { setNotifications(update); }
   function removeProduct(id) { setProducts((current) => current.filter((product) => product.id !== id)); }
-  async function refreshCatalog() { const response = await apiFetch("/api/categories"); const data = await response.json(); if (response.ok) { setCategories(data.categories || []); setSubcategories(data.subcategories || []); } }
+  async function refreshCatalog() { const response = await apiFetch("/api/categories", { cacheTtl: ADMIN_CACHE_TTLS.categories }); const data = await response.json(); if (response.ok) { setCategories(data.categories || []); setSubcategories(data.subcategories || []); } }
   const loading = loadedRoute !== route;
   return <AdminShell route={route} onNavigate={onNavigate} notifications={notifications} unreadCount={unreadCount}>{error && errorRoute === route ? <section className="admin-panel admin-wide-panel"><p className="eyebrow">Admin access</p><h2>{error}</h2><p className="muted">Use the sign-in page to continue.</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Open admin sign-in <span aria-hidden="true">↗</span></button></section> : loading ? <div className="loading-card">Preparing your console…</div> : route === "/admin" ? <DashboardView dashboard={dashboard} orders={orders} notifications={notifications} onNavigate={onNavigate} /> : route === "/admin/storefront" ? <StorefrontSettingsView /> : route === "/admin/labels" ? <LabelsView orders={orders} /> : route === "/admin/hero" ? <HeroStudioView products={products} categories={categories} /> : route === "/admin/tax" ? <TaxComplianceView /> : route === "/admin/add-product" ? <AddListingView categories={categories} subcategories={subcategories} onNavigate={onNavigate} /> : route === "/admin/bulk-listing" ? <BulkListingView categories={categories} subcategories={subcategories} /> : route === "/admin/orders" ? <OrdersView orders={orders} onOrderChanged={changeOrder} /> : route === "/admin/products" ? <ManageProductsView products={products} categories={categories} subcategories={subcategories} onProductChanged={changeProduct} onProductDeleted={removeProduct} onNavigate={onNavigate} /> : route === "/admin/inventory" ? <InventoryView products={products} onProductChanged={changeProduct} /> : route === "/admin/customers" ? <CustomersView /> : route === "/admin/employees" ? <EmployeesView /> : route === "/admin/reviews" ? <ReviewsView /> : route === "/admin/questions" ? <QuestionsView /> : route === "/admin/coupons" ? <CouponsView products={products} categories={categories} subcategories={subcategories} /> : route === "/admin/deals" ? <DealsView products={products} onProductChanged={changeProduct} /> : route === "/admin/categories" ? <CategoriesView categories={categories} subcategories={subcategories} onCatalogChanged={refreshCatalog} /> : route === "/admin/returns" ? <ReturnsView /> : route === "/admin/support" ? <SupportView /> : route === "/admin/system" ? <SystemView /> : route === "/admin/manage-store" ? <ManageStoreView onNavigate={onNavigate} /> : <NotificationsView notifications={notifications} onNotificationsChanged={changeNotifications} onNavigate={onNavigate} />}</AdminShell>;
 }
