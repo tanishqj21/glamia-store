@@ -347,9 +347,26 @@ function AddressPanel({ initialAddresses }) {
 
 function OrdersPanel({ initialOrders, products }) {
   const [orders, setOrders] = useState(initialOrders || []);
+  const [returns, setReturns] = useState([]);
   const [status, setStatus] = useState("");
   const [afterSalesOrder, setAfterSalesOrder] = useState(null);
   useEffect(() => { setOrders(initialOrders || []); }, [initialOrders]);
+  useEffect(() => {
+    let active = true;
+    apiFetch("/api/returns").then(async (response) => {
+      const data = await response.json();
+      if (active && response.ok) setReturns(data.requests || []);
+    }).catch(() => null);
+    return () => { active = false; };
+  }, []);
+
+  async function refreshReturns() {
+    const response = await apiFetch("/api/returns").catch(() => null);
+    if (response?.ok) {
+      const data = await response.json();
+      setReturns(data.requests || []);
+    }
+  }
 
   async function cancel(order) {
     if (!window.confirm(`Cancel order ${order.order_number}?`)) return;
@@ -364,8 +381,11 @@ function OrdersPanel({ initialOrders, products }) {
     <section className="account-panel" aria-labelledby="orders-title">
       <div className="account-panel-heading"><div><p className="eyebrow">Order history</p><h2 id="orders-title">Your purchases</h2></div><span className="account-badge">{orders.length} total</span></div>
       {status && <p className="inline-note" role="status">{status}</p>}
-      {orders.length ? <div className="order-list">{orders.map((order) => <article className="account-order-card" key={order.id}><div className="order-card-top"><div><strong>{order.order_number}</strong><p>{order.created_at ? formatIST(order.created_at) : "Recent order"} · {order.order_type === "preorder" ? "Pre-order" : String(order.payment_method || "demo").toUpperCase()}</p></div><span className={`status-pill status-${order.status}`}>{String(order.status || "pending").replace(/_/g, " ")}</span></div><div className="order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.title || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}{item.preorder && <small className="preorder-line-label">Pre-order</small>}</span>)}</div><div className="order-card-bottom"><strong>{money(order.total)}</strong><div className="order-card-actions">{order.status === "delivered" && <button type="button" onClick={() => setAfterSalesOrder(order)}>Return / Refund</button>}{["pending", "confirmed"].includes(order.status) && cancellationWindowOpen(order) && <button type="button" onClick={() => cancel(order)}>Cancel order</button>}{["pending", "confirmed"].includes(order.status) && !cancellationWindowOpen(order) && <small className="form-hint">Cancellation window closed after 2 days.</small>}</div></div></article>)}</div> : <div className="empty-state">You have not placed an order yet.</div>}
-      {afterSalesOrder && <AfterSalesDialog order={afterSalesOrder} products={products} onClose={() => setAfterSalesOrder(null)} onComplete={(data) => { setAfterSalesOrder(null); setStatus(data.replacement_order ? "Exchange submitted and a replacement order was created." : "Return / refund request submitted."); }} />}
+      {orders.length ? <div className="order-list">{orders.map((order) => {
+        const afterSales = returns.find((request) => request.order_id === order.id);
+        return <article className="account-order-card" key={order.id}><div className="order-card-top"><div><strong>{order.order_number}</strong><p>{order.created_at ? formatIST(order.created_at) : "Recent order"} · {order.order_type === "preorder" ? "Pre-order" : String(order.payment_method || "demo").toUpperCase()} · Payment {String(order.payment_status || "demo").replace(/_/g, " ")}</p></div><span className={`status-pill status-${order.status}`}>{String(order.status || "pending").replace(/_/g, " ")}</span></div><div className="order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.title || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}{item.preorder && <small className="preorder-line-label">Pre-order</small>}</span>)}</div>{afterSales && <p className="inline-note" role="status">After-sales request: {String(afterSales.status || "requested").replace(/_/g, " ")}{afterSales.refund_destination === "store_credit" ? " · Store credit" : ""}</p>}<div className="order-card-bottom"><strong>{money(order.total)}</strong><div className="order-card-actions"><a className="text-link" href={`/api/orders/${encodeURIComponent(order.id)}/invoice`} target="_blank" rel="noreferrer">Invoice preview ↗</a>{order.status === "delivered" && !afterSales && <button type="button" onClick={() => setAfterSalesOrder(order)}>Return / Refund</button>}{["pending", "confirmed"].includes(order.status) && cancellationWindowOpen(order) && <button type="button" onClick={() => cancel(order)}>Cancel order</button>}{["pending", "confirmed"].includes(order.status) && !cancellationWindowOpen(order) && <small className="form-hint">Cancellation window closed after 2 days.</small>}</div></div></article>;
+      })}</div> : <div className="empty-state">You have not placed an order yet.</div>}
+      {afterSalesOrder && <AfterSalesDialog order={afterSalesOrder} products={products} onClose={() => setAfterSalesOrder(null)} onComplete={(data) => { setAfterSalesOrder(null); refreshReturns(); setStatus(data.replacement_order ? "Exchange submitted and a replacement order was created." : "Return / refund request submitted."); }} />}
     </section>
   );
 }

@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Glamia Packing",
+    "slug": "glamia-packing",
+    "version": "1.0.0",
+    "icon": "./assets/icon.png",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "glamia-packing",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.glamia.packing"
+    },
+    "android": {
+      "package": "com.glamia.packing",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#11221b"
+      }
+    },
+    "web": {
+      "favicon": "./assets/icon.png"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "extra": {
+      "apiBaseUrl": "https://glamiastore.com",
+      "eas": {
+        "projectId": "3fba46a2-ffc4-45d3-9371-5e3729b274b6"
+      }
+    }
+  }
+}

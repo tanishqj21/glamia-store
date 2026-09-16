@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 const policySections = [
   {
@@ -127,7 +127,7 @@ const policySections = [
       {
         heading: "Seven-day window",
         paragraphs: [
-          "A refund or exchange may be requested within the first 7 days from purchase. After 7 days, the supplied policy document does not allow a return, exchange, or refund."
+          "A refund or exchange may be requested within 7 days of delivery or receipt. After 7 days, the supplied policy document does not allow a return, exchange, or refund."
         ]
       },
       {

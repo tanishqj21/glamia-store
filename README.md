@@ -8,6 +8,7 @@ Customer-facing apparel marketplace on a Cloudflare Worker backend with D1, R2 p
 - `public/` — static frontend (`index.html`, `app.js`, `styles.css`) served by Workers Assets.
 - `migrations/` — D1 schema and seed data.
 - `scripts/smoke-test.mjs` — end-to-end API smoke test (run against `wrangler dev`).
+- `employee-app/` — separate Expo/React Native packing app for Android and iOS. It uses the same Worker/D1 order data through employee-only bearer APIs.
 
 ## Storefront UX
 
@@ -59,6 +60,23 @@ Reach it from the header **Admin** tab or the user dropdown. Sections:
 - **Coupons** — create percent or flat-₹ codes with mixed category/product targeting, selected customer emails, start/end times, total and per-account usage limits, optional minimum cart values, maximum discount caps, and delete them.
 - **Returns & refunds** — review customer after-sales requests and move them through requested, approved, received, refunded, completed, rejected, or cancelled.
 - **System health** — check D1 health, inspect Brevo email delivery attempts, retry failed email events, and download a JSON data backup.
+- **Employees** — create, disable, and reset individual packing-team app credentials. Employee actions are restricted to the packing queue and recorded in a separate audit trail.
+
+## Employee packing app
+
+The employee app is intentionally separate from the buyer storefront and admin console. Admins create credentials under **Admin → Employees**. Each employee can sign in, view non-cancelled orders waiting to be packed, open item/size/colourway/quantity/shipping details, and mark an order as **Packed**.
+
+Packing is stored independently from shipping: marking an order packed never marks it shipped. The Worker creates a deduplicated `order_packed` alert for the admin dashboard, and the website refreshes its admin data every 30 seconds. The app also refreshes its queue every 30 seconds; push notifications can be added later after the workflow is validated.
+
+Run the app from its own directory:
+
+```bash
+cd employee-app
+npm install
+npx expo start
+```
+
+For a local Worker on a physical phone, set `EXPO_PUBLIC_API_URL` to the computer’s LAN IP (not `127.0.0.1`). The managed Expo project exports for both platforms with `npx expo export --platform android` and `npx expo export --platform ios`. Before using employee accounts against a deployment, apply migration `0061_employee_packing_workflow.sql` to that D1 database.
 
 Listing statuses: **on hold** (default for new listings — invisible to buyers), **live** (purchasable), **archived** (retired, hidden everywhere until restored). Buyers only ever see live products.
 

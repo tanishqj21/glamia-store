@@ -7,6 +7,12 @@ const DEMO_ADMIN_EMAIL = "demo-admin@glamia.local";
 const LOW_STOCK_THRESHOLD = 15;
 const CANCELLATION_WINDOW_DAYS = 2;
 const RETURN_WINDOW_DAYS = 7;
+const EMPLOYEE_SESSION_MAX_AGE = 30 * 24 * 60 * 60;
+// Cloudflare Workers currently caps PBKDF2 iteration counts at 100,000.
+// Existing employee records keep and use their stored iteration count.
+const EMPLOYEE_PASSWORD_ITERATIONS = 100000;
+const EMPLOYEE_LOGIN_MAX_FAILURES = 5;
+const EMPLOYEE_LOGIN_LOCK_MS = 15 * 60 * 1000;
 const R2_CLEANUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const R2_CLEANUP_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
@@ -14,6 +20,7 @@ let googleKeysCache = { keys: null, expiresAt: 0 };
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMITS = new Map([
   ["/api/auth/google", 20],
+  ["/api/employee/auth/login", 10],
   ["/api/orders", 30],
   ["/api/order-tracking", 20],
   ["/api/coupons/validate", 60],
@@ -217,7 +224,7 @@ function policiesBotContent(selectedId = "") {
     ["terms", "Terms & Conditions", "Glamia is a brand name owned and operated by SHREE SHAYAM HOSIERY. Glamia’s Platform includes https://glamiastore.com/, its mobile site, and app. By using it, you agree to provide accurate information, follow applicable law, and respect Glamia’s intellectual property. Orders become legally binding once accepted. These terms are governed by the laws of India; the jurisdiction field in the supplied policy document still needs confirmation before production."],
     ["privacy", "Privacy Policy", "Glamia may collect account, contact, identity, address, order, transaction, preference, and relevant payment information to provide services, support orders, personalise the experience, communicate updates, prevent fraud, and meet legal obligations. Information may be shared with affiliates, sellers, logistics providers, service providers, payment providers, and authorities where lawful. Users can access, update, or request deletion of their information, subject to legal and operational retention needs."],
     ["refund-cancellation", "Refund & Cancellation Policy", "Cancellation requests should be made within 2 days of the order and may not be accepted after shipping has started or the order is out for delivery. Damaged, defective, or not-as-described items should be reported to customer service within 7 days of receipt. Approved refunds are processed within 14 days."],
-    ["returns", "Return Policy", "Refunds or exchanges may be requested within the first 7 days from purchase. Items should be unused, in the same condition, and in original packaging. Sale items, exempt categories, and exchanges are subject to the eligibility rules shown at purchase and inspection on return."],
+    ["returns", "Return Policy", "Refunds or exchanges may be requested within 7 days of delivery or receipt. Items should be unused, in the same condition, and in original packaging. Sale items, exempt categories, and exchanges are subject to the eligibility rules shown at purchase and inspection on return."],
     ["shipping", "Shipping Policy", "Orders are shipped through registered domestic courier and/or speed post services within 14 days from order or payment, or by an agreed delivery date. Delivery is attempted at the address supplied at purchase. Courier delays are outside Glamia’s liability, and seller or Platform shipping charges are not refundable."]
   ];
   const selected = sections.find(([id]) => id === selectedId);
@@ -513,10 +520,36 @@ async function cachedPublicApi(request, ctx, ttl, producer) {
 }
 
 async function routeApi(request, env, url, ctx) {
-  assertSameOrigin(request, url);
+  const path = url.pathname;
+  // The native Expo employee app does not have a browser Origin/Referer. Its
+  // bearer session is the CSRF boundary for these narrowly-scoped endpoints.
+  if (!path.startsWith("/api/employee/")) assertSameOrigin(request, url);
   await enforceRateLimit(request, url, env, ctx);
   const user = await currentUser(request, env);
-  const path = url.pathname;
+
+  if (request.method === "POST" && path === "/api/employee/auth/login") {
+    return employeeLogin(request, env);
+  }
+  if (request.method === "POST" && path === "/api/employee/auth/logout") {
+    return employeeLogout(request, env);
+  }
+  if (request.method === "GET" && path === "/api/employee/session") {
+    return getEmployeeSession(request, env);
+  }
+  if (request.method === "GET" && path === "/api/employee/orders") {
+    const employeeSession = await requireEmployee(request, env);
+    return listEmployeeOrders(env, url.searchParams.get("status") || "unpacked", employeeSession);
+  }
+  const employeeOrder = path.match(/^\/api\/employee\/orders\/([^/]+)$/);
+  if (employeeOrder && request.method === "GET") {
+    const employeeSession = await requireEmployee(request, env);
+    return getEmployeeOrder(env, decodeURIComponent(employeeOrder[1]), employeeSession);
+  }
+  const employeePackedOrder = path.match(/^\/api\/employee\/orders\/([^/]+)\/packed$/);
+  if (employeePackedOrder && request.method === "POST") {
+    const employeeSession = await requireEmployee(request, env);
+    return markEmployeeOrderPacked(env, decodeURIComponent(employeePackedOrder[1]), employeeSession);
+  }
 
   if (request.method === "GET" && path === "/api/config") {
     return json({
@@ -659,6 +692,11 @@ async function routeApi(request, env, url, ctx) {
 
   if (request.method === "POST" && path === "/api/orders") {
     return createOrder(request, env, user);
+  }
+
+  const orderInvoice = path.match(/^\/api\/orders\/([^/]+)\/invoice$/);
+  if (orderInvoice && request.method === "GET") {
+    return orderInvoiceResponse(env, user, decodeURIComponent(orderInvoice[1]), url.searchParams.get("token"));
   }
 
   const orderAction = path.match(/^\/api\/orders\/([^/]+)\/(cancel|returns)$/);
@@ -862,6 +900,20 @@ async function routeApi(request, env, url, ctx) {
     return listCustomers(env);
   }
 
+  if (request.method === "GET" && path === "/api/admin/employees") {
+    requireAdmin(user);
+    return listEmployees(env);
+  }
+  if (request.method === "POST" && path === "/api/admin/employees") {
+    requireAdmin(user);
+    return createEmployee(request, env, user);
+  }
+  const adminEmployee = path.match(/^\/api\/admin\/employees\/([^/]+)$/);
+  if (adminEmployee && request.method === "PATCH") {
+    requireAdmin(user);
+    return updateEmployee(request, env, decodeURIComponent(adminEmployee[1]), user);
+  }
+
   if (request.method === "GET" && path === "/api/admin/tax-compliance") {
     requireAdmin(user);
     return taxComplianceReport(env);
@@ -900,6 +952,10 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "GET" && path === "/api/admin/notifications") {
     requireAdmin(user);
     return listAdminNotifications(env);
+  }
+  if (request.method === "GET" && path === "/api/admin/notifications/count") {
+    requireAdmin(user);
+    return getAdminNotificationCount(env);
   }
   if (request.method === "POST" && path === "/api/admin/notifications/read-all") {
     requireAdmin(user);
@@ -2418,12 +2474,6 @@ function sizeStockPlan(env, productId, sizes, sizeStock, fallbackStock) {
   };
 }
 
-async function applySizeStock(env, productId, sizes, sizeStock, fallbackStock) {
-  const plan = sizeStockPlan(env, productId, sizes, sizeStock, fallbackStock);
-  await env.DB.batch(plan.statements);
-  return plan.total;
-}
-
 async function getSizeStockMap(env, productId) {
   const { results } = await env.DB.prepare("SELECT size, stock FROM product_sizes WHERE product_id = ?")
     .bind(productId).all();
@@ -2844,6 +2894,23 @@ async function updateProduct(request, env, id, adminUser = null) {
     validateSizeList(sizes);
     sizePlan = sizeStockPlan(env, id, sizes, body.size_stock, 0);
     next.stock = sizePlan.total;
+  }
+
+  if (body.status === "live") {
+    const publicationIssues = productPublicationIssues(next);
+    if (current.variant_group) {
+      const { results: variantRows } = await env.DB.prepare("SELECT * FROM products WHERE variant_group = ? AND id != ?")
+        .bind(current.variant_group, id).all();
+      for (const variantRow of variantRows) publicationIssues.push(...productPublicationIssues(variantRow).map((issue) => `${variantRow.color || "Linked colourway"}: ${issue}`));
+    }
+    const uniqueIssues = [...new Set(publicationIssues)];
+    if (uniqueIssues.length) {
+      return json({
+        error: "This listing is not ready to go live. Complete the publish checks first.",
+        code: "PUBLISH_VALIDATION_FAILED",
+        issues: uniqueIssues
+      }, 422);
+    }
   }
 
   const updateStatement = env.DB.prepare(`
@@ -3777,6 +3844,15 @@ async function listAdminNotifications(env) {
   return json({ notifications: results, unread_count: unread });
 }
 
+async function getAdminNotificationCount(env) {
+  const row = await env.DB.prepare(`
+    SELECT COUNT(*) AS unread_count
+    FROM admin_notifications
+    WHERE dismissed_at IS NULL AND read_at IS NULL
+  `).first();
+  return json({ unread_count: Number(row?.unread_count || 0) });
+}
+
 async function updateAdminNotification(request, env, id) {
   const current = await env.DB.prepare("SELECT id FROM admin_notifications WHERE id = ?").bind(id).first();
   if (!current) return json({ error: "Notification not found" }, 404);
@@ -4039,11 +4115,16 @@ function formatOrder(row) {
     status: row.status,
     payment_method: formatPaymentMethod(row.payment_method),
     payment_status: row.payment_status || "pending",
+    payment_reference: row.payment_reference || "",
+    payment_updated_at: row.payment_updated_at || null,
     tracking_token: row.tracking_token || "",
     tracking_number: row.tracking_number || "",
     order_type: row.order_type || "standard",
     replacement_for_order_id: row.replacement_for_order_id || null,
     replacement_request_id: row.replacement_request_id || null,
+    packing_status: row.packing_status || "unpacked",
+    packed_at: row.packed_at || null,
+    packed_by: row.packed_by || null,
     shipping,
     created_at: row.created_at,
     updated_at: row.updated_at
@@ -4061,8 +4142,9 @@ async function listOrders(env, user, scope) {
     requireAdmin(user);
     const { results } = await env.DB.prepare(`
       SELECT id, order_number, customer_email, customer_name, items_json, subtotal, discount,
-        coupon_code, total, status, payment_method, payment_status, tracking_token, tracking_number,
-        order_type, replacement_for_order_id, replacement_request_id, shipping_json,
+        coupon_code, total, status, payment_method, payment_status, payment_reference, payment_updated_at,
+        tracking_token, tracking_number,
+        order_type, replacement_for_order_id, replacement_request_id, packing_status, packed_at, packed_by, shipping_json,
         created_at, updated_at
       FROM orders
       ORDER BY created_at DESC, id DESC
@@ -4073,6 +4155,311 @@ async function listOrders(env, user, scope) {
     .bind(String(user.email || "").trim().toLowerCase())
     .all();
   return json({ orders: results.map(formatOrder) });
+}
+
+function employeePublicProfile(employee) {
+  return {
+    id: employee.id,
+    employee_code: employee.employee_code,
+    name: employee.name,
+    active: Boolean(employee.active)
+  };
+}
+
+function employeeBearerToken(request) {
+  const header = String(request.headers.get("Authorization") || "").trim();
+  return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+}
+
+async function digestBase64Url(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value || "")));
+  return base64UrlEncodeBytes(new Uint8Array(digest));
+}
+
+async function hashEmployeePassword(password, salt, iterations = EMPLOYEE_PASSWORD_ITERATIONS) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(String(password)),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: base64UrlToBytes(String(salt)), iterations: Number(iterations) || EMPLOYEE_PASSWORD_ITERATIONS, hash: "SHA-256" },
+    key,
+    256
+  );
+  return base64UrlEncodeBytes(new Uint8Array(bits));
+}
+
+async function generateEmployeePasswordRecord(password) {
+  const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+  const salt = base64UrlEncodeBytes(saltBytes);
+  return {
+    password_hash: await hashEmployeePassword(password, salt, EMPLOYEE_PASSWORD_ITERATIONS),
+    password_salt: salt,
+    password_iterations: EMPLOYEE_PASSWORD_ITERATIONS
+  };
+}
+
+async function employeeLogin(request, env) {
+  const body = await readJson(request);
+  const employeeCode = String(body.employee_id || body.employee_code || "").trim().toUpperCase();
+  const password = String(body.password || "");
+  if (!employeeCode || !password) return json({ error: "Enter your employee ID and password" }, 400);
+  const employee = await env.DB.prepare("SELECT * FROM employees WHERE employee_code = ? LIMIT 1").bind(employeeCode).first();
+  if (!employee) return json({ error: "Employee ID or password is incorrect" }, 401);
+  if (!Number(employee.active)) return json({ error: "This employee account is disabled. Contact an admin." }, 403);
+  if (employee.locked_until && Date.parse(employee.locked_until) > Date.now()) {
+    return json({ error: "Too many failed attempts. Try again in a few minutes." }, 429);
+  }
+
+  let passwordHash = "";
+  try {
+    passwordHash = await hashEmployeePassword(password, employee.password_salt, employee.password_iterations);
+  } catch {
+    return json({ error: "Employee login is not configured correctly" }, 500);
+  }
+  const valid = passwordHash.length === String(employee.password_hash || "").length &&
+    Boolean(await Promise.resolve(crypto.subtle.timingSafeEqual(
+      base64UrlToBytes(passwordHash), base64UrlToBytes(String(employee.password_hash || ""))
+    )).catch(() => false));
+  if (!valid) {
+    const failures = Math.min(EMPLOYEE_LOGIN_MAX_FAILURES, Number(employee.failed_login_count || 0) + 1);
+    const lockedUntil = failures >= EMPLOYEE_LOGIN_MAX_FAILURES
+      ? new Date(Date.now() + EMPLOYEE_LOGIN_LOCK_MS).toISOString()
+      : null;
+    await env.DB.prepare("UPDATE employees SET failed_login_count = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(failures, lockedUntil, employee.id).run();
+    return json({ error: "Employee ID or password is incorrect" }, 401);
+  }
+
+  const token = base64UrlEncodeBytes(crypto.getRandomValues(new Uint8Array(32)));
+  const tokenHash = await digestBase64Url(token);
+  const expiresAt = new Date(Date.now() + EMPLOYEE_SESSION_MAX_AGE * 1000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE employees SET failed_login_count = 0, locked_until = NULL, last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(employee.id),
+    env.DB.prepare("INSERT INTO employee_sessions (token_hash, employee_id, expires_at) VALUES (?, ?, ?)").bind(tokenHash, employee.id, expiresAt)
+  ]);
+  return json({ token, expires_at: expiresAt, employee: employeePublicProfile(employee) });
+}
+
+async function requireEmployee(request, env) {
+  const token = employeeBearerToken(request);
+  if (!token || token.length > 300) throw httpError("Employee sign-in required", 401);
+  const tokenHash = await digestBase64Url(token);
+  const session = await env.DB.prepare(`
+    SELECT s.token_hash, s.expires_at, e.*
+    FROM employee_sessions s
+    JOIN employees e ON e.id = s.employee_id
+    WHERE s.token_hash = ? AND s.revoked_at IS NULL
+    LIMIT 1
+  `).bind(tokenHash).first();
+  if (!session || !Number(session.active) || !session.expires_at || Date.parse(session.expires_at) <= Date.now()) {
+    throw httpError("Employee session expired. Sign in again.", 401);
+  }
+  await env.DB.prepare("UPDATE employee_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?")
+    .bind(tokenHash).run().catch(() => {});
+  return { employee: session, tokenHash };
+}
+
+async function employeeLogout(request, env) {
+  const token = employeeBearerToken(request);
+  if (token) await env.DB.prepare("UPDATE employee_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ?")
+    .bind(await digestBase64Url(token)).run();
+  return json({ ok: true });
+}
+
+async function getEmployeeSession(request, env) {
+  const session = await requireEmployee(request, env);
+  return json({ employee: employeePublicProfile(session.employee), expires_at: session.employee.expires_at });
+}
+
+function formatEmployeeOrder(row) {
+  if (!row) return null;
+  let rawItems = [];
+  let shipping = {};
+  try { rawItems = JSON.parse(row.items_json || "[]"); } catch { rawItems = []; }
+  try { shipping = row.shipping_json ? JSON.parse(row.shipping_json) : {}; } catch { shipping = {}; }
+  return {
+    id: row.id,
+    order_number: row.order_number || fallbackOrderNumber(row),
+    customer_name: row.customer_name || "Customer",
+    customer_email: row.customer_email || "",
+    total: row.total,
+    payment_status: row.payment_status || "demo",
+    order_type: row.order_type || "standard",
+    status: row.status || "pending",
+    packing_status: row.packing_status || "unpacked",
+    packed_at: row.packed_at || null,
+    packed_by: row.packed_by || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    shipping: {
+      name: shipping.name || row.customer_name || "Customer",
+      phone: shipping.phone || "",
+      line1: shipping.line1 || "",
+      line2: shipping.line2 || "",
+      city: shipping.city || "",
+      state: shipping.state || "",
+      pin: shipping.pin || "",
+      country: shipping.country || "India"
+    },
+    items: Array.isArray(rawItems) ? rawItems.map((item) => ({
+      id: item.id || item.product_id || "",
+      name: item.name || item.product_name || item.title || item.id || "Product",
+      quantity: Math.max(1, Number(item.quantity) || 1),
+      size: item.size || "",
+      color: item.color || item.colour || "",
+      variant: item.variant || "",
+      image: item.image || item.image_url || item.thumbnail_url || "",
+      preorder: Boolean(item.preorder)
+    })) : []
+  };
+}
+
+const EMPLOYEE_ORDER_SELECT = `
+  SELECT id, order_number, customer_name, customer_email, items_json, total,
+    payment_status, order_type, status, packing_status, packed_at, packed_by,
+    shipping_json, created_at, updated_at
+  FROM orders
+`;
+
+async function listEmployeeOrders(env, status, _employeeSession) {
+  const normalizedStatus = ["unpacked", "packed", "all"].includes(status) ? status : "unpacked";
+  const conditions = ["status != 'cancelled'"];
+  const bindings = [];
+  if (normalizedStatus !== "all") {
+    conditions.push("packing_status = ?");
+    bindings.push(normalizedStatus);
+  }
+  const { results } = await env.DB.prepare(`${EMPLOYEE_ORDER_SELECT} WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC, id DESC LIMIT 500`)
+    .bind(...bindings).all();
+  return json({ orders: results.map(formatEmployeeOrder), status: normalizedStatus });
+}
+
+async function getEmployeeOrder(env, id, _employeeSession) {
+  const row = await env.DB.prepare(`${EMPLOYEE_ORDER_SELECT} WHERE id = ? OR order_number = ? LIMIT 1`).bind(id, id).first();
+  if (!row || row.status === "cancelled") return json({ error: "Order not found" }, 404);
+  return json({ order: formatEmployeeOrder(row) });
+}
+
+async function writeEmployeeAuditLog(env, employeeId, action, orderId, details = {}) {
+  try {
+    await env.DB.prepare("INSERT INTO employee_audit_log (id, employee_id, action, order_id, details_json) VALUES (?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), employeeId, action, orderId || null, JSON.stringify(details)).run();
+  } catch (error) {
+    console.error("employee_audit_log_write_failed", { action, order_id: orderId || null, error: String(error?.message || error || "Unknown error").slice(0, 300) });
+  }
+}
+
+async function markEmployeeOrderPacked(env, id, employeeSession) {
+  const current = await env.DB.prepare("SELECT * FROM orders WHERE id = ? OR order_number = ? LIMIT 1").bind(id, id).first();
+  if (!current) return json({ error: "Order not found" }, 404);
+  if (current.status === "cancelled") return json({ error: "Cancelled orders cannot be packed" }, 409);
+  if (current.packing_status === "packed") return json({ order: formatEmployeeOrder(current), already_packed: true });
+  const result = await env.DB.prepare(`
+    UPDATE orders
+    SET packing_status = 'packed', packed_at = CURRENT_TIMESTAMP, packed_by = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND status != 'cancelled' AND packing_status = 'unpacked'
+  `).bind(employeeSession.employee.id, current.id).run();
+  if (!Number(result.meta?.changes || 0)) {
+    const latest = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(current.id).first();
+    if (latest?.packing_status === "packed") return json({ order: formatEmployeeOrder(latest), already_packed: true });
+    return json({ error: "Order could not be marked packed. Refresh and try again." }, 409);
+  }
+  const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(current.id).first();
+  await writeEmployeeAuditLog(env, employeeSession.employee.id, "mark_order_packed", current.id, {
+    order_number: updated.order_number || updated.id
+  });
+  await createAdminNotification(env, {
+    type: "order_packed",
+    priority: "high",
+    title: "Order packed",
+    message: `${updated.order_number || updated.id} packed by ${employeeSession.employee.name}`,
+    dedupeKey: `order-packed:${current.id}`,
+    orderId: current.id
+  }).catch(() => null);
+  return json({ order: formatEmployeeOrder(updated), already_packed: false });
+}
+
+function invoiceLineItems(order) {
+  const subtotal = Math.max(0, Number(order.subtotal || 0));
+  const discount = Math.max(0, Number(order.discount || 0));
+  return (order.items || []).map((item) => {
+    const quantity = Math.max(1, Number(item.quantity) || 1);
+    const gross = Math.max(0, Number(item.price || 0) * quantity);
+    const discountShare = subtotal > 0 ? Math.min(gross, discount * (gross / subtotal)) : 0;
+    const net = Math.max(0, gross - discountShare);
+    const code = String(item.hsn_sac_code || "").trim().toUpperCase();
+    const codeType = String(item.hsn_sac_type || "HSN").trim().toUpperCase() === "SAC" ? "SAC" : "HSN";
+    const rateValue = item.gst_rate === null || item.gst_rate === undefined || item.gst_rate === "" ? null : Number(item.gst_rate);
+    const rate = Number.isFinite(rateValue) ? rateValue : null;
+    const inclusive = item.gst_tax_inclusive === undefined || item.gst_tax_inclusive === null ? true : Boolean(item.gst_tax_inclusive);
+    const ready = Boolean(code) && rate !== null;
+    const taxable = ready ? (inclusive ? net / (1 + rate / 100) : net) : 0;
+    const tax = ready ? (inclusive ? net - taxable : taxable * rate / 100) : 0;
+    return {
+      name: item.name || item.product_name || item.id || "Product",
+      selection: [item.size, item.variant, item.color].filter(Boolean).join(" · "),
+      quantity,
+      code,
+      codeType,
+      rate,
+      gross: roundTax(gross),
+      taxable: roundTax(taxable),
+      tax: roundTax(tax),
+      ready
+    };
+  });
+}
+
+async function orderInvoiceResponse(env, user, id, accessToken = "") {
+  const row = await env.DB.prepare("SELECT * FROM orders WHERE id = ? OR order_number = ? LIMIT 1").bind(id, id).first();
+  if (!row) return new Response("Order not found", { status: 404 });
+  const isAdmin = user?.role === "admin";
+  const tokenMatches = accessToken && String(row.tracking_token || "") === String(accessToken).trim();
+  const ownerMatches = user && String(row.customer_email || "").trim().toLowerCase() === String(user.email || "").trim().toLowerCase();
+  if (!isAdmin && !ownerMatches && !tokenMatches) {
+    return new Response("Not found", { status: 404 });
+  }
+  const taxSettings = await env.DB.prepare("SELECT business_state, business_state_code, gstin FROM tax_settings WHERE id = 1").first();
+  const order = formatOrder(row);
+  const lines = invoiceLineItems(order);
+  const classification = classifyTaxState(order.shipping?.state, taxSettings);
+  const taxable = roundTax(lines.reduce((sum, line) => sum + line.taxable, 0));
+  const tax = roundTax(lines.reduce((sum, line) => sum + line.tax, 0));
+  const cgst = classification === "intra_state" ? roundTax(tax / 2) : 0;
+  const sgst = classification === "intra_state" ? roundTax(tax - cgst) : 0;
+  const igst = classification === "inter_state" ? tax : 0;
+  const shipping = order.shipping || {};
+  const buyerAddress = [shipping.line1, shipping.line2, shipping.city, shipping.state, shipping.pin, shipping.country || "India"].filter(Boolean).join(", ");
+  const missingTax = lines.some((line) => !line.ready) || classification === "unclassified";
+  const demoDocument = ["demo", "cod", "replacement"].includes(String(row.payment_method || "").trim().toLowerCase());
+  const previewDocument = demoDocument || missingTax;
+  const taxableLabel = missingTax ? "Taxable value (configured lines)" : "Taxable value";
+  const lineMarkup = lines.map((line) => `<tr><td><strong>${escapeHtml(line.name)}</strong>${line.selection ? `<small>${escapeHtml(line.selection)}</small>` : ""}</td><td>${line.quantity}</td><td>${escapeHtml(line.codeType)} ${escapeHtml(line.code || "—")}</td><td>${line.rate === null ? "—" : `${line.rate}%`}</td><td>${line.ready ? formatInr(line.taxable) : "—"}</td><td>${line.ready ? formatInr(line.tax) : "—"}</td><td>${formatInr(line.gross)}</td></tr>`).join("");
+  const taxSummary = classification === "intra_state"
+    ? `<tr><td>CGST</td><td>${formatInr(cgst)}</td></tr><tr><td>SGST</td><td>${formatInr(sgst)}</td></tr>`
+    : classification === "inter_state"
+      ? `<tr><td>IGST</td><td>${formatInr(igst)}</td></tr>`
+      : `<tr><td>GST status</td><td>${tax ? formatInr(tax) : "Pending tax setup"}</td></tr>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ${escapeHtml(order.order_number)} · Glamia</title><style>body{margin:0;background:#f4f1eb;color:#242520;font:14px/1.5 Arial,sans-serif}.sheet{max-width:920px;margin:28px auto;padding:42px;background:#fff}@media(max-width:700px){.sheet{margin:0;padding:22px 16px}table{font-size:11px}}.top,.meta,.totals{display:flex;justify-content:space-between;gap:24px}.brand{letter-spacing:.28em;font-size:24px;margin:0 0 6px}.muted{color:#6e7069}.notice{border:1px solid #b56a4d;background:#fff6f0;padding:12px;margin:24px 0}.meta{border-top:1px solid #d8d4cb;border-bottom:1px solid #d8d4cb;padding:18px 0;margin:25px 0}.meta div{min-width:0}.meta strong,.meta span{display:block}.meta span{white-space:pre-wrap}.order-table{width:100%;border-collapse:collapse;margin:20px 0}.order-table th,.order-table td{padding:10px 7px;border-bottom:1px solid #e1ddd5;text-align:right;vertical-align:top}.order-table th:first-child,.order-table td:first-child{text-align:left}.order-table small{display:block;color:#6e7069}.totals{justify-content:flex-end}.totals table{min-width:290px;border-collapse:collapse}.totals td{padding:5px 0}.totals td:last-child{text-align:right}.grand{font-size:18px;border-top:1px solid #242520}.footer{margin-top:36px;padding-top:16px;border-top:1px solid #d8d4cb;color:#6e7069;font-size:12px}button{background:#242520;color:#fff;border:0;padding:10px 16px;cursor:pointer}@media print{body{background:#fff}.sheet{margin:0;max-width:none;padding:0}button{display:none}.notice{background:#fff}}</style></head><body><main class="sheet"><div class="top"><div><p class="brand">GLAMIA</p><span class="muted">Fashion, considered.</span></div><div style="text-align:right"><strong>${previewDocument ? "DEMO INVOICE PREVIEW" : "INVOICE PREVIEW"}</strong><br><span class="muted">${escapeHtml(order.order_number)}</span><br><button onclick="window.print()">Print / save PDF</button></div></div>${previewDocument ? `<div class="notice"><strong>Demo tax document — not a production tax invoice.</strong><br>Confirm GST classification, place of supply, invoice numbering, and tax treatment with your CA before enabling live payments.</div>` : ""}<div class="meta"><div><strong>Bill to</strong><span>${escapeHtml(order.customer_name || "Customer")}</span><span>${escapeHtml(order.customer_email || "")}</span><span>${escapeHtml(buyerAddress || "Address not supplied")}</span></div><div><strong>Order date</strong><span>${escapeHtml(formatOrderDate(order.created_at))}</span><strong style="margin-top:10px">Payment</strong><span>${escapeHtml(formatPaymentMethod(order.payment_method))} · ${escapeHtml(order.payment_status || "pending")}</span></div><div><strong>Seller</strong><span>Glamia</span><span>${escapeHtml(taxSettings?.business_state || "Business state not configured")}</span><span>${taxSettings?.gstin ? `GSTIN: ${escapeHtml(taxSettings.gstin)}` : "GSTIN not configured"}</span></div></div><table class="order-table"><thead><tr><th>Item</th><th>Qty</th><th>HSN/SAC</th><th>GST</th><th>Taxable</th><th>Tax</th><th>Amount</th></tr></thead><tbody>${lineMarkup || `<tr><td colspan="7">No line items</td></tr>`}</tbody></table><div class="totals"><table><tr><td>Subtotal</td><td>${formatInr(order.subtotal)}</td></tr><tr><td>Discount</td><td>−${formatInr(order.discount)}</td></tr><tr><td>Taxable value</td><td>${formatInr(taxable)}</td></tr>${taxSummary}<tr class="grand"><td><strong>Total</strong></td><td><strong>${formatInr(order.total)}</strong></td></tr></table></div><p class="footer">Place of supply: ${escapeHtml(shipping.state || "Not supplied")} · Classification: ${escapeHtml(classification.replace("_", " "))}. This preview reflects the tax codes and rates saved on the order at checkout.</p></main></body></html>`;
+  const invoiceDocument = html
+    .replace(/<style>[\s\S]*?<\/style>/, '<link rel="stylesheet" href="/invoice.css">')
+    .replace('<div style="text-align:right"><strong>', '<div class="invoice-top-actions"><span class="invoice-document-label">')
+    .replace('</strong><br><span class="muted">', '</span><span class="invoice-number">')
+    .replace('</span><br><button onclick="window.print()">', '</span><button onclick="window.print()">')
+    .replace('<strong style="margin-top:10px">', '<strong>')
+    .replace('<td>Taxable value</td>', `<td>${taxableLabel}</td>`);
+  return new Response(invoiceDocument, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store, private",
+      "Content-Disposition": `inline; filename="glamia-invoice-${String(order.order_number || id).replace(/[^A-Za-z0-9_-]/g, "-")}.html"`,
+      "X-Content-Type-Options": "nosniff"
+    }
+  });
 }
 
 async function trackPublicOrder(env, rawOrderId, rawEmail) {
@@ -4191,6 +4578,21 @@ async function createOrder(request, env, user) {
   if (!user && (customerEmail.length > 254 || !isRealCustomerEmail(customerEmail))) {
     throw httpError("Enter a valid email for order confirmation and delivery updates", 400);
   }
+  const checkoutTokenInput = String(body.checkout_token || "").trim();
+  if (checkoutTokenInput && !/^[A-Za-z0-9_-]{16,120}$/.test(checkoutTokenInput)) {
+    throw httpError("Checkout session token is invalid. Refresh the checkout page and try again.", 400);
+  }
+  if (checkoutTokenInput) {
+    const existing = await env.DB.prepare("SELECT * FROM orders WHERE checkout_token = ? LIMIT 1")
+      .bind(checkoutTokenInput).first();
+    if (existing) {
+      if (String(existing.customer_email || "").trim().toLowerCase() !== customerEmail) {
+        throw httpError("This checkout session is no longer valid. Refresh the checkout page and try again.", 409);
+      }
+      return json({ order: formatOrder(existing), idempotent: true });
+    }
+  }
+  const checkoutToken = checkoutTokenInput || crypto.randomUUID().replace(/-/g, "");
   const paymentStatus = "demo";
   const trackingToken = crypto.randomUUID().replace(/-/g, "");
 
@@ -4288,7 +4690,16 @@ async function createOrder(request, env, user) {
   const customerName = user?.name || address.name;
   const orderType = hasPreorder ? "preorder" : "standard";
 
-  const checkoutStatements = [];
+  const orderInsertStatement = env.DB.prepare(`
+      INSERT INTO orders (id, order_number, tracking_token, checkout_token, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_status, shipping_json, order_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+    `).bind(
+    id, orderNumber, trackingToken, checkoutToken, customerEmail, customerName, JSON.stringify(items), subtotal, discount,
+    couponCode, total, paymentMethod, paymentStatus, JSON.stringify(address), orderType
+  );
+  // Insert first so the database stock trigger sees the available snapshot;
+  // every following adjustment remains in the same atomic D1 batch.
+  const checkoutStatements = [orderInsertStatement];
   for (const [productId, quantity] of preorderQuantities) {
     checkoutStatements.push(env.DB.prepare(`
       UPDATE products
@@ -4328,14 +4739,6 @@ async function createOrder(request, env, user) {
       )
     `).bind(sizeAdjustmentsJson, sizeAdjustmentsJson));
   }
-  checkoutStatements.push(env.DB.prepare(`
-      INSERT INTO orders (id, order_number, tracking_token, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_status, shipping_json, order_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
-    `).bind(
-      id, orderNumber, trackingToken, customerEmail, customerName, JSON.stringify(items), subtotal, discount,
-      couponCode, total, paymentMethod, paymentStatus, JSON.stringify(address), orderType
-    ));
-
   const orderItemRows = items.map(item => ({
     lineId: crypto.randomUUID(),
     ...item,
@@ -4384,6 +4787,11 @@ async function createOrder(request, env, user) {
     await env.DB.batch(checkoutStatements);
   } catch (error) {
     const detail = String(error?.message || error || "");
+    if (/unique constraint failed: orders\.checkout_token/i.test(detail) && checkoutToken) {
+      const existing = await env.DB.prepare("SELECT * FROM orders WHERE checkout_token = ? AND customer_email = ? LIMIT 1")
+        .bind(checkoutToken, customerEmail).first();
+      if (existing) return json({ order: formatOrder(existing), idempotent: true });
+    }
     if (/insufficient .*stock/i.test(detail)) {
       throw httpError("Some items sold out while you were checking out. Please refresh your cart.", 409);
     }
@@ -4888,7 +5296,7 @@ async function listSupportMessages(env, user, ticketId) {
 }
 
 async function createSupportMessage(request, env, user, ticketId) {
-  const ticket = await supportTicketForUser(env, user, ticketId);
+  await supportTicketForUser(env, user, ticketId);
   const body = await readJson(request);
   const message = String(body.message || "").trim().slice(0, 2000);
   if (message.length < 1) return json({ error: "Write a message before sending" }, 400);
@@ -4931,7 +5339,7 @@ async function exportBackup(env, adminUser) {
     "coupons", "coupon_email_targets", "coupon_redemptions", "user_addresses", "profile_phones",
     "return_requests", "store_credit_accounts", "store_credit_ledger", "referral_codes", "referral_rewards",
     "support_tickets", "support_messages", "product_questions", "restock_subscriptions", "email_delivery_log",
-    "admin_notifications", "admin_audit_log", "cart_adds", "wishlist_adds", "upload_usage", "page_views", "counters"
+    "admin_notifications", "admin_audit_log", "employee_audit_log", "employees", "employee_sessions", "cart_adds", "wishlist_adds", "upload_usage", "page_views", "counters"
   ];
   const backup = { generated_at: new Date().toISOString(), tables: {} };
   const tableResults = await env.DB.batch(tables.map(table => env.DB.prepare(`SELECT * FROM ${table}`)));
@@ -4947,40 +5355,68 @@ async function exportBackup(env, adminUser) {
 }
 
 const ORDER_STATUSES = ["pending", "confirmed", "shipped", "delivered", "cancelled"];
+const PAYMENT_STATUSES = ["demo", "pending", "paid", "failed", "refunded", "not_required"];
 
 async function updateOrderStatus(request, env, id, adminUser = null) {
   const body = await readJson(request);
-  if (!ORDER_STATUSES.includes(body.status)) return json({ error: "Invalid order status" }, 400);
+  if (body.status !== undefined && !ORDER_STATUSES.includes(body.status)) return json({ error: "Invalid order status" }, 400);
+  const hasPaymentStatus = Object.prototype.hasOwnProperty.call(body, "payment_status");
+  if (hasPaymentStatus && !PAYMENT_STATUSES.includes(String(body.payment_status || "").trim().toLowerCase())) {
+    return json({ error: "Invalid payment status" }, 400);
+  }
   const hasTracking = Object.prototype.hasOwnProperty.call(body, "tracking_number");
   if (hasTracking && String(body.tracking_number || "").trim().length > 80) {
     return json({ error: "Tracking number must be 80 characters or fewer" }, 400);
   }
+  const hasPaymentReference = Object.prototype.hasOwnProperty.call(body, "payment_reference");
+  if (hasPaymentReference && String(body.payment_reference || "").trim().length > 160) {
+    return json({ error: "Payment reference must be 160 characters or fewer" }, 400);
+  }
   const current = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(id).first();
   if (!current) return json({ error: "Order not found" }, 404);
-  if (current.status === "cancelled" && body.status !== "cancelled") {
+  const requestedStatus = body.status === undefined ? current.status : body.status;
+  if (current.status === "cancelled" && requestedStatus !== "cancelled") {
     return json({ error: "Cancelled orders cannot be reopened" }, 409);
   }
   const statements = [];
   const trackingNumber = hasTracking ? String(body.tracking_number || "").trim() : String(current.tracking_number || "");
   const assigningTracking = hasTracking && trackingNumber && !String(current.tracking_number || "").trim();
-  const nextStatus = body.status === "cancelled"
+  const nextStatus = requestedStatus === "cancelled"
     ? "cancelled"
     : assigningTracking && current.status !== "cancelled"
       ? "shipped"
-      : body.status;
-  if (body.status === "cancelled" && current.status !== "cancelled") {
+      : requestedStatus;
+  const paymentStatus = hasPaymentStatus
+    ? String(body.payment_status || "").trim().toLowerCase()
+    : String(current.payment_status || "pending").trim().toLowerCase();
+  const paymentReference = hasPaymentReference
+    ? String(body.payment_reference || "").trim()
+    : String(current.payment_reference || "").trim();
+  const paymentChanged = paymentStatus !== String(current.payment_status || "pending").trim().toLowerCase()
+    || paymentReference !== String(current.payment_reference || "").trim();
+  if (requestedStatus === "cancelled" && current.status !== "cancelled") {
     statements.push(env.DB.prepare(`
       INSERT OR IGNORE INTO order_stock_releases (order_id)
       SELECT id FROM orders WHERE id = ? AND status != 'cancelled'
     `).bind(id));
     statements.push(env.DB.prepare("DELETE FROM coupon_redemptions WHERE order_id = ?").bind(id));
   }
-  statements.push(env.DB.prepare("UPDATE orders SET status = ?, tracking_number = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-    .bind(nextStatus, trackingNumber || null, id));
+  statements.push(env.DB.prepare(`
+    UPDATE orders SET
+      status = ?, tracking_number = ?, payment_status = ?, payment_reference = ?,
+      payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(
+    nextStatus, trackingNumber || null, paymentStatus, paymentReference || null,
+    paymentChanged ? new Date().toISOString() : (current.payment_updated_at || null), id
+  ));
   await env.DB.batch(statements);
   invalidateProductEnrichment();
   const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(id).first();
-  if (adminUser) await writeAuditLog(env, adminUser.email, "update_order_status", "order", id, { from: current.status, to: nextStatus, tracking_number: trackingNumber || null });
+  if (adminUser) await writeAuditLog(env, adminUser.email, "update_order_status", "order", id, {
+    from: current.status, to: nextStatus, tracking_number: trackingNumber || null,
+    payment_status: paymentStatus, payment_reference_changed: paymentReference !== String(current.payment_reference || "").trim()
+  });
   if (nextStatus === "cancelled" && current.status !== "cancelled") {
     await createAdminNotification(env, {
       type: "cancelled_order",
@@ -5002,6 +5438,9 @@ async function updateOrderStatus(request, env, id, adminUser = null) {
         .bind(id).run();
     }
   }
+  if (paymentChanged && paymentStatus !== "demo") {
+    await sendOrderEmail(env, updated, "payment");
+  }
   return json({ order: formatOrder(updated) });
 }
 
@@ -5010,7 +5449,7 @@ async function sendOrderEmail(env, row, type) {
   const recipient = String(row?.customer_email || "").trim();
   if (!isRealCustomerEmail(recipient)) return false;
 
-  const emailType = ["confirmation", "shipped", "delivery", "cancelled"].includes(type) ? type : "confirmation";
+  const emailType = ["confirmation", "shipped", "delivery", "cancelled", "payment"].includes(type) ? type : "confirmation";
   const order = formatOrder(row);
   const isReplacement = order.order_type === "replacement";
   const isPreorder = order.order_type === "preorder" || order.items.some(item => item.preorder);
@@ -5025,13 +5464,15 @@ async function sendOrderEmail(env, row, type) {
     confirmation: `${isReplacement ? "Replacement order" : "Order"} ${order.order_number} received · Glamia`,
     shipped: `Your Glamia ${orderLabel} ${order.order_number} is on the way`,
     delivery: `Your Glamia ${orderLabel} ${order.order_number} has been delivered`,
-    cancelled: `Your Glamia ${orderLabel} ${order.order_number} was cancelled`
+    cancelled: `Your Glamia ${orderLabel} ${order.order_number} was cancelled`,
+    payment: `Payment update for your Glamia ${order.order_number}`
   }[emailType];
   const eventLabel = {
     confirmation: isReplacement ? "Your replacement product order is ready" : "Thank you for your order",
     shipped: `Your ${orderLabel} is on the way`,
     delivery: `Your ${orderLabel} has been delivered`,
-    cancelled: `Your ${orderLabel} has been cancelled`
+    cancelled: `Your ${orderLabel} has been cancelled`,
+    payment: "Your payment status has been updated"
   }[emailType];
   const eventTime = emailType === "confirmation" ? order.created_at : order.updated_at;
   const shipping = order.shipping || {};
@@ -5043,12 +5484,15 @@ async function sendOrderEmail(env, row, type) {
     ? "If you did not request this cancellation, please contact Glamia support."
     : emailType === "shipped" && !trackingLine
       ? "Your tracking details will be shared as soon as they are available."
+      : emailType === "payment"
+        ? `Payment status: ${String(order.payment_status || "pending").replace(/_/g, " ")}${order.payment_reference ? ` · Reference: ${order.payment_reference}` : ""}.`
       : "";
+  const invoiceUrl = `${String(env.PUBLIC_SITE_URL || "https://glamiastore.com").replace(/\/$/, "")}/api/orders/${encodeURIComponent(order.id)}/invoice?token=${encodeURIComponent(order.tracking_token || "")}`;
   const htmlItems = order.items.map(item => {
     const selection = [item.size, item.variant, item.color].filter(Boolean).join(" · ");
     return `<li><strong>${escapeHtml(item.name)}</strong>${selection ? ` · ${escapeHtml(selection)}` : ""} · Qty ${Number(item.quantity) || 0} · ${formatInr(item.price * item.quantity)}</li>`;
   }).join("");
-  const htmlContent = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#241f18;line-height:1.6"><h1 style="letter-spacing:.18em">GLAMIA</h1><p>Hi ${escapeHtml(firstName)},</p><h2>${escapeHtml(eventLabel)}</h2><p>Order <strong>${escapeHtml(order.order_number)}</strong> · ${escapeHtml(formatOrderDate(eventTime))}</p>${statusLine ? `<p>${escapeHtml(statusLine)}</p>` : ""}${trackingLine ? `<p>${escapeHtml(trackingLine)}</p>` : ""}${preorderLine ? `<p>${escapeHtml(preorderLine)}</p>` : ""}<ul>${htmlItems}</ul><p>Subtotal: ${formatInr(order.subtotal)}<br>Discount: ${formatInr(order.discount)}<br><strong>Total: ${formatInr(order.total)}</strong></p><p>Payment: ${escapeHtml(formatPaymentMethod(order.payment_method).toUpperCase())}</p>${shippingLine ? `<p>Delivery address: ${escapeHtml(shippingLine)}</p>` : ""}<p>Warmly,<br>Team Glamia</p></body></html>`;
+  const htmlContent = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#241f18;line-height:1.6"><h1 style="letter-spacing:.18em">GLAMIA</h1><p>Hi ${escapeHtml(firstName)},</p><h2>${escapeHtml(eventLabel)}</h2><p>Order <strong>${escapeHtml(order.order_number)}</strong> · ${escapeHtml(formatOrderDate(eventTime))}</p>${statusLine ? `<p>${escapeHtml(statusLine)}</p>` : ""}${trackingLine ? `<p>${escapeHtml(trackingLine)}</p>` : ""}${preorderLine ? `<p>${escapeHtml(preorderLine)}</p>` : ""}<ul>${htmlItems}</ul><p>Subtotal: ${formatInr(order.subtotal)}<br>Discount: ${formatInr(order.discount)}<br><strong>Total: ${formatInr(order.total)}</strong></p><p>Payment: ${escapeHtml(formatPaymentMethod(order.payment_method).toUpperCase())} · ${escapeHtml(String(order.payment_status || "pending"))}</p>${shippingLine ? `<p>Delivery address: ${escapeHtml(shippingLine)}</p>` : ""}<p><a href="${escapeHtml(invoiceUrl)}">View / print invoice preview</a></p><p>Warmly,<br>Team Glamia</p></body></html>`;
   const textContent = [
     `Hi ${firstName},`,
     "",
@@ -5064,6 +5508,8 @@ async function sendOrderEmail(env, row, type) {
     `Discount: ${formatInr(order.discount)}`,
     `Total: ${formatInr(order.total)}`,
     `Payment: ${formatPaymentMethod(order.payment_method).toUpperCase()}`,
+    `Payment status: ${order.payment_status || "pending"}`,
+    `Invoice preview: ${invoiceUrl}`,
     shippingLine ? `Delivery address: ${shippingLine}` : "",
     "",
     "Warmly,",
@@ -5072,7 +5518,9 @@ async function sendOrderEmail(env, row, type) {
 
   return deliverBrevoEmail(env, {
     eventType: `order-${emailType}`,
-    dedupeKey: `order:${order.id}:${emailType}`,
+    dedupeKey: emailType === "payment"
+      ? `order:${order.id}:payment:${order.payment_status || "pending"}:${order.payment_reference || ""}`
+      : `order:${order.id}:${emailType}`,
     recipient,
     userEmail: recipient,
     orderId: order.id,
@@ -5333,6 +5781,81 @@ function formatInr(value) {
 function formatOrderDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value || "") : date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+}
+
+async function listEmployees(env) {
+  const { results } = await env.DB.prepare(`
+    SELECT id, employee_code, name, active, failed_login_count, locked_until,
+      last_login_at, created_at, updated_at
+    FROM employees
+    ORDER BY active DESC, name COLLATE NOCASE ASC
+  `).all();
+  return json({ employees: results.map(employeePublicProfile).map((employee, index) => ({
+    ...employee,
+    ...(results[index] ? {
+      failed_login_count: Number(results[index].failed_login_count || 0),
+      locked_until: results[index].locked_until || null,
+      last_login_at: results[index].last_login_at || null,
+      created_at: results[index].created_at,
+      updated_at: results[index].updated_at
+    } : {})
+  })) });
+}
+
+async function createEmployee(request, env, adminUser) {
+  const body = await readJson(request);
+  const employeeCode = String(body.employee_id || body.employee_code || "").trim().toUpperCase();
+  const name = String(body.name || "").trim();
+  const password = String(body.password || "");
+  if (!/^[A-Z0-9][A-Z0-9_-]{2,30}$/.test(employeeCode)) {
+    return json({ error: "Employee ID must be 3–31 characters using letters, numbers, hyphens, or underscores" }, 400);
+  }
+  if (name.length < 2 || name.length > 80) return json({ error: "Enter an employee name from 2 to 80 characters" }, 400);
+  if (password.length < 8 || password.length > 200) return json({ error: "Employee password must be 8–200 characters" }, 400);
+  const existing = await env.DB.prepare("SELECT id FROM employees WHERE employee_code = ?").bind(employeeCode).first();
+  if (existing) return json({ error: "That employee ID is already in use" }, 409);
+  const passwordRecord = await generateEmployeePasswordRecord(password);
+  const id = crypto.randomUUID();
+  await env.DB.prepare(`
+    INSERT INTO employees (id, employee_code, name, password_hash, password_salt, password_iterations)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(id, employeeCode, name, passwordRecord.password_hash, passwordRecord.password_salt, passwordRecord.password_iterations).run();
+  await writeAuditLog(env, adminUser.email, "create_employee", "employee", id, { employee_code: employeeCode, name });
+  return json({ employee: employeePublicProfile({ id, employee_code: employeeCode, name, active: 1 }) }, 201);
+}
+
+async function updateEmployee(request, env, id, adminUser) {
+  const current = await env.DB.prepare("SELECT * FROM employees WHERE id = ?").bind(id).first();
+  if (!current) return json({ error: "Employee not found" }, 404);
+  const body = await readJson(request);
+  const updates = [];
+  const bindings = [];
+  const audit = {};
+  if (body.name !== undefined) {
+    const name = String(body.name || "").trim();
+    if (name.length < 2 || name.length > 80) return json({ error: "Enter an employee name from 2 to 80 characters" }, 400);
+    updates.push("name = ?"); bindings.push(name); audit.name_changed = name !== current.name;
+  }
+  if (body.active !== undefined) {
+    const active = body.active === true || body.active === 1 || body.active === "true" ? 1 : 0;
+    updates.push("active = ?"); bindings.push(active); audit.active = Boolean(active);
+    if (!active) await env.DB.prepare("UPDATE employee_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE employee_id = ? AND revoked_at IS NULL").bind(id).run();
+  }
+  if (body.password !== undefined && String(body.password || "")) {
+    const password = String(body.password);
+    if (password.length < 8 || password.length > 200) return json({ error: "Employee password must be 8–200 characters" }, 400);
+    const record = await generateEmployeePasswordRecord(password);
+    updates.push("password_hash = ?", "password_salt = ?", "password_iterations = ?", "failed_login_count = 0", "locked_until = NULL");
+    bindings.push(record.password_hash, record.password_salt, record.password_iterations);
+    audit.password_reset = true;
+    await env.DB.prepare("UPDATE employee_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE employee_id = ? AND revoked_at IS NULL").bind(id).run();
+  }
+  if (!updates.length) return json({ error: "No employee changes supplied" }, 400);
+  updates.push("updated_at = CURRENT_TIMESTAMP");
+  await env.DB.prepare(`UPDATE employees SET ${updates.join(", ")} WHERE id = ?`).bind(...bindings, id).run();
+  const updated = await env.DB.prepare("SELECT id, employee_code, name, active FROM employees WHERE id = ?").bind(id).first();
+  await writeAuditLog(env, adminUser.email, "update_employee", "employee", id, audit);
+  return json({ employee: employeePublicProfile(updated) });
 }
 
 async function listCustomers(env) {
@@ -5821,9 +6344,9 @@ async function createCoupon(request, env) {
       if (target.type === "product") {
         if (!existingProducts.has(target.value)) return json({ error: `Pick a product that exists (${target.value})` }, 400);
       } else if (target.type === "category") {
-        if (!existingCategories.has(target.value.toLowerCase())) return json({ error: `Category \"${target.value}\" does not exist` }, 400);
+        if (!existingCategories.has(target.value.toLowerCase())) return json({ error: `Category "${target.value}" does not exist` }, 400);
       } else if (target.type === "subcategory") {
-        if (!existingSubcategories.has(target.value.toLowerCase())) return json({ error: `Subcategory \"${target.value}\" does not exist` }, 400);
+        if (!existingSubcategories.has(target.value.toLowerCase())) return json({ error: `Subcategory "${target.value}" does not exist` }, 400);
       }
     }
   }
@@ -6044,6 +6567,31 @@ function validateProduct(product, { requireImages = true } = {}) {
       }
     }
   }
+}
+
+function productPublicationIssues(product) {
+  const issues = [];
+  const required = ["name", "category", "brand", "color", "material", "description"];
+  for (const key of required) {
+    if (String(product?.[key] || "").trim().length === 0) issues.push(`Add ${key.replace("color", "colour")}`);
+  }
+  if (!Number.isSafeInteger(Number(product?.price)) || Number(product.price) <= 0) issues.push("Add a valid selling price");
+  if (!Number.isSafeInteger(Number(product?.mrp)) || Number(product.mrp) <= 0) issues.push("Add a valid MRP");
+  let images = [];
+  let thumbnails = [];
+  let sizes = [];
+  try { images = JSON.parse(product?.images_json || "[]"); } catch {}
+  try { thumbnails = JSON.parse(product?.thumbnail_images_json || "[]"); } catch {}
+  try { sizes = JSON.parse(product?.sizes_json || "[]"); } catch {}
+  if (!images.length && product?.image_url) images = [product.image_url];
+  if (!thumbnails.length && product?.thumbnail_url) thumbnails = [product.thumbnail_url];
+  if (images.length < 4 || images.length > 6) issues.push("Add between 4 and 6 product images");
+  if (!thumbnails.length || !images.includes(product?.thumbnail_source_url || thumbnails[0])) issues.push("Choose a thumbnail from the product images");
+  if (!sizes.length) issues.push("Add at least one size");
+  if (product?.preorder_enabled && product?.preorder_limit !== null && product?.preorder_limit !== undefined && Number(product.preorder_sold || 0) >= Number(product.preorder_limit)) {
+    issues.push("Increase the pre-order limit or turn pre-order off");
+  }
+  return [...new Set(issues)];
 }
 
 function formatProduct(row) {

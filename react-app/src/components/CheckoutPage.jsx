@@ -8,6 +8,10 @@ function emptyAddress() {
   return { name: "", phone: "", line1: "", line2: "", city: "", state: "", pin: "", country: "India" };
 }
 
+function newCheckoutToken() {
+  try { return crypto.randomUUID().replace(/-/g, ""); } catch { return `${Date.now()}${Math.random().toString(36).slice(2)}`; }
+}
+
 function addressLabel(address) {
   return [address.line1, address.line2, address.city, address.state, address.pin, address.country || "India"].filter(Boolean).join(", ");
 }
@@ -26,6 +30,10 @@ export function CheckoutPage({ cart, products, user, addresses, onNavigate, onOr
   const [demoEnabled, setDemoEnabled] = useState(false);
   const [confirmation, setConfirmation] = useState(null);
   const cartIds = JSON.stringify([...new Set(cart.map((item) => item.id))].sort());
+  const cartFingerprint = JSON.stringify(cart.map((item) => ({ id: item.id, size: item.size || "", quantity: item.quantity })).sort((a, b) => `${a.id}-${a.size}`.localeCompare(`${b.id}-${b.size}`)));
+  const [checkoutToken, setCheckoutToken] = useState(newCheckoutToken);
+
+  useEffect(() => { setCheckoutToken(newCheckoutToken()); }, [cartFingerprint]);
 
   useEffect(() => {
     let active = true;
@@ -91,6 +99,7 @@ export function CheckoutPage({ cart, products, user, addresses, onNavigate, onOr
         method: "POST",
         body: JSON.stringify({
           items: cart.map((item) => ({ id: item.id, quantity: item.quantity, size: item.size || "" })),
+          checkout_token: checkoutToken,
           payment_method: "demo",
           email: user ? undefined : email,
           address: draft,

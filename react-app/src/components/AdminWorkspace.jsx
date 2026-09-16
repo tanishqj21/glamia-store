@@ -21,6 +21,7 @@ const SystemView = lazy(() => import("./AdminSystemViews").then((module) => ({ d
 const ManageStoreView = lazy(() => import("./AdminSystemViews").then((module) => ({ default: module.ManageStoreView })));
 const TaxComplianceView = lazy(() => import("./TaxComplianceView").then((module) => ({ default: module.TaxComplianceView })));
 const GoogleAnalyticsView = lazy(() => import("./GoogleAnalyticsView").then((module) => ({ default: module.GoogleAnalyticsView })));
+const EmployeesView = lazy(() => import("./AdminEmployees").then((module) => ({ default: module.EmployeesView })));
 
 
 async function compactThumbnailFile(file) {
@@ -83,11 +84,41 @@ function variantImageItems(variant) {
 }
 
 const adminLinks = [
-  ["/admin", "Dashboard"], ["/admin/storefront", "Storefront"], ["/admin/hero", "Hero studio"], ["/admin/tax", "GST & HSN"], ["/admin/labels", "Labels"], ["/admin/manage-store", "Manage store"],
+  ["/admin", "Dashboard"], ["/admin/storefront", "Storefront"], ["/admin/hero", "Hero studio"], ["/admin/tax", "GST & HSN"], ["/admin/labels", "Labels"], ["/admin/employees", "Employees"], ["/admin/manage-store", "Manage store"],
 ];
 
-function AdminShell({ route, onNavigate, notifications = [], children }) {
-  const unread = notifications.filter((item) => !item.read_at && !item.dismissed_at).length;
+// Keep the admin shell light: each section asks the Worker only for the data
+// it actually renders. Notifications remain available through a small unread
+// count everywhere, while the full notification list is loaded only where it
+// is visible or used by the dashboard.
+const ADMIN_SECTION_DATA = {
+  "/admin": { dashboard: true, notifications: true, orders: true },
+  "/admin/notifications": { notifications: true },
+  "/admin/orders": { orders: true },
+  "/admin/labels": { orders: true },
+  "/admin/hero": { products: true, categories: true },
+  "/admin/add-product": { categories: true },
+  "/admin/bulk-listing": { categories: true },
+  "/admin/products": { products: true, categories: true },
+  "/admin/inventory": { products: true },
+  "/admin/coupons": { products: true, categories: true },
+  "/admin/deals": { products: true },
+  "/admin/categories": { categories: true },
+};
+
+const ADMIN_POLL_ROUTES = new Set([
+  "/admin",
+  "/admin/notifications",
+  "/admin/orders",
+  "/admin/labels",
+  "/admin/products",
+  "/admin/inventory",
+]);
+
+function AdminShell({ route, onNavigate, notifications = [], unreadCount = null, children }) {
+  const unread = unreadCount === null || unreadCount === undefined
+    ? notifications.filter((item) => !item.read_at && !item.dismissed_at).length
+    : Number(unreadCount || 0);
   return <main className="page-main"><section className="admin-page admin-react-page"><div className="admin-heading"><div><p className="eyebrow">Glamia console</p><h1 className="page-title">Manage the marketplace.</h1></div><div className="admin-heading-actions"><button className="admin-notification-button" type="button" onClick={() => onNavigate("/admin/notifications")} aria-label={`Open notifications${unread ? `, ${unread} unread` : ""}`} title="Open notifications"><Icon name="bell" size={20} />{unread > 0 && <span>{unread > 99 ? "99+" : unread}</span>}</button><button className="text-link" type="button" onClick={() => onNavigate("/admin/manage-store")}>Open store map</button></div></div><nav className="admin-nav" aria-label="Admin workspace" tabIndex={0}>{adminLinks.map(([href, label]) => <button key={href} type="button" className={route === href ? "active" : ""} onClick={() => onNavigate(href)}>{label}</button>)}</nav>{children}</section></main>;
 }
 
@@ -190,6 +221,8 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
   });
   const hourlyVisitTotal = hourlyVisitEntries.reduce((sum, entry) => sum + entry.views, 0);
   const visitorRangeLabel = selectedVisitDay ? dayLabel(selectedVisitDay) : "30-day pattern";
+  const packingQueue = orders.filter((order) => order.status !== "cancelled" && order.packing_status !== "packed");
+  const packedAlerts = notifications.filter((item) => item.type === "order_packed").slice(0, 4);
   return (
     <>
       <section
@@ -316,6 +349,20 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
           detail={`${notifications.filter((item) => !item.read_at).length} unread alerts`}
         />
       </div>
+      </section>
+      <section className="dashboard-section dashboard-fulfilment-section" aria-labelledby="dashboard-fulfilment-heading">
+        <div className="dashboard-section-heading">
+          <div>
+            <p className="eyebrow">Warehouse handoff</p>
+            <h2 id="dashboard-fulfilment-heading">Packing activity</h2>
+          </div>
+          <button type="button" className="secondary-action" onClick={() => onNavigate("/admin/employees")}>Manage employees ↗</button>
+        </div>
+        <div className="admin-metric-grid dashboard-kpi-grid">
+          <Metric label="Packing queue" value={packingQueue.length} detail="orders awaiting a pack confirmation" />
+          <Metric label="Packed alerts" value={packedAlerts.length} detail="recent employee handoffs" />
+        </div>
+        {packedAlerts.length ? <div className="admin-notification-list dashboard-packed-alerts">{packedAlerts.map((item) => <button type="button" className="admin-notification-row" key={item.id} onClick={() => onNavigate("/admin/orders")}><strong>{item.title || "Order packed"}</strong><span>{item.message}</span></button>)}</div> : <div className="empty-state">No employee packing alerts yet. Create an employee ID to start the workflow.</div>}
       </section>
       <section className="dashboard-section dashboard-visitor-section" aria-labelledby="dashboard-traffic-heading">
         <div className="dashboard-section-heading">
@@ -665,12 +712,42 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
 function OrdersView({ orders, onOrderChanged }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
+  const [quickFilter, setQuickFilter] = useState("all");
   const [expanded, setExpanded] = useState("");
   const [drafts, setDrafts] = useState({});
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
-  const filtered = useMemo(() => orders.filter((order) => { const haystack = `${order.order_number} ${order.customer_name} ${order.customer_email}`.toLowerCase(); return (!query || haystack.includes(query.toLowerCase())) && (status === "all" || order.status === status); }), [orders, query, status]);
-  function draft(order) { return drafts[order.id] || { status: order.status || "pending", tracking_number: order.tracking_number || "" }; }
+  const counts = useMemo(() => {
+    const attention = orders.filter((order) => {
+      const needsPaymentReview = ["pending", "failed"].includes(order.payment_status);
+      const needsPacking = !["cancelled", "delivered"].includes(order.status) && order.packing_status !== "packed";
+      return needsPaymentReview || needsPacking;
+    }).length;
+    return {
+      all: orders.length,
+      attention,
+      transit: orders.filter((order) => order.status === "shipped").length,
+      complete: orders.filter((order) => order.status === "delivered").length
+    };
+  }, [orders]);
+  const filtered = useMemo(() => orders.filter((order) => {
+    const haystack = `${order.order_number} ${order.customer_name} ${order.customer_email}`.toLowerCase();
+    const matchesQuickFilter = quickFilter === "all"
+      || (quickFilter === "attention" && (["pending", "failed"].includes(order.payment_status) || (!["cancelled", "delivered"].includes(order.status) && order.packing_status !== "packed")))
+      || (quickFilter === "transit" && order.status === "shipped")
+      || (quickFilter === "complete" && order.status === "delivered");
+    return (!query || haystack.includes(query.toLowerCase())) && (status === "all" || order.status === status) && matchesQuickFilter;
+  }), [orders, query, quickFilter, status]);
+  const labels = { pending: "Pending", confirmed: "Confirmed", shipped: "Shipped", delivered: "Delivered", cancelled: "Cancelled", demo: "Demo recorded", paid: "Paid", failed: "Payment failed", refunded: "Refunded", not_required: "Not required" };
+  const label = (value) => labels[value] || String(value || "Pending").replace(/_/g, " ");
+  function draft(order) {
+    return drafts[order.id] || {
+      status: order.status || "pending",
+      tracking_number: order.tracking_number || "",
+      payment_status: order.payment_status || "demo",
+      payment_reference: order.payment_reference || ""
+    };
+  }
   function changeDraft(order, field, value) { setDrafts((current) => ({ ...current, [order.id]: { ...draft(order), [field]: value } })); }
   async function save(order) {
     const values = draft(order);
@@ -680,11 +757,35 @@ function OrdersView({ orders, onOrderChanged }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Order could not be updated");
       onOrderChanged(data.order || { ...order, ...values });
-      setDrafts((current) => ({ ...current, [order.id]: { status: data.order?.status || values.status, tracking_number: data.order?.tracking_number || values.tracking_number } }));
+      setDrafts((current) => ({ ...current, [order.id]: {
+        status: data.order?.status || values.status,
+        tracking_number: data.order?.tracking_number || values.tracking_number,
+        payment_status: data.order?.payment_status || values.payment_status,
+        payment_reference: data.order?.payment_reference || values.payment_reference
+      } }));
       setMessage(`${data.order?.order_number || order.order_number || "Order"} updated.`);
     } catch (error) { setMessage(error.message); } finally { setBusyId(""); }
   }
-  return <section className="admin-panel admin-wide-panel"><div className="admin-panel-heading"><div><p className="eyebrow">Order workspace</p><h2>Orders</h2></div><span>{filtered.length} shown</span></div><div className="admin-filters"><label className="sr-only" htmlFor="adminOrderSearch">Search orders</label><input id="adminOrderSearch" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search order number or customer" /><select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filter orders by status"><option value="all">All statuses</option>{["pending", "confirmed", "shipped", "delivered", "cancelled"].map((value) => <option key={value} value={value}>{value}</option>)}</select></div>{message && <p className="inline-note" role="status">{message}</p>}<div className="admin-order-list">{filtered.map((order) => { const values = draft(order); const isOpen = expanded === order.id; return <article className={`admin-order-card ${isOpen ? "is-expanded" : ""}`} key={order.id}><button type="button" className="admin-order-card-summary" onClick={() => setExpanded(isOpen ? "" : order.id)} aria-expanded={isOpen}><span><strong>{order.order_number || order.id}</strong><small>{order.customer_name || order.customer_email || "Customer"} · {order.created_at ? formatIST(order.created_at) : "Recent"}</small></span><span><b>{money(order.total)}</b><small className={`status-pill status-${order.status}`}>{order.status || "pending"}</small></span></button>{isOpen && <div className="admin-order-card-details"><div className="admin-order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}</span>)}{order.shipping && <p className="muted">Ship to: {order.shipping.full_name || order.customer_name}, {order.shipping.city || ""}, {order.shipping.state || ""} {order.shipping.postal_code || ""}</p>}</div><div className="admin-order-edit"><label>Status<select value={values.status} onChange={(event) => changeDraft(order, "status", event.target.value)} disabled={order.status === "cancelled"}><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></label><label>Tracking number <span className="form-hint">optional</span><input value={values.tracking_number} onChange={(event) => changeDraft(order, "tracking_number", event.target.value)} maxLength="80" placeholder="Assign courier tracking" /></label>{message && <p className={message.includes("updated") ? "inline-note" : "inline-error"} role="status">{message}</p>}<button className="primary-action" type="button" disabled={busyId === order.id} onClick={() => save(order)}>{busyId === order.id ? "Saving…" : "Save order"} <span aria-hidden="true">↗</span></button></div></div>}</article>; })}{!filtered.length && <div className="empty-state">No matching orders.</div>}</div></section>;
+  return <section className="admin-panel admin-wide-panel orders-workspace">
+    <div className="admin-panel-heading orders-heading"><div><p className="eyebrow">Order workspace <span className="orders-live-dot" aria-hidden="true" /> Live queue</p><h2>Orders</h2><p className="muted">Follow every order from confirmation to delivery. Razorpay remains disabled until approval.</p></div><div className="orders-heading-meta"><span className="orders-auto-refresh"><i aria-hidden="true" /> Auto-refreshes every 30s</span><strong>{filtered.length}<small> showing</small></strong></div></div>
+    <div className="orders-overview-grid" aria-label="Order overview">
+      {[{ key: "all", label: "All orders", count: counts.all, tone: "blue", note: "Total queue" }, { key: "attention", label: "Needs attention", count: counts.attention, tone: "amber", note: "Packing or payment" }, { key: "transit", label: "In transit", count: counts.transit, tone: "violet", note: "Shipped orders" }, { key: "complete", label: "Completed", count: counts.complete, tone: "green", note: "Delivered orders" }].map((item) => <button type="button" key={item.key} className={`orders-overview-card tone-${item.tone} ${quickFilter === item.key ? "is-active" : ""}`} onClick={() => { setQuickFilter(item.key); setStatus("all"); }} aria-pressed={quickFilter === item.key}><span className="orders-overview-icon" aria-hidden="true"><i /></span><span><strong>{item.count}</strong><small>{item.label}</small><em>{item.note}</em></span><span className="orders-overview-arrow" aria-hidden="true">↗</span></button>)}
+    </div>
+    <div className="admin-filters orders-filter-bar"><label className="orders-search-field" htmlFor="adminOrderSearch"><span>Find an order</span><input id="adminOrderSearch" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Order number, customer, or email" /></label><label className="orders-status-field" htmlFor="adminOrderStatus"><span>Status</span><select id="adminOrderStatus" value={status} onChange={(event) => { setStatus(event.target.value); setQuickFilter("all"); }} aria-label="Filter orders by status"><option value="all">All statuses</option>{["pending", "confirmed", "shipped", "delivered", "cancelled"].map((value) => <option key={value} value={value}>{label(value)}</option>)}</select></label></div>
+    {message && <p className="inline-note" role="status">{message}</p>}
+    <div className="orders-results-heading"><span><strong>{filtered.length}</strong> {filtered.length === 1 ? "order" : "orders"} in view</span><small>Click an order to view details and edit its status</small></div>
+    <div className="admin-order-list">{filtered.map((order, index) => {
+      const values = draft(order); const isOpen = expanded === order.id; const orderStatus = order.status || "pending"; const paymentStatus = order.payment_status || "demo"; const isPacked = order.packing_status === "packed"; const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0); const customer = order.customer_name || order.customer_email || "Customer"; const initials = customer.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "C"; const progressIndex = orderStatus === "cancelled" ? -1 : orderStatus === "delivered" ? 3 : orderStatus === "shipped" ? 2 : isPacked ? 1 : 0;
+      return <article className={`admin-order-card order-status-${orderStatus} ${isOpen ? "is-expanded" : ""}`} key={order.id}>
+         <button type="button" className="admin-order-card-summary" onClick={() => setExpanded(isOpen ? "" : order.id)} aria-expanded={isOpen}>
+           <span className="admin-order-card-main"><span className="admin-order-index">{String(index + 1).padStart(2, "0")}</span><span className="admin-order-identity"><span className="admin-order-customer"><i>{initials}</i><strong>{customer}</strong></span><b>{order.order_number || order.id}</b><small>{order.created_at ? formatIST(order.created_at) : "Recent"} · {itemCount || (order.items || []).length || 0} item{itemCount === 1 ? "" : "s"}{order.order_type === "preorder" ? " · Pre-order" : ""}</small></span></span>
+           <span className={`admin-order-progress ${orderStatus === "cancelled" ? "is-cancelled" : ""}`} aria-label={`Order progress: ${orderStatus === "cancelled" ? "cancelled" : label(orderStatus)}`}>{orderStatus === "cancelled" ? <span className="admin-order-progress-cancelled"><i>!</i><small>Order cancelled</small></span> : [{ key: "confirmed", text: orderStatus === "pending" ? "Pending" : "Confirmed" }, { key: "packed", text: "Packed" }, { key: "shipped", text: "Shipped" }, { key: "delivered", text: "Delivered" }].map((step, stepIndex) => <span className={`${stepIndex <= progressIndex ? "is-complete" : ""} ${stepIndex === progressIndex ? "is-current" : ""}`} key={step.key}><i>{stepIndex < progressIndex ? "✓" : stepIndex + 1}</i><small>{step.text}</small></span>)}</span>
+           <span className="admin-order-card-side"><b>{money(order.total)}</b><span className="admin-order-status-stack"><small className={`status-pill status-${orderStatus}`}><i />{label(orderStatus)}</small><small className={`status-pill status-${paymentStatus}`}><i />Payment · {label(paymentStatus)}</small><small className={`status-pill ${isPacked ? "status-live" : "status-hold"}`}><i />{isPacked ? "Packed" : "Awaiting pack"}</small></span><span className="admin-order-open">{isOpen ? "Close details" : "View / edit"} <em aria-hidden="true">↗</em></span></span>
+         </button>
+         {isOpen && <div className="admin-order-card-details"><div className="admin-order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}</span>)}{order.shipping && <p className="muted">Ship to: {order.shipping.name || order.customer_name}, {order.shipping.city || ""}, {order.shipping.state || ""} {order.shipping.pin || ""}</p>}<p className="muted">Customer: {order.customer_email || "—"}{order.payment_updated_at ? ` · Payment updated ${formatIST(order.payment_updated_at)}` : ""}</p><p className="muted">Packing: {order.packing_status === "packed" ? `Packed ${order.packed_at ? formatIST(order.packed_at) : ""}${order.packed_by ? ` by ${order.packed_by}` : ""}` : "Awaiting employee confirmation"}</p><a className="text-link" href={`/api/orders/${encodeURIComponent(order.id)}/invoice`} target="_blank" rel="noreferrer">Open GST invoice preview ↗</a></div><div className="admin-order-edit"><label>Fulfilment status<select value={values.status} onChange={(event) => changeDraft(order, "status", event.target.value)} disabled={order.status === "cancelled"}><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></label><label>Payment state<select value={values.payment_status} onChange={(event) => changeDraft(order, "payment_status", event.target.value)}><option value="demo">Demo recorded</option><option value="pending">Pending provider</option><option value="paid">Marked paid</option><option value="failed">Failed</option><option value="refunded">Refunded</option><option value="not_required">Not required</option></select></label><label>Payment reference <span className="form-hint">optional · never enter a secret</span><input value={values.payment_reference} onChange={(event) => changeDraft(order, "payment_reference", event.target.value)} maxLength="160" placeholder="Future Razorpay payment/order ID" /></label><label>Tracking number <span className="form-hint">optional</span><input value={values.tracking_number} onChange={(event) => changeDraft(order, "tracking_number", event.target.value)} maxLength="80" placeholder="Assign courier tracking" /></label>{message && <p className={message.includes("updated") ? "inline-note" : "inline-error"} role="status">{message}</p>}<button className="primary-action" type="button" disabled={busyId === order.id} onClick={() => save(order)}>{busyId === order.id ? "Saving…" : "Save order"} <span aria-hidden="true">↗</span></button></div></div>}
+      </article>;
+    })}{!filtered.length && <div className="empty-state">No matching orders.</div>}</div>
+  </section>;
 }
 
 function ProductsView({ products, onNavigate }) {
@@ -856,7 +957,7 @@ function ManageProductsView({ products, categories, subcategories, onProductChan
     try {
       const response = await apiFetch(`/api/admin/products/${encodeURIComponent(product.id)}`, { method: "PATCH", body: JSON.stringify(patch) });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Product could not be updated");
+      if (!response.ok) throw new Error([data.error, ...(Array.isArray(data.issues) ? data.issues.map((issue) => `• ${issue}`) : [])].filter(Boolean).join("\n"));
       onProductChanged(data.product || { ...product, ...patch });
     } catch (error) { window.alert(error.message); } finally { setBusyId(""); }
   }
@@ -1087,12 +1188,61 @@ function NotificationsView({ notifications, onNotificationsChanged, onNavigate }
 }
 
 export function AdminWorkspace({ route, onNavigate }) {
-  const [dashboard, setDashboard] = useState(null); const [orders, setOrders] = useState([]); const [notifications, setNotifications] = useState([]); const [products, setProducts] = useState([]); const [categories, setCategories] = useState([]); const [subcategories, setSubcategories] = useState([]); const [error, setError] = useState("");
-  useEffect(() => { let active = true; Promise.all([apiFetch("/api/admin/dashboard"), apiFetch("/api/admin/notifications"), apiFetch("/api/orders?scope=admin"), apiFetch("/api/products?scope=admin"), apiFetch("/api/categories")]).then(async ([dashboardResponse, notificationResponse, orderResponse, productResponse, categoryResponse]) => { const dashboardData = await dashboardResponse.json(); if (!dashboardResponse.ok) throw new Error(dashboardData.error || "Admin access required"); const notificationData = notificationResponse.ok ? await notificationResponse.json() : {}; const orderData = orderResponse.ok ? await orderResponse.json() : {}; const productData = productResponse.ok ? await productResponse.json() : {}; const categoryData = categoryResponse.ok ? await categoryResponse.json() : {}; if (active) { setDashboard(dashboardData); setNotifications(notificationData.notifications || []); setOrders(orderData.orders || []); setProducts(productData.products || []); setCategories(categoryData.categories || []); setSubcategories(categoryData.subcategories || []); } }).catch((requestError) => active && setError(requestError.message)); return () => { active = false; }; }, []);
+  const [dashboard, setDashboard] = useState(null); const [orders, setOrders] = useState([]); const [notifications, setNotifications] = useState([]); const [unreadCount, setUnreadCount] = useState(0); const [products, setProducts] = useState([]); const [categories, setCategories] = useState([]); const [subcategories, setSubcategories] = useState([]); const [error, setError] = useState(""); const [errorRoute, setErrorRoute] = useState(""); const [loadedRoute, setLoadedRoute] = useState("");
+  useEffect(() => {
+    let active = true;
+    const needs = ADMIN_SECTION_DATA[route] || {};
+    async function loadAdminData() {
+      const requestEntries = [];
+      const addRequest = (key, input) => requestEntries.push([key, apiFetch(input)]);
+      if (needs.dashboard) addRequest("dashboard", "/api/admin/dashboard");
+      if (needs.notifications) addRequest("notifications", "/api/admin/notifications");
+      else addRequest("notificationCount", "/api/admin/notifications/count");
+      if (needs.orders) addRequest("orders", "/api/orders?scope=admin");
+      if (needs.products) addRequest("products", "/api/products?scope=admin");
+      if (needs.categories) addRequest("categories", "/api/categories");
+      const responses = await Promise.all(requestEntries.map(([, request]) => request));
+      const responseData = {};
+      for (let index = 0; index < requestEntries.length; index += 1) {
+        const [key] = requestEntries[index];
+        const response = responses[index];
+        responseData[key] = response.ok ? await response.json() : {};
+      }
+      const dashboardIndex = requestEntries.findIndex(([key]) => key === "dashboard");
+      if (needs.dashboard && !responses[dashboardIndex]?.ok) {
+        throw new Error(responseData.dashboard?.error || "Admin access required");
+      }
+      if (!active) return;
+      if (needs.dashboard) setDashboard(responseData.dashboard || null);
+      if (needs.notifications) {
+        setNotifications(responseData.notifications?.notifications || []);
+        setUnreadCount(Number(responseData.notifications?.unread_count || 0));
+      } else {
+        setUnreadCount(Number(responseData.notificationCount?.unread_count || 0));
+      }
+      if (needs.orders) setOrders(responseData.orders?.orders || []);
+      if (needs.products) setProducts(responseData.products?.products || []);
+      if (needs.categories) {
+        setCategories(responseData.categories?.categories || []);
+        setSubcategories(responseData.categories?.subcategories || []);
+      }
+      setError("");
+    }
+    const reportError = (requestError) => {
+      if (!active) return;
+      setError(requestError.message);
+      setErrorRoute(route);
+    };
+    loadAdminData().catch(reportError).finally(() => active && setLoadedRoute(route));
+    if (!ADMIN_POLL_ROUTES.has(route)) return () => { active = false; };
+    const refreshTimer = window.setInterval(() => loadAdminData().catch(reportError), 30000);
+    return () => { active = false; window.clearInterval(refreshTimer); };
+  }, [route]);
   function changeProduct(next) { setProducts((current) => current.map((product) => product.id === next.id ? { ...product, ...next } : product)); }
   function changeOrder(next) { setOrders((current) => current.map((order) => order.id === next.id ? { ...order, ...next } : order)); }
   function changeNotifications(update) { setNotifications(update); }
   function removeProduct(id) { setProducts((current) => current.filter((product) => product.id !== id)); }
   async function refreshCatalog() { const response = await apiFetch("/api/categories"); const data = await response.json(); if (response.ok) { setCategories(data.categories || []); setSubcategories(data.subcategories || []); } }
-  return <AdminShell route={route} onNavigate={onNavigate} notifications={notifications}>{error ? <section className="admin-panel admin-wide-panel"><p className="eyebrow">Admin access</p><h2>{error}</h2><p className="muted">Use the sign-in page to continue.</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Open admin sign-in <span aria-hidden="true">↗</span></button></section> : !dashboard ? <div className="loading-card">Preparing your console…</div> : route === "/admin" ? <DashboardView dashboard={dashboard} orders={orders} notifications={notifications} onNavigate={onNavigate} /> : route === "/admin/storefront" ? <StorefrontSettingsView /> : route === "/admin/labels" ? <LabelsView orders={orders} /> : route === "/admin/hero" ? <HeroStudioView products={products} categories={categories} /> : route === "/admin/tax" ? <TaxComplianceView /> : route === "/admin/add-product" ? <AddListingView categories={categories} subcategories={subcategories} onNavigate={onNavigate} /> : route === "/admin/bulk-listing" ? <BulkListingView categories={categories} subcategories={subcategories} /> : route === "/admin/orders" ? <OrdersView orders={orders} onOrderChanged={changeOrder} /> : route === "/admin/products" ? <ManageProductsView products={products} categories={categories} subcategories={subcategories} onProductChanged={changeProduct} onProductDeleted={removeProduct} onNavigate={onNavigate} /> : route === "/admin/inventory" ? <InventoryView products={products} onProductChanged={changeProduct} /> : route === "/admin/customers" ? <CustomersView /> : route === "/admin/reviews" ? <ReviewsView /> : route === "/admin/questions" ? <QuestionsView /> : route === "/admin/coupons" ? <CouponsView products={products} categories={categories} subcategories={subcategories} /> : route === "/admin/deals" ? <DealsView products={products} onProductChanged={changeProduct} /> : route === "/admin/categories" ? <CategoriesView categories={categories} subcategories={subcategories} onCatalogChanged={refreshCatalog} /> : route === "/admin/returns" ? <ReturnsView /> : route === "/admin/support" ? <SupportView /> : route === "/admin/system" ? <SystemView /> : route === "/admin/manage-store" ? <ManageStoreView onNavigate={onNavigate} /> : <NotificationsView notifications={notifications} onNotificationsChanged={changeNotifications} onNavigate={onNavigate} />}</AdminShell>;
+  const loading = loadedRoute !== route;
+  return <AdminShell route={route} onNavigate={onNavigate} notifications={notifications} unreadCount={unreadCount}>{error && errorRoute === route ? <section className="admin-panel admin-wide-panel"><p className="eyebrow">Admin access</p><h2>{error}</h2><p className="muted">Use the sign-in page to continue.</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Open admin sign-in <span aria-hidden="true">↗</span></button></section> : loading ? <div className="loading-card">Preparing your console…</div> : route === "/admin" ? <DashboardView dashboard={dashboard} orders={orders} notifications={notifications} onNavigate={onNavigate} /> : route === "/admin/storefront" ? <StorefrontSettingsView /> : route === "/admin/labels" ? <LabelsView orders={orders} /> : route === "/admin/hero" ? <HeroStudioView products={products} categories={categories} /> : route === "/admin/tax" ? <TaxComplianceView /> : route === "/admin/add-product" ? <AddListingView categories={categories} subcategories={subcategories} onNavigate={onNavigate} /> : route === "/admin/bulk-listing" ? <BulkListingView categories={categories} subcategories={subcategories} /> : route === "/admin/orders" ? <OrdersView orders={orders} onOrderChanged={changeOrder} /> : route === "/admin/products" ? <ManageProductsView products={products} categories={categories} subcategories={subcategories} onProductChanged={changeProduct} onProductDeleted={removeProduct} onNavigate={onNavigate} /> : route === "/admin/inventory" ? <InventoryView products={products} onProductChanged={changeProduct} /> : route === "/admin/customers" ? <CustomersView /> : route === "/admin/employees" ? <EmployeesView /> : route === "/admin/reviews" ? <ReviewsView /> : route === "/admin/questions" ? <QuestionsView /> : route === "/admin/coupons" ? <CouponsView products={products} categories={categories} subcategories={subcategories} /> : route === "/admin/deals" ? <DealsView products={products} onProductChanged={changeProduct} /> : route === "/admin/categories" ? <CategoriesView categories={categories} subcategories={subcategories} onCatalogChanged={refreshCatalog} /> : route === "/admin/returns" ? <ReturnsView /> : route === "/admin/support" ? <SupportView /> : route === "/admin/system" ? <SystemView /> : route === "/admin/manage-store" ? <ManageStoreView onNavigate={onNavigate} /> : <NotificationsView notifications={notifications} onNotificationsChanged={changeNotifications} onNavigate={onNavigate} />}</AdminShell>;
 }
