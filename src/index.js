@@ -16,6 +16,8 @@ const EMPLOYEE_LOGIN_LOCK_MS = 15 * 60 * 1000;
 const R2_CLEANUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const R2_CLEANUP_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
+const CANONICAL_ORIGIN = "https://glamiastore.com";
+const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com"]);
 let googleKeysCache = { keys: null, expiresAt: 0 };
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMITS = new Map([
@@ -52,6 +54,15 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === "OPTIONS") return withSecurityHeaders(new Response(null, { status: 204 }));
+      if (["GET", "HEAD"].includes(request.method) && !url.pathname.startsWith("/api/") && PRODUCTION_HOSTNAMES.has(url.hostname) && url.origin !== CANONICAL_ORIGIN) {
+        return withSecurityHeaders(new Response(null, {
+          status: 301,
+          headers: {
+            Location: `${CANONICAL_ORIGIN}${url.pathname}${url.search}`,
+            "Cache-Control": "public, max-age=86400"
+          }
+        }));
+      }
       if (request.method === "GET" && url.pathname === "/demo-admin") return withSecurityHeaders(await loginAsDemoAdmin(request, env, true));
       if (request.method === "GET" && url.pathname === "/sitemap.xml") return withSecurityHeaders(await getSitemap(request, env));
       if (request.method === "GET" && url.pathname === "/robots.txt") return withSecurityHeaders(await getRobots(request));
@@ -247,6 +258,10 @@ function catalogJsonLd(rows, origin) {
   };
 }
 
+function canonicalOriginForRequest(url) {
+  return PRODUCTION_HOSTNAMES.has(url.hostname) ? CANONICAL_ORIGIN : url.origin;
+}
+
 /* Server-side meta + content for public pages. Every visitor gets real
    Open Graph/Twitter tags, canonical URL and Product JSON-LD in the HTML;
    known crawlers receive a self-contained static rendering inside #root so
@@ -264,7 +279,7 @@ async function renderPublicPage(request, env) {
   const shellResponse = await env.ASSETS.fetch(new URL("/index.html", url));
   if (!shellResponse.ok) return null;
   let html = await shellResponse.text();
-  const origin = url.origin;
+  const origin = canonicalOriginForRequest(url);
   const isBot = CRAWLER_UA.test(request.headers.get("User-Agent") || "");
 
   let title = "Glamia — Curated Apparel & Accessories";
@@ -379,7 +394,7 @@ async function renderPublicPage(request, env) {
 }
 
 async function getSitemap(request, env) {
-  const origin = new URL(request.url).origin.replace(/\/+$/, "");
+  const origin = canonicalOriginForRequest(new URL(request.url));
   const staticPaths = ["/", "/offers", "/just-arrived", "/best-sellers", "/contact", "/support", "/policies", ...Object.values(standalonePolicyPaths)];
   let productRows = [];
   try {
@@ -465,7 +480,7 @@ async function getSitemap(request, env) {
 }
 
 async function getRobots(request) {
-  const origin = new URL(request.url).origin.replace(/\/+$/, "");
+  const origin = canonicalOriginForRequest(new URL(request.url));
   const body = [
     "User-agent: *",
     "Allow: /",
@@ -683,7 +698,7 @@ async function routeApi(request, env, url, ctx) {
 
   if (request.method === "GET" && path === "/api/orders") {
     requireUser(user);
-    return listOrders(env, user, url.searchParams.get("scope") || "own");
+    return listOrders(env, user, url.searchParams.get("scope") || "own", url.searchParams);
   }
 
   if (request.method === "GET" && path === "/api/order-tracking") {
@@ -1255,7 +1270,19 @@ function productSearchQuery(value) {
 async function listProducts(env, user, scope, searchParams = new URLSearchParams()) {
   if (scope === "admin") {
     requireAdmin(user);
-    return json({ products: await withSizeStock(env, await allProductRows(env)) });
+    const requestedLimit = Number(searchParams.get("limit"));
+    const hasPagination = Number.isSafeInteger(requestedLimit) && requestedLimit > 0;
+    if (!hasPagination) return json({ products: await withSizeStock(env, await allProductRows(env)) });
+    const limit = Math.min(requestedLimit, 100);
+    const page = Math.max(1, Math.floor(Number(searchParams.get("page")) || 1));
+    const offset = (page - 1) * limit;
+    const { results } = await env.DB.prepare(`${PRODUCT_SELECT} GROUP BY p.id ORDER BY p.created_at DESC, p.id DESC LIMIT ? OFFSET ?`)
+      .bind(limit, offset)
+      .all();
+    const products = await withSizeStock(env, results);
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM products").first();
+    const total = Number(count?.count || 0);
+    return json({ products, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + products.length < total } });
   }
   if (scope === "seller") {
     requireUser(user);
@@ -4137,9 +4164,14 @@ function fallbackOrderNumber(row) {
   return `GM-${date}-${token}`;
 }
 
-async function listOrders(env, user, scope) {
+async function listOrders(env, user, scope, searchParams = new URLSearchParams()) {
   if (scope === "admin") {
     requireAdmin(user);
+    const requestedLimit = Number(searchParams.get("limit"));
+    const hasPagination = Number.isSafeInteger(requestedLimit) && requestedLimit > 0;
+    const limit = hasPagination ? Math.min(requestedLimit, 100) : null;
+    const page = hasPagination ? Math.max(1, Math.floor(Number(searchParams.get("page")) || 1)) : 1;
+    const offset = limit ? (page - 1) * limit : 0;
     const { results } = await env.DB.prepare(`
       SELECT id, order_number, customer_email, customer_name, items_json, subtotal, discount,
         coupon_code, total, status, payment_method, payment_status, payment_reference, payment_updated_at,
@@ -4147,9 +4179,13 @@ async function listOrders(env, user, scope) {
         order_type, replacement_for_order_id, replacement_request_id, packing_status, packed_at, packed_by, shipping_json,
         created_at, updated_at
       FROM orders
-      ORDER BY created_at DESC, id DESC
-    `).all();
-    return json({ orders: results.map(formatOrder) });
+      ORDER BY created_at DESC, id DESC${limit ? " LIMIT ? OFFSET ?" : ""}
+    `).bind(...(limit ? [limit, offset] : [])).all();
+    const orders = results.map(formatOrder);
+    if (!limit) return json({ orders });
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM orders").first();
+    const total = Number(count?.count || 0);
+    return json({ orders, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + orders.length < total } });
   }
   const { results } = await env.DB.prepare("SELECT * FROM orders WHERE customer_email = ? ORDER BY created_at DESC")
     .bind(String(user.email || "").trim().toLowerCase())

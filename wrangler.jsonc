@@ -3,6 +3,8 @@
 	"name": "maison-mode-commerce",
 	"main": "src/index.js",
 	"compatibility_date": "2026-08-26",
+	"workers_dev": false,
+	"preview_urls": false,
 	"assets": {
 		"directory": "./public",
 		"binding": "ASSETS",

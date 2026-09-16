@@ -124,6 +124,12 @@ const ADMIN_CACHE_TTLS = {
   categories: 300000,
 };
 
+const ADMIN_PAGE_SIZES = { orders: 50, products: 40 };
+const ADMIN_PAGINATED_ROUTES = {
+  orders: new Set(["/admin/orders"]),
+  products: new Set(["/admin/products", "/admin/inventory"]),
+};
+
 function AdminShell({ route, onNavigate, notifications = [], unreadCount = null, children }) {
   const unread = unreadCount === null || unreadCount === undefined
     ? notifications.filter((item) => !item.read_at && !item.dismissed_at).length
@@ -718,7 +724,7 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
   );
 }
 
-function OrdersView({ orders, onOrderChanged }) {
+function OrdersView({ orders, onOrderChanged, hasMoreOrders = false, orderTotal = orders.length, loadingMore = false, onLoadMore }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [quickFilter, setQuickFilter] = useState("all");
@@ -794,6 +800,7 @@ function OrdersView({ orders, onOrderChanged }) {
          {isOpen && <div className="admin-order-card-details"><div className="admin-order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}</span>)}{order.shipping && <p className="muted">Ship to: {order.shipping.name || order.customer_name}, {order.shipping.city || ""}, {order.shipping.state || ""} {order.shipping.pin || ""}</p>}<p className="muted">Customer: {order.customer_email || "—"}{order.payment_updated_at ? ` · Payment updated ${formatIST(order.payment_updated_at)}` : ""}</p><p className="muted">Packing: {order.packing_status === "packed" ? `Packed ${order.packed_at ? formatIST(order.packed_at) : ""}${order.packed_by ? ` by ${order.packed_by}` : ""}` : "Awaiting employee confirmation"}</p><a className="text-link" href={`/api/orders/${encodeURIComponent(order.id)}/invoice`} target="_blank" rel="noreferrer">Open GST invoice preview ↗</a></div><div className="admin-order-edit"><label>Fulfilment status<select value={values.status} onChange={(event) => changeDraft(order, "status", event.target.value)} disabled={order.status === "cancelled"}><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></label><label>Payment state<select value={values.payment_status} onChange={(event) => changeDraft(order, "payment_status", event.target.value)}><option value="demo">Demo recorded</option><option value="pending">Pending provider</option><option value="paid">Marked paid</option><option value="failed">Failed</option><option value="refunded">Refunded</option><option value="not_required">Not required</option></select></label><label>Payment reference <span className="form-hint">optional · never enter a secret</span><input value={values.payment_reference} onChange={(event) => changeDraft(order, "payment_reference", event.target.value)} maxLength="160" placeholder="Future Razorpay payment/order ID" /></label><label>Tracking number <span className="form-hint">optional</span><input value={values.tracking_number} onChange={(event) => changeDraft(order, "tracking_number", event.target.value)} maxLength="80" placeholder="Assign courier tracking" /></label>{message && <p className={message.includes("updated") ? "inline-note" : "inline-error"} role="status">{message}</p>}<button className="primary-action" type="button" disabled={busyId === order.id} onClick={() => save(order)}>{busyId === order.id ? "Saving…" : "Save order"} <span aria-hidden="true">↗</span></button></div></div>}
       </article>;
     })}{!filtered.length && <div className="empty-state">No matching orders.</div>}</div>
+    {hasMoreOrders && <div className="admin-load-more"><span>Showing {orders.length} of {orderTotal} orders. Search and filters apply to the loaded orders.</span><button type="button" className="secondary-action" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? "Loading older orders…" : "Load older orders"} <span aria-hidden="true">↓</span></button></div>}
   </section>;
 }
 
@@ -954,7 +961,7 @@ function VariantEditor({ variants, setVariants, setUploading, setStatus, uploadi
   return <fieldset className="variant-react-block"><legend>Colourways</legend><p className="form-hint">Each colourway becomes a linked listing with its own sizes, per-size stock, and 4–8 images.</p>{variants.map((variant, index) => { const sizes = variant.sizes.split(",").map((size) => size.trim()).filter(Boolean); const total = sizes.reduce((sum, size) => sum + Math.max(0, Number(variant.sizeStock?.[size] || 0)), 0); const images = variantImageItems(variant); return <article className="variant-react-card" key={`variant-${index}`}><div className="variant-react-heading"><strong>Colourway {index + 1}</strong><button type="button" className="danger-action" onClick={() => remove(index)}>Remove</button></div><div className="admin-form-grid"><label>Colour<input value={variant.color} onChange={(event) => update(index, "color", event.target.value)} required /></label><label>Sizes<input value={variant.sizes} onChange={(event) => updateSizes(index, event.target.value)} required /></label></div><div className="variant-size-stock"><div className="listing-subheading"><strong>Stock by size</strong><span>{total} total units</span></div>{sizes.map((size) => <label key={`${index}-${size}`}>{size}<input type="number" min="0" value={variant.sizeStock?.[size] ?? 0} onChange={(event) => setVariants((current) => current.map((entry, itemIndex) => itemIndex === index ? { ...entry, sizeStock: { ...(entry.sizeStock || {}), [size]: event.target.value } } : entry))} /></label>)}</div><ImageManager value={images} thumbnailUrl={variant.thumbnailSourceUrl || images[0]?.url || ""} onChange={(next) => updateImages(index, next)} onUpload={(files) => uploadImages(index, files)} uploading={uploading} min={4} max={8} label="Colourway images" /></article>; })}<button type="button" className="secondary-action" onClick={add}>Add colourway</button></fieldset>;
 }
 
-function ManageProductsView({ products, categories, subcategories, onProductChanged, onProductDeleted, onNavigate }) {
+function ManageProductsView({ products, categories, subcategories, onProductChanged, onProductDeleted, onNavigate, hasMoreProducts = false, productTotal = products.length, loadingMore = false, onLoadMore }) {
   const [filter, setFilter] = useState("all");
   const [busyId, setBusyId] = useState("");
   const [editing, setEditing] = useState(null);
@@ -982,10 +989,10 @@ function ManageProductsView({ products, categories, subcategories, onProductChan
     } catch (error) { window.alert(error.message); } finally { setBusyId(""); }
   }
 
-  return <section className="admin-panel admin-wide-panel"><div className="admin-panel-heading"><div><p className="eyebrow">Catalog controls</p><h2>All products</h2></div><button className="secondary-action" type="button" onClick={() => onNavigate("/admin/add-product")}>Add listing ↗</button></div>{editing && <EditProductForm key={editing.id} product={editing} categories={categories} subcategories={subcategories} onCancel={() => setEditing(null)} onSave={(next) => { onProductChanged(next); setEditing(null); }} />}<div className="admin-filters"><label className="sr-only" htmlFor="productStatusFilter">Filter products</label><select id="productStatusFilter" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All statuses</option><option value="live">Live</option><option value="hold">On hold</option><option value="review">In review</option><option value="archived">Archived</option></select><span className="admin-filter-result">{visible.length} listings</span></div><div className="manage-product-list">{visible.map((product) => <article className="manage-product-row" key={product.id}>{imageFor(product) ? <img src={imageFor(product)} alt="" loading="lazy" /> : <div className="admin-product-placeholder" />}<div className="manage-product-main"><strong>{product.name}</strong><span>{product.category || "Uncategorized"}{product.color ? ` · ${product.color}` : ""}</span><span>{money(product.price)} · {Number(product.stock || 0)} total units</span></div><span className={`status-pill status-${product.status}`}>{product.status || "hold"}</span><div className="manage-product-actions"><button type="button" disabled={busyId === product.id} onClick={() => setEditing(product)}>Edit</button><button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: product.status === "live" ? "hold" : "live" })}>{product.status === "live" ? "Put on hold" : "Go live"}</button><button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { featured: !product.featured })}>{product.featured ? "Unfeature" : "Feature"}</button>{product.status === "archived" ? <button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: "hold" })}>Restore</button> : <button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: "archived" })}>Archive</button>}<button className="danger-action" type="button" disabled={busyId === product.id} onClick={() => removeProduct(product)}>Delete</button></div></article>)}{!visible.length && <div className="empty-state">No products match this status.</div>}</div></section>;
+  return <section className="admin-panel admin-wide-panel"><div className="admin-panel-heading"><div><p className="eyebrow">Catalog controls</p><h2>All products</h2></div><button className="secondary-action" type="button" onClick={() => onNavigate("/admin/add-product")}>Add listing ↗</button></div>{editing && <EditProductForm key={editing.id} product={editing} categories={categories} subcategories={subcategories} onCancel={() => setEditing(null)} onSave={(next) => { onProductChanged(next); setEditing(null); }} />}<div className="admin-filters"><label className="sr-only" htmlFor="productStatusFilter">Filter products</label><select id="productStatusFilter" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All statuses</option><option value="live">Live</option><option value="hold">On hold</option><option value="review">In review</option><option value="archived">Archived</option></select><span className="admin-filter-result">{visible.length} listings</span></div><div className="manage-product-list">{visible.map((product) => <article className="manage-product-row" key={product.id}>{imageFor(product) ? <img src={imageFor(product)} alt="" loading="lazy" /> : <div className="admin-product-placeholder" />}<div className="manage-product-main"><strong>{product.name}</strong><span>{product.category || "Uncategorized"}{product.color ? ` · ${product.color}` : ""}</span><span>{money(product.price)} · {Number(product.stock || 0)} total units</span></div><span className={`status-pill status-${product.status}`}>{product.status || "hold"}</span><div className="manage-product-actions"><button type="button" disabled={busyId === product.id} onClick={() => setEditing(product)}>Edit</button><button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: product.status === "live" ? "hold" : "live" })}>{product.status === "live" ? "Put on hold" : "Go live"}</button><button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { featured: !product.featured })}>{product.featured ? "Unfeature" : "Feature"}</button>{product.status === "archived" ? <button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: "hold" })}>Restore</button> : <button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: "archived" })}>Archive</button>}<button className="danger-action" type="button" disabled={busyId === product.id} onClick={() => removeProduct(product)}>Delete</button></div></article>)}{!visible.length && <div className="empty-state">No products match this status.</div>}</div>{hasMoreProducts && <div className="admin-load-more"><span>Showing {products.length} of {productTotal} listings.</span><button type="button" className="secondary-action" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? "Loading more listings…" : "Load more listings"} <span aria-hidden="true">↓</span></button></div>}</section>;
 }
 
-function InventoryView({ products, onProductChanged }) {
+function InventoryView({ products, onProductChanged, hasMoreProducts = false, productTotal = products.length, loadingMore = false, onLoadMore }) {
   const [busyId, setBusyId] = useState("");
   const [drafts, setDrafts] = useState({});
   const [message, setMessage] = useState("");
@@ -1007,7 +1014,7 @@ function InventoryView({ products, onProductChanged }) {
   const totalUnits = activeProducts.reduce((sum, product) => sum + Number(product.stock || 0), 0);
   const lowStockCount = activeProducts.filter((product) => Number(product.stock || 0) > 0 && Number(product.stock || 0) <= Number(product.reorder_point || 15)).length;
   const outOfStockCount = activeProducts.filter((product) => Number(product.stock || 0) === 0).length;
-  return <section className="admin-panel admin-wide-panel inventory-workspace"><div className="admin-panel-heading"><div><p className="eyebrow">Stock control</p><h2>Inventory by size</h2><p className="muted">Monitor live availability and adjust each size without losing the product-level view.</p></div><span>{activeProducts.length} active listings</span></div>{message && <p className="inline-note" role="status">{message}</p>}<div className="inventory-live-summary"><article><span className="inventory-summary-icon"><Icon name="check" size={18} /></span><div><small>Available units</small><strong>{totalUnits}</strong></div><em>Live total</em></article><article className={lowStockCount ? "has-alert" : ""}><span className="inventory-summary-icon"><Icon name="bell" size={18} /></span><div><small>Low stock</small><strong>{lowStockCount}</strong></div><em>Needs attention</em></article><article className={outOfStockCount ? "has-alert is-out" : ""}><span className="inventory-summary-icon"><Icon name="close" size={18} /></span><div><small>Out of stock</small><strong>{outOfStockCount}</strong></div><em>Unavailable now</em></article></div><div className="inventory-table inventory-live-feed">{activeProducts.map((product) => { const stock = Number(product.stock || 0); const threshold = Number(product.reorder_point || 15); const sizeStock = stockFor(product); const sizes = product.sizes?.length ? product.sizes : Object.keys(sizeStock); const meter = threshold > 0 ? Math.min(100, Math.round((stock / Math.max(threshold * 3, stock, 1)) * 100)) : stock > 0 ? 100 : 0; return (
+  return <section className="admin-panel admin-wide-panel inventory-workspace"><div className="admin-panel-heading"><div><p className="eyebrow">Stock control</p><h2>Inventory by size</h2><p className="muted">Monitor live availability and adjust each size without losing the product-level view.</p></div><span>{activeProducts.length} active listings{hasMoreProducts ? ` · ${productTotal} total` : ""}</span></div>{message && <p className="inline-note" role="status">{message}</p>}<div className="inventory-live-summary"><article><span className="inventory-summary-icon"><Icon name="check" size={18} /></span><div><small>Available units</small><strong>{totalUnits}</strong></div><em>{hasMoreProducts ? "Loaded page" : "Live total"}</em></article><article className={lowStockCount ? "has-alert" : ""}><span className="inventory-summary-icon"><Icon name="bell" size={18} /></span><div><small>Low stock</small><strong>{lowStockCount}</strong></div><em>{hasMoreProducts ? "Loaded page" : "Needs attention"}</em></article><article className={outOfStockCount ? "has-alert is-out" : ""}><span className="inventory-summary-icon"><Icon name="close" size={18} /></span><div><small>Out of stock</small><strong>{outOfStockCount}</strong></div><em>{hasMoreProducts ? "Loaded page" : "Unavailable now"}</em></article></div><div className="inventory-table inventory-live-feed">{activeProducts.map((product) => { const stock = Number(product.stock || 0); const threshold = Number(product.reorder_point || 15); const sizeStock = stockFor(product); const sizes = product.sizes?.length ? product.sizes : Object.keys(sizeStock); const meter = threshold > 0 ? Math.min(100, Math.round((stock / Math.max(threshold * 3, stock, 1)) * 100)) : stock > 0 ? 100 : 0; return (
     <article
       className={
         "inventory-row inventory-live-card" +
@@ -1082,7 +1089,7 @@ function InventoryView({ products, onProductChanged }) {
         </button>
       </div>
     </article>
-  ); })}{!activeProducts.length && <div className="empty-state">No products found.</div>}</div></section>;
+  ); })}{!activeProducts.length && <div className="empty-state">No products found.</div>}</div>{hasMoreProducts && <div className="admin-load-more"><span>Showing {products.length} of {productTotal} listings. Summary counts cover the loaded listings.</span><button type="button" className="secondary-action" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? "Loading more listings…" : "Load more listings"} <span aria-hidden="true">↓</span></button></div>}</section>;
 }
 
 function AddListingView({ categories, subcategories, onNavigate }) {
@@ -1197,18 +1204,20 @@ function NotificationsView({ notifications, onNotificationsChanged, onNavigate }
 }
 
 export function AdminWorkspace({ route, onNavigate }) {
-  const [dashboard, setDashboard] = useState(null); const [orders, setOrders] = useState([]); const [notifications, setNotifications] = useState([]); const [unreadCount, setUnreadCount] = useState(0); const [products, setProducts] = useState([]); const [categories, setCategories] = useState([]); const [subcategories, setSubcategories] = useState([]); const [error, setError] = useState(""); const [errorRoute, setErrorRoute] = useState(""); const [loadedRoute, setLoadedRoute] = useState("");
+  const [dashboard, setDashboard] = useState(null); const [orders, setOrders] = useState([]); const [orderPagination, setOrderPagination] = useState(null); const [notifications, setNotifications] = useState([]); const [unreadCount, setUnreadCount] = useState(0); const [products, setProducts] = useState([]); const [productPagination, setProductPagination] = useState(null); const [categories, setCategories] = useState([]); const [subcategories, setSubcategories] = useState([]); const [loadingMore, setLoadingMore] = useState(""); const [error, setError] = useState(""); const [errorRoute, setErrorRoute] = useState(""); const [loadedRoute, setLoadedRoute] = useState("");
   useEffect(() => {
     let active = true;
     const needs = ADMIN_SECTION_DATA[route] || {};
+    const paginateOrders = ADMIN_PAGINATED_ROUTES.orders.has(route);
+    const paginateProducts = ADMIN_PAGINATED_ROUTES.products.has(route);
     async function loadAdminData() {
       const requestEntries = [];
       const addRequest = (key, input) => requestEntries.push([key, apiFetch(input, { cacheTtl: ADMIN_CACHE_TTLS[key] || 0 })]);
       if (needs.dashboard) addRequest("dashboard", "/api/admin/dashboard");
       if (needs.notifications) addRequest("notifications", "/api/admin/notifications");
       else addRequest("notificationCount", "/api/admin/notifications/count");
-      if (needs.orders) addRequest("orders", "/api/orders?scope=admin");
-      if (needs.products) addRequest("products", "/api/products?scope=admin");
+      if (needs.orders) addRequest("orders", paginateOrders ? `/api/orders?scope=admin&limit=${ADMIN_PAGE_SIZES.orders}&page=1` : "/api/orders?scope=admin");
+      if (needs.products) addRequest("products", paginateProducts ? `/api/products?scope=admin&limit=${ADMIN_PAGE_SIZES.products}&page=1` : "/api/products?scope=admin");
       if (needs.categories) addRequest("categories", "/api/categories");
       const responses = await Promise.all(requestEntries.map(([, request]) => request));
       const responseData = {};
@@ -1229,8 +1238,14 @@ export function AdminWorkspace({ route, onNavigate }) {
       } else {
         setUnreadCount(Number(responseData.notificationCount?.unread_count || 0));
       }
-      if (needs.orders) setOrders(responseData.orders?.orders || []);
-      if (needs.products) setProducts(responseData.products?.products || []);
+      if (needs.orders) {
+        setOrders(responseData.orders?.orders || []);
+        setOrderPagination(responseData.orders?.pagination || null);
+      }
+      if (needs.products) {
+        setProducts(responseData.products?.products || []);
+        setProductPagination(responseData.products?.pagination || null);
+      }
       if (needs.categories) {
         setCategories(responseData.categories?.categories || []);
         setSubcategories(responseData.categories?.subcategories || []);
@@ -1251,7 +1266,33 @@ export function AdminWorkspace({ route, onNavigate }) {
   function changeOrder(next) { setOrders((current) => current.map((order) => order.id === next.id ? { ...order, ...next } : order)); }
   function changeNotifications(update) { setNotifications(update); }
   function removeProduct(id) { setProducts((current) => current.filter((product) => product.id !== id)); }
+  async function loadMore(kind) {
+    const pagination = kind === "orders" ? orderPagination : productPagination;
+    if (!pagination?.has_more || loadingMore) return;
+    setLoadingMore(kind);
+    try {
+      const nextPage = Number(pagination.page || 1) + 1;
+      const input = kind === "orders"
+        ? `/api/orders?scope=admin&limit=${ADMIN_PAGE_SIZES.orders}&page=${nextPage}`
+        : `/api/products?scope=admin&limit=${ADMIN_PAGE_SIZES.products}&page=${nextPage}`;
+      const response = await apiFetch(input, { cacheTtl: ADMIN_CACHE_TTLS[kind] || 0 });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `More ${kind} could not be loaded`);
+      if (kind === "orders") {
+        setOrders((current) => [...current, ...(data.orders || [])]);
+        setOrderPagination(data.pagination || null);
+      } else {
+        setProducts((current) => [...current, ...(data.products || [])]);
+        setProductPagination(data.pagination || null);
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+      setErrorRoute(route);
+    } finally {
+      setLoadingMore("");
+    }
+  }
   async function refreshCatalog() { const response = await apiFetch("/api/categories", { cacheTtl: ADMIN_CACHE_TTLS.categories }); const data = await response.json(); if (response.ok) { setCategories(data.categories || []); setSubcategories(data.subcategories || []); } }
   const loading = loadedRoute !== route;
-  return <AdminShell route={route} onNavigate={onNavigate} notifications={notifications} unreadCount={unreadCount}>{error && errorRoute === route ? <section className="admin-panel admin-wide-panel"><p className="eyebrow">Admin access</p><h2>{error}</h2><p className="muted">Use the sign-in page to continue.</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Open admin sign-in <span aria-hidden="true">↗</span></button></section> : loading ? <div className="loading-card">Preparing your console…</div> : route === "/admin" ? <DashboardView dashboard={dashboard} orders={orders} notifications={notifications} onNavigate={onNavigate} /> : route === "/admin/storefront" ? <StorefrontSettingsView /> : route === "/admin/labels" ? <LabelsView orders={orders} /> : route === "/admin/hero" ? <HeroStudioView products={products} categories={categories} /> : route === "/admin/tax" ? <TaxComplianceView /> : route === "/admin/add-product" ? <AddListingView categories={categories} subcategories={subcategories} onNavigate={onNavigate} /> : route === "/admin/bulk-listing" ? <BulkListingView categories={categories} subcategories={subcategories} /> : route === "/admin/orders" ? <OrdersView orders={orders} onOrderChanged={changeOrder} /> : route === "/admin/products" ? <ManageProductsView products={products} categories={categories} subcategories={subcategories} onProductChanged={changeProduct} onProductDeleted={removeProduct} onNavigate={onNavigate} /> : route === "/admin/inventory" ? <InventoryView products={products} onProductChanged={changeProduct} /> : route === "/admin/customers" ? <CustomersView /> : route === "/admin/employees" ? <EmployeesView /> : route === "/admin/reviews" ? <ReviewsView /> : route === "/admin/questions" ? <QuestionsView /> : route === "/admin/coupons" ? <CouponsView products={products} categories={categories} subcategories={subcategories} /> : route === "/admin/deals" ? <DealsView products={products} onProductChanged={changeProduct} /> : route === "/admin/categories" ? <CategoriesView categories={categories} subcategories={subcategories} onCatalogChanged={refreshCatalog} /> : route === "/admin/returns" ? <ReturnsView /> : route === "/admin/support" ? <SupportView /> : route === "/admin/system" ? <SystemView /> : route === "/admin/manage-store" ? <ManageStoreView onNavigate={onNavigate} /> : <NotificationsView notifications={notifications} onNotificationsChanged={changeNotifications} onNavigate={onNavigate} />}</AdminShell>;
+  return <AdminShell route={route} onNavigate={onNavigate} notifications={notifications} unreadCount={unreadCount}>{error && errorRoute === route ? <section className="admin-panel admin-wide-panel"><p className="eyebrow">Admin access</p><h2>{error}</h2><p className="muted">Use the sign-in page to continue.</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Open admin sign-in <span aria-hidden="true">↗</span></button></section> : loading ? <div className="loading-card">Preparing your console…</div> : route === "/admin" ? <DashboardView dashboard={dashboard} orders={orders} notifications={notifications} onNavigate={onNavigate} /> : route === "/admin/storefront" ? <StorefrontSettingsView /> : route === "/admin/labels" ? <LabelsView orders={orders} /> : route === "/admin/hero" ? <HeroStudioView products={products} categories={categories} /> : route === "/admin/tax" ? <TaxComplianceView /> : route === "/admin/add-product" ? <AddListingView categories={categories} subcategories={subcategories} onNavigate={onNavigate} /> : route === "/admin/bulk-listing" ? <BulkListingView categories={categories} subcategories={subcategories} /> : route === "/admin/orders" ? <OrdersView orders={orders} onOrderChanged={changeOrder} orderTotal={orderPagination?.total ?? orders.length} hasMoreOrders={Boolean(orderPagination?.has_more)} loadingMore={loadingMore === "orders"} onLoadMore={() => loadMore("orders")} /> : route === "/admin/products" ? <ManageProductsView products={products} categories={categories} subcategories={subcategories} onProductChanged={changeProduct} onProductDeleted={removeProduct} onNavigate={onNavigate} productTotal={productPagination?.total ?? products.length} hasMoreProducts={Boolean(productPagination?.has_more)} loadingMore={loadingMore === "products"} onLoadMore={() => loadMore("products")} /> : route === "/admin/inventory" ? <InventoryView products={products} onProductChanged={changeProduct} productTotal={productPagination?.total ?? products.length} hasMoreProducts={Boolean(productPagination?.has_more)} loadingMore={loadingMore === "products"} onLoadMore={() => loadMore("products")} /> : route === "/admin/customers" ? <CustomersView /> : route === "/admin/employees" ? <EmployeesView /> : route === "/admin/reviews" ? <ReviewsView /> : route === "/admin/questions" ? <QuestionsView /> : route === "/admin/coupons" ? <CouponsView products={products} categories={categories} subcategories={subcategories} /> : route === "/admin/deals" ? <DealsView products={products} onProductChanged={changeProduct} /> : route === "/admin/categories" ? <CategoriesView categories={categories} subcategories={subcategories} onCatalogChanged={refreshCatalog} /> : route === "/admin/returns" ? <ReturnsView /> : route === "/admin/support" ? <SupportView /> : route === "/admin/system" ? <SystemView /> : route === "/admin/manage-store" ? <ManageStoreView onNavigate={onNavigate} /> : <NotificationsView notifications={notifications} onNotificationsChanged={changeNotifications} onNavigate={onNavigate} />}</AdminShell>;
 }

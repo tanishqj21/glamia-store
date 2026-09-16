@@ -617,6 +617,7 @@ del { color: var(--muted); margin-left: 6px; }
   .orders-overview-card em { font-size: 9px; }
   .orders-filter-bar { grid-template-columns: 1fr; }
   .orders-results-heading { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .admin-load-more { align-items: flex-start; flex-direction: column; }
   .orders-workspace .admin-order-card-summary { padding: 16px 14px; }
   .admin-order-index { height: 34px; width: 34px; }
   .admin-order-identity > b { font-size: 14px; }
@@ -678,6 +679,8 @@ del { color: var(--muted); margin-left: 6px; }
 .secondary-action { border: 1px solid var(--line); color: var(--ink); padding: 9px 12px; text-decoration: none; }
 .secondary-action:hover { background: var(--surface-strong); }
 .admin-filter-result { align-self: center; color: var(--muted); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+.admin-load-more { align-items: center; border-top: 1px solid var(--line); color: var(--muted); display: flex; font-size: 12px; gap: 16px; justify-content: space-between; padding: 16px 0 2px; }
+.admin-load-more span { line-height: 1.5; }
 .manage-product-list, .inventory-table { border-top: 1px solid var(--line); }
 .manage-product-row, .inventory-row { align-items: center; border-bottom: 1px solid var(--line); display: grid; gap: 14px; grid-template-columns: 62px minmax(180px, 1fr) auto minmax(260px, auto); padding: 13px 0; }
 .manage-product-row > img, .manage-product-row > .admin-product-placeholder { background: var(--surface-strong); height: 76px; object-fit: cover; width: 62px; }
