@@ -518,9 +518,13 @@ async function getRobots(request) {
 }
 
 function publicApiCacheTtl(request, url) {
-  if (request.method !== "GET" || request.headers.get("Cookie")) return 0;
-  if (url.searchParams.get("cache") === "1" && url.pathname === "/api/categories") return 300;
-  if (url.searchParams.get("cache") === "1" && (url.pathname === "/api/hero" || url.pathname === "/api/storefront-settings")) return 60;
+  if (request.method !== "GET" || request.headers.get("Cookie") || request.headers.get("Authorization")) return 0;
+  const cacheEnabled = url.searchParams.get("cache") === "1";
+  if (cacheEnabled && url.pathname === "/api/categories") return 300;
+  if (cacheEnabled && (url.pathname === "/api/hero" || url.pathname === "/api/storefront-settings")) return 60;
+  if (cacheEnabled && /^\/api\/products\/[^/]+$/.test(url.pathname)) return 30;
+  if (cacheEnabled && /^\/api\/products\/[^/]+\/(reviews|questions)$/.test(url.pathname)) return 20;
+  if (cacheEnabled && url.pathname === "/api/search" && url.searchParams.get("q")) return 20;
   if (url.pathname === "/api/products" && url.searchParams.get("view") === "cards" && [null, "public"].includes(url.searchParams.get("scope"))) return 30;
   return 0;
 }
