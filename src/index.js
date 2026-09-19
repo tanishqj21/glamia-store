@@ -3,6 +3,7 @@ const HOST_SESSION_COOKIE = "__Host-mm_session";
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60;
 const DAILY_UPLOAD_LIMIT = 50 * 1024 * 1024;
 const GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
+const APPLE_CERTS_URL = "https://appleid.apple.com/auth/keys";
 const DEMO_ADMIN_EMAIL = "demo-admin@glamia.local";
 const LOW_STOCK_THRESHOLD = 15;
 const CANCELLATION_WINDOW_DAYS = 2;
@@ -18,14 +19,32 @@ const R2_CLEANUP_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
 const CANONICAL_ORIGIN = "https://glamiastore.com";
 const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com"]);
+const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
+const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
+const PHONEPE_SANDBOX_BASE = "https://api-preprod.phonepe.com/apis/pg-sandbox";
+const PHONEPE_PRODUCTION_BASE = "https://api.phonepe.com/apis/pg";
+const PHONEPE_SANDBOX_TOKEN_URL = "https://api-preprod.phonepe.com/apis/pg-sandbox/v1/oauth/token";
+const PHONEPE_PRODUCTION_TOKEN_URL = "https://api.phonepe.com/apis/identity-manager/v1/oauth/token";
+let phonePeTokenCache = { token: "", expiresAt: 0, environment: "" };
 let googleKeysCache = { keys: null, expiresAt: 0 };
+let appleKeysCache = { keys: null, expiresAt: 0 };
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMITS = new Map([
   ["/api/auth/google", 20],
+  ["/api/auth/apple", 20],
   ["/api/employee/auth/login", 10],
   ["/api/orders", 30],
+  ["/api/payments/create", 20],
+  ["/api/payments/razorpay/verify", 30],
+  ["/api/payments/phonepe/status", 60],
+  ["/api/payments/webhooks/razorpay", 120],
+  ["/api/payments/webhooks/phonepe", 120],
   ["/api/order-tracking", 20],
   ["/api/coupons/validate", 60],
+  ["/api/coupons/available", 60],
+  ["/api/notifications", 60],
+  ["/api/notifications/read", 60],
+  ["/api/push-tokens", 30],
   ["/api/uploads/image", 30],
   ["/api/support/tickets", 30],
   ["/api/cart-events", 120],
@@ -39,9 +58,12 @@ const PRODUCT_REFERENCE_CACHE_MAX_ENTRIES = 1000;
 const PRODUCT_REFERENCE_CACHE_TTL_MS = 60_000;
 const productReferenceCache = new Map();
 const DASHBOARD_CACHE_TTL_MS = 45_000;
+const PAGINATION_COUNT_CACHE_TTL_MS = 30_000;
+const paginationCountCache = new Map();
 let dashboardStatsCache = { expiresAt: 0, generation: 0, payload: null };
 let dashboardStatsInFlight = null;
 function invalidateDashboardStats() {
+  paginationCountCache.clear();
   dashboardStatsCache = { expiresAt: 0, generation: dashboardStatsCache.generation + 1, payload: null };
 }
 const invalidateProductEnrichment = () => {
@@ -50,6 +72,16 @@ const invalidateProductEnrichment = () => {
   invalidateDashboardStats();
 };
 let googleAnalyticsTokenCache = { accessToken: "", expiresAt: 0, clientEmail: "" };
+
+async function cachedCount(env, key, sql, bindings = []) {
+  const now = Date.now();
+  const cached = paginationCountCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.value;
+  const row = await env.DB.prepare(sql).bind(...bindings).first();
+  const value = Number(row?.count || 0);
+  paginationCountCache.set(key, { value, expiresAt: now + PAGINATION_COUNT_CACHE_TTL_MS });
+  return value;
+}
 
 const seedProducts = [
   ["seed-ivory-linen-shirt", "seed@glamia.local", "Ivory Linen Resort Shirt", "Men", "North Loom", 1899, 2799, 38, 4.6, "live", 1, "Ivory", ["S", "M", "L", "XL"], "https://images.unsplash.com/photo-1516826957135-700dedea698c?auto=format&fit=crop&w=900&q=82", "A breathable linen shirt with a relaxed resort collar, mother-of-pearl buttons, and a soft garment-washed finish.", "Pure Linen"],
@@ -110,6 +142,8 @@ export default {
   async scheduled(_controller, env, ctx) {
     ctx.waitUntil(processDueEmailEvents(env));
     ctx.waitUntil(runWeeklyR2Cleanup(env));
+    ctx.waitUntil(expirePendingGatewayOrders(env));
+    ctx.waitUntil(runPageViewRollup(env));
   }
 };
 
@@ -161,7 +195,7 @@ function buildOrderNumber(initials, sequence) {
   return `GM-${istDateString()}-${initials}-${tail}`;
 }
 
-const DEFAULT_PAGE_DESCRIPTION = "Shop curated apparel and accessories from independent ateliers — free and fast shipping across India, demo checkout available.";
+const DEFAULT_PAGE_DESCRIPTION = "Shop curated apparel and accessories from independent ateliers — free and fast shipping across India, with secure payments available.";
 
 const CRAWLER_UA = /Googlebot|Google-InspectionTool|Bingbot|Yandex|DuckDuckBot|Baiduspider|facebookexternalhit|Facebot|Twitterbot|LinkedInBot|Slackbot|WhatsApp|TelegramBot|Applebot|PetalBot|SemrushBot|AhrefsBot|MJ12bot|GPTBot|ClaudeBot|PerplexityBot|ImagesiftBot/i;
 
@@ -233,7 +267,7 @@ function productBotContent(product, price, images, inStock, relatedRows) {
   const specificationMarkup = specifications.length
     ? `<section class="seo-product-specifications" aria-labelledby="product-specifications-heading"><h2 id="product-specifications-heading">Product specifications</h2><ul>${specifications.map(line => `<li>${escapeHtml(line)}</li>`).join("")}</ul></section>`
     : "";
-  return `<main class="page-main seo-product-page"><nav class="seo-breadcrumbs" aria-label="Breadcrumb"><a href="/">Home</a><span aria-hidden="true">›</span><a href="${categoryHref}">${escapeHtml(category)}</a><span aria-hidden="true">›</span><a href="${subcategoryHref}">${escapeHtml(subcategory)}</a><span aria-hidden="true">›</span><span aria-current="page">${escapeHtml(product.name)}</span></nav><article class="detail-page"><div class="detail-gallery">${imageMarkup}</div><div class="detail-copy"><p class="eyebrow">${escapeHtml(product.brand || "Glamia")}</p><h1>${escapeHtml(product.name)}</h1><p class="detail-price">₹${Number(price).toLocaleString("en-IN")}${Number(product.mrp) > price ? ` <del>₹${Number(product.mrp).toLocaleString("en-IN")}</del>` : ""}</p><p class="muted">${escapeHtml(category)} · ${escapeHtml(subcategory)}${product.color ? ` · ${escapeHtml(product.color)}` : ""}${Number(product.rating) > 0 ? ` · ${Number(product.rating)} / 5${Number(product.review_count) > 0 ? ` from ${Number(product.review_count)} review${Number(product.review_count) === 1 ? "" : "s"}` : " rating"}` : ""}</p><p class="detail-description">${escapeHtml(description)}</p><section aria-labelledby="product-details-heading"><h2 id="product-details-heading">Product details</h2><dl class="seo-product-details">${details}</dl></section>${specificationMarkup}<p class="seo-shop-note">Secure demo checkout is available while Glamia completes payment-provider approval. Shipping and return information is shown before an order is placed.</p><p><a href="${subcategoryHref}">Explore more ${escapeHtml(subcategory)}</a> · <a href="/policies">Delivery and return policies</a> · <a href="/support">Customer support</a></p></div></article>${related ? `<section class="seo-related-products" aria-labelledby="related-products-heading"><h2 id="related-products-heading">More from ${escapeHtml(category)}</h2><ul>${related}</ul></section>` : ""}</main>`;
+  return `<main class="page-main seo-product-page"><nav class="seo-breadcrumbs" aria-label="Breadcrumb"><a href="/">Home</a><span aria-hidden="true">›</span><a href="${categoryHref}">${escapeHtml(category)}</a><span aria-hidden="true">›</span><a href="${subcategoryHref}">${escapeHtml(subcategory)}</a><span aria-hidden="true">›</span><span aria-current="page">${escapeHtml(product.name)}</span></nav><article class="detail-page"><div class="detail-gallery">${imageMarkup}</div><div class="detail-copy"><p class="eyebrow">${escapeHtml(product.brand || "Glamia")}</p><h1>${escapeHtml(product.name)}</h1><p class="detail-price">₹${Number(price).toLocaleString("en-IN")}${Number(product.mrp) > price ? ` <del>₹${Number(product.mrp).toLocaleString("en-IN")}</del>` : ""}</p><p class="muted">${escapeHtml(category)} · ${escapeHtml(subcategory)}${product.color ? ` · ${escapeHtml(product.color)}` : ""}${Number(product.rating) > 0 ? ` · ${Number(product.rating)} / 5${Number(product.review_count) > 0 ? ` from ${Number(product.review_count)} review${Number(product.review_count) === 1 ? "" : "s"}` : " rating"}` : ""}</p><p class="detail-description">${escapeHtml(description)}</p><section aria-labelledby="product-details-heading"><h2 id="product-details-heading">Product details</h2><dl class="seo-product-details">${details}</dl></section>${specificationMarkup}<p class="seo-shop-note">Secure online payments are available through trusted payment providers. Shipping and return information is shown before an order is placed.</p><p><a href="${subcategoryHref}">Explore more ${escapeHtml(subcategory)}</a> · <a href="/policies">Delivery and return policies</a> · <a href="/support">Customer support</a></p></div></article>${related ? `<section class="seo-related-products" aria-labelledby="related-products-heading"><h2 id="related-products-heading">More from ${escapeHtml(category)}</h2><ul>${related}</ul></section>` : ""}</main>`;
 }
 
 const standalonePolicyPaths = {
@@ -569,9 +603,10 @@ async function cachedPublicResponse(request, ctx, ttl, producer) {
 
 async function routeApi(request, env, url, ctx) {
   const path = url.pathname;
-  // The native Expo employee app does not have a browser Origin/Referer. Its
-  // bearer session is the CSRF boundary for these narrowly-scoped endpoints.
-  if (!path.startsWith("/api/employee/")) assertSameOrigin(request, url);
+  // Native Expo clients do not have a browser Origin/Referer. Their explicit
+  // mobile marker plus bearer session is the CSRF boundary for app requests.
+  const isPaymentWebhook = ["/api/payments/webhooks/razorpay", "/api/payments/webhooks/phonepe"].includes(path);
+  if (!path.startsWith("/api/employee/") && !isPaymentWebhook) assertSameOrigin(request, url);
   await enforceRateLimit(request, url, env, ctx);
   const user = await currentUser(request, env);
 
@@ -624,6 +659,9 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "POST" && path === "/api/auth/google") {
     return loginWithGoogle(request, env);
   }
+  if (request.method === "POST" && path === "/api/auth/apple") {
+    return loginWithApple(request, env);
+  }
 
   if (request.method === "GET" && path === "/api/auth/demo-admin") {
     return loginAsDemoAdmin(request, env);
@@ -647,6 +685,10 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "PUT" && path === "/api/profile") {
     requireUser(user);
     return updateProfile(request, env, user);
+  }
+  if (request.method === "DELETE" && path === "/api/account") {
+    requireUser(user);
+    return deleteCustomerAccount(request, env, user);
   }
 
   if (request.method === "GET" && path === "/api/loyalty") {
@@ -713,6 +755,26 @@ async function routeApi(request, env, url, ctx) {
     return getStorefrontSettings(env);
   }
 
+  if (request.method === "POST" && path === "/api/payments/create") {
+      return createGatewayPayment(request, env, user);
+  }
+
+  if (request.method === "POST" && path === "/api/payments/razorpay/verify") {
+    return verifyRazorpayPayment(request, env, user);
+  }
+
+  if (request.method === "GET" && path === "/api/payments/phonepe/status") {
+    return getPhonePePaymentStatus(request, env, user, url);
+  }
+
+  if (request.method === "POST" && path === "/api/payments/webhooks/razorpay") {
+    return handleRazorpayWebhook(request, env);
+  }
+
+  if (request.method === "POST" && path === "/api/payments/webhooks/phonepe") {
+    return handlePhonePeWebhook(request, env);
+  }
+
   if (request.method === "GET" && path === "/api/postal-lookup") {
     return lookupIndianPostalCode(url.searchParams.get("pin"));
   }
@@ -732,6 +794,23 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "GET" && path === "/api/orders") {
     requireUser(user);
     return listOrders(env, user, url.searchParams.get("scope") || "own", url.searchParams);
+  }
+
+  if (request.method === "GET" && path === "/api/notifications") {
+    requireUser(user);
+    return listCustomerNotifications(env, user);
+  }
+  if (request.method === "POST" && path === "/api/notifications/read") {
+    requireUser(user);
+    return markCustomerNotificationsRead(request, env, user);
+  }
+  if (request.method === "POST" && path === "/api/push-tokens") {
+    requireUser(user);
+    return registerCustomerPushToken(request, env, user);
+  }
+  if (request.method === "DELETE" && path === "/api/push-tokens") {
+    requireUser(user);
+    return removeCustomerPushToken(request, env, user);
   }
 
   if (request.method === "GET" && path === "/api/order-tracking") {
@@ -797,6 +876,11 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "POST" && path === "/api/coupons/validate") {
     requireUser(user);
     return validateCoupon(request, env, user);
+  }
+
+  if (request.method === "POST" && path === "/api/coupons/available") {
+    requireUser(user);
+    return listAvailableCoupons(request, env, user);
   }
 
   if (request.method === "POST" && path === "/api/cart-events") {
@@ -1087,11 +1171,12 @@ async function routeApi(request, env, url, ctx) {
 async function loginWithGoogle(request, env) {
   const { credential, referral_code: referralCode } = await readJson(request);
   if (!credential) return json({ error: "Missing Google credential" }, 400);
-  if (!env.GOOGLE_CLIENT_ID || env.GOOGLE_CLIENT_ID.includes("REPLACE_WITH")) {
+  const googleClientIds = allowedGoogleClientIds(env);
+  if (!googleClientIds.length) {
     return json({ error: "Configure GOOGLE_CLIENT_ID in wrangler.jsonc" }, 500);
   }
 
-  const profile = await verifyGoogleIdToken(credential, env.GOOGLE_CLIENT_ID);
+  const profile = await verifyGoogleIdToken(credential, googleClientIds);
   if (!profile.email || profile.email_verified !== true) {
     return json({ error: "Google email must be verified" }, 401);
   }
@@ -1141,9 +1226,62 @@ async function loginWithGoogle(request, env) {
     ? { profile_complete: true, needs_profile_completion: false }
     : await getProfileCompletionStatus(env, user);
   const token = await signSession(user, env);
-  return json({ user: { ...user, needs_profile_completion: profileStatus.needs_profile_completion }, ...profileStatus }, 200, {
+  const mobile = request.headers.get("X-Glamia-Mobile") === "1";
+  return json({
+    user: { ...user, needs_profile_completion: profileStatus.needs_profile_completion },
+    ...profileStatus,
+    ...(mobile ? { session_token: token } : {})
+  }, 200, mobile ? {} : {
     "Set-Cookie": makeSessionCookie(request, token)
   });
+}
+
+async function loginWithApple(request, env) {
+  const body = await readJson(request);
+  const identityToken = String(body.identity_token || body.identityToken || "").trim();
+  if (!identityToken) return json({ error: "Missing Apple identity token" }, 400);
+  const profile = await verifyAppleIdentityToken(identityToken, env);
+  const appleSub = String(profile.sub || "").trim();
+  if (!appleSub) return json({ error: "Apple account identity is missing" }, 401);
+
+  const linked = await env.DB.prepare("SELECT * FROM users WHERE apple_sub = ? LIMIT 1").bind(appleSub).first();
+  const email = String(profile.email || linked?.email || "").trim().toLowerCase();
+  if (!email || !isRealCustomerEmail(email)) {
+    return json({ error: "Apple did not provide an account email. Please use the original Apple authorization or Google sign-in." }, 401);
+  }
+  const providedName = String(body.name || "").trim().slice(0, 160);
+  const name = providedName || linked?.name || email;
+  const role = adminEmails(env, request).includes(email) ? "admin" : "seller";
+  const user = { sub: `apple:${appleSub}`, email, name, picture: "", role };
+  const existing = linked || await env.DB.prepare("SELECT auth_email_sent_at, name, first_name FROM users WHERE email = ?").bind(email).first();
+  const authEmailType = existing ? (!existing.auth_email_sent_at ? "first-login" : null) : "welcome";
+
+  await env.DB.prepare(`
+    INSERT INTO users (email, google_sub, apple_sub, name, picture, role, last_login_at)
+    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(email) DO UPDATE SET
+      apple_sub = excluded.apple_sub,
+      name = CASE WHEN COALESCE(users.first_name, '') <> '' THEN users.name ELSE excluded.name END,
+      role = excluded.role,
+      last_login_at = CURRENT_TIMESTAMP
+  `).bind(email, `apple:${appleSub}`, appleSub, name, "", role).run();
+
+  const storedIdentity = await env.DB.prepare("SELECT name FROM users WHERE email = ?").bind(email).first();
+  user.name = storedIdentity?.name || name;
+  if (authEmailType) {
+    const sent = await sendAuthEmail(env, user, authEmailType);
+    if (sent) await env.DB.prepare("UPDATE users SET auth_email_sent_at = CURRENT_TIMESTAMP WHERE email = ?").bind(email).run();
+  }
+  const profileStatus = role === "admin"
+    ? { profile_complete: true, needs_profile_completion: false }
+    : await getProfileCompletionStatus(env, user);
+  const token = await signSession(user, env);
+  const mobile = request.headers.get("X-Glamia-Mobile") === "1";
+  return json({
+    user: { ...user, needs_profile_completion: profileStatus.needs_profile_completion },
+    ...profileStatus,
+    ...(mobile ? { session_token: token } : {})
+  }, 200, mobile ? {} : { "Set-Cookie": makeSessionCookie(request, token) });
 }
 
 async function sendAuthEmail(env, user, type) {
@@ -1218,7 +1356,14 @@ async function loginAsDemoAdmin(request, env, renderPage = false) {
   });
 }
 
-async function verifyGoogleIdToken(token, clientId) {
+function allowedGoogleClientIds(env) {
+  return [...new Set([env.GOOGLE_CLIENT_ID, env.GOOGLE_ANDROID_CLIENT_ID, env.GOOGLE_IOS_CLIENT_ID]
+    .flatMap(value => Array.isArray(value) ? value : String(value || "").split(","))
+    .map(value => String(value || "").trim())
+    .filter(value => value && !value.includes("REPLACE_WITH")))];
+}
+
+async function verifyGoogleIdToken(token, clientIds) {
   const [encodedHeader, encodedPayload, encodedSignature] = token.split(".");
   if (!encodedHeader || !encodedPayload || !encodedSignature || token.split(".").length !== 3) {
     throw httpError("Invalid Google token", 401);
@@ -1257,7 +1402,8 @@ async function verifyGoogleIdToken(token, clientId) {
   if (!valid) throw httpError("Invalid Google token signature", 401);
 
   const now = Math.floor(Date.now() / 1000);
-  if (payload.aud !== clientId) throw httpError("Google token audience mismatch", 401);
+  const allowedAudiences = Array.isArray(clientIds) ? clientIds : [clientIds];
+  if (!allowedAudiences.includes(payload.aud)) throw httpError("Google token audience mismatch", 401);
   if (!["accounts.google.com", "https://accounts.google.com"].includes(payload.iss)) throw httpError("Invalid Google token issuer", 401);
   if (Number(payload.exp) <= now) throw httpError("Google token expired", 401);
   return payload;
@@ -1272,6 +1418,46 @@ async function fetchGoogleKeys() {
   return googleKeysCache.keys;
 }
 
+async function verifyAppleIdentityToken(token, env) {
+  const [encodedHeader, encodedPayload, encodedSignature] = String(token).split(".");
+  if (!encodedHeader || !encodedPayload || !encodedSignature || String(token).split(".").length !== 3) {
+    throw httpError("Invalid Apple identity token", 401);
+  }
+  let header;
+  let payload;
+  try {
+    header = JSON.parse(base64UrlDecodeToString(encodedHeader));
+    payload = JSON.parse(base64UrlDecodeToString(encodedPayload));
+  } catch {
+    throw httpError("Invalid Apple identity token", 401);
+  }
+  if (header?.alg !== "RS256") throw httpError("Unsupported Apple token algorithm", 401);
+  const keys = await fetchAppleKeys();
+  const jwk = keys.find(key => key.kid === header.kid);
+  if (!jwk) throw httpError("Apple signing key not found", 401);
+  const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  const valid = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, base64UrlToBytes(encodedSignature), new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`));
+  if (!valid) throw httpError("Apple identity token signature is invalid", 401);
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.iss !== "https://appleid.apple.com") throw httpError("Invalid Apple token issuer", 401);
+  if (payload.exp <= now || payload.iat > now + 300) throw httpError("Apple identity token expired", 401);
+  const expectedAudience = String(env.APPLE_CLIENT_ID || "com.glamia.store").trim();
+  if (expectedAudience && payload.aud !== expectedAudience) throw httpError("Apple token audience mismatch", 401);
+  if (payload.email_verified !== undefined && ![true, "true", 1, "1"].includes(payload.email_verified)) {
+    throw httpError("Apple email must be verified", 401);
+  }
+  return payload;
+}
+
+async function fetchAppleKeys() {
+  if (appleKeysCache.keys && appleKeysCache.expiresAt > Date.now()) return appleKeysCache.keys;
+  const response = await fetch(APPLE_CERTS_URL);
+  if (!response.ok) throw httpError("Unable to fetch Apple signing keys", 502);
+  const body = await response.json();
+  appleKeysCache = { keys: body.keys || [], expiresAt: Date.now() + 5 * 60 * 1000 };
+  return appleKeysCache.keys;
+}
+
 const PRODUCT_SELECT = `
   SELECT p.*, AVG(r.rating) AS review_avg, COUNT(r.id) AS review_count
   FROM products p
@@ -1282,6 +1468,7 @@ const PRODUCT_CARD_SELECT = `
   SELECT
     p.id, p.name, p.category, p.subcategory, p.brand, p.price, p.mrp, p.stock,
     p.rating, p.status, p.featured, p.color, p.material, p.sizes_json,
+    p.color_hex, p.returnable,
     p.image_url, p.thumbnail_url, p.thumbnail_images_json, p.variant_group,
     p.deal_starts_at, p.deal_ends_at, p.deal_price, p.reorder_point,
     p.preorder_enabled, p.preorder_release_at, p.preorder_limit, p.preorder_sold, p.created_at,
@@ -1313,8 +1500,7 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
       .bind(limit, offset)
       .all();
     const products = await withSizeStock(env, results);
-    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM products").first();
-    const total = Number(count?.count || 0);
+    const total = await cachedCount(env, "admin-products", "SELECT COUNT(*) AS count FROM products");
     return json({ products, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + products.length < total } });
   }
   if (scope === "seller") {
@@ -1328,6 +1514,10 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
 
   const where = ["p.status = 'live'"];
   const bindings = [];
+  const requestedIds = [...new Set(String(searchParams.get("ids") || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean))].slice(0, 100);
   const category = String(searchParams.get("category") || "").trim();
   const subcategory = String(searchParams.get("subcategory") || "").trim();
   const color = String(searchParams.get("color") || "").trim();
@@ -1336,6 +1526,10 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
   const search = productSearchQuery(searchParams.get("q"));
   const minPrice = Number(searchParams.get("min_price"));
   const maxPrice = Number(searchParams.get("max_price"));
+  if (requestedIds.length) {
+    where.push(`p.id IN (${requestedIds.map(() => "?").join(", ")})`);
+    bindings.push(...requestedIds);
+  }
   if (category) { where.push("p.category = ?"); bindings.push(category); }
   if (subcategory) { where.push("p.subcategory = ?"); bindings.push(subcategory); }
   if (color) { where.push("LOWER(p.color) = LOWER(?)"); bindings.push(color); }
@@ -1369,11 +1563,17 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
   const sql = `${select} WHERE ${where.join(" AND ")} GROUP BY p.id ORDER BY ${sortSql}${limit ? " LIMIT ? OFFSET ?" : ""}`;
   const queryBindings = limit ? [...bindings, limit, offset] : bindings;
   const { results } = await env.DB.prepare(sql).bind(...queryBindings).all();
-  const products = await withSizeStock(env, results, wantsCards ? formatProductCard : formatProduct);
+  const shouldEnrich = !wantsCards || searchParams.get("include_stock") === "1";
+  const products = shouldEnrich
+    ? await withSizeStock(env, results, wantsCards ? formatProductCard : formatProduct)
+    : results.map(formatProductCard);
   if (!limit) return json({ products });
-  const count = await env.DB.prepare(`SELECT COUNT(*) AS count FROM products p WHERE ${where.join(" AND ")}`)
-    .bind(...bindings).first();
-  const total = Number(count?.count || 0);
+  const total = await cachedCount(
+    env,
+    `public-products:${where.join("|")}:${JSON.stringify(bindings)}`,
+    `SELECT COUNT(*) AS count FROM products p WHERE ${where.join(" AND ")}`,
+    bindings
+  );
   return json({ products, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + products.length < total } });
 }
 
@@ -1398,6 +1598,55 @@ async function trackPageView(request, env) {
     .bind(crypto.randomUUID(), path, referrerHost, device, country)
     .run();
   return json({ ok: true });
+}
+
+/* Fold new raw page-view events into compact IST buckets. The cursor is the
+   pair (created_at, id), so events sharing SQLite's second-resolution timestamp
+   are still processed exactly once. The INSERT and cursor advance are one D1
+   batch, making retries safe. */
+async function runPageViewRollup(env) {
+  try {
+    const state = await env.DB.prepare("SELECT last_created_at, last_id FROM analytics_rollup_state WHERE id = 1").first();
+    const lastCreatedAt = String(state?.last_created_at || "");
+    const lastId = String(state?.last_id || "");
+    const cursorWhere = "(created_at > ? OR (created_at = ? AND id > ?))";
+    const pending = await env.DB.prepare(`SELECT 1 AS pending FROM page_views WHERE ${cursorWhere} ORDER BY created_at ASC, id ASC LIMIT 1`)
+      .bind(lastCreatedAt, lastCreatedAt, lastId)
+      .first();
+    if (!pending) return;
+
+    const batch = `WITH batch AS (
+      SELECT id, created_at,
+        date(created_at, '+5 hours', '+30 minutes') AS day,
+        CAST(strftime('%H', datetime(created_at, '+5 hours', '+30 minutes')) AS INTEGER) AS hour,
+        path, referrer_host, device, country
+      FROM page_views
+      WHERE ${cursorWhere}
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1000
+    )`;
+    const aggregate = `${batch}
+      INSERT INTO page_view_rollups
+        (day, hour, path, referrer_host, device, country, views)
+      SELECT day, hour, path, referrer_host, device, country, COUNT(*)
+      FROM batch
+      GROUP BY day, hour, path, referrer_host, device, country
+      ON CONFLICT(day, hour, path, referrer_host, device, country)
+      DO UPDATE SET views = page_view_rollups.views + excluded.views`;
+    const advance = `${batch}
+      UPDATE analytics_rollup_state
+      SET last_created_at = COALESCE((SELECT created_at FROM batch ORDER BY created_at DESC, id DESC LIMIT 1), last_created_at),
+          last_id = COALESCE((SELECT id FROM batch ORDER BY created_at DESC, id DESC LIMIT 1), last_id)
+      WHERE id = 1`;
+    await env.DB.batch([
+      env.DB.prepare(aggregate).bind(lastCreatedAt, lastCreatedAt, lastId),
+      env.DB.prepare(advance).bind(lastCreatedAt, lastCreatedAt, lastId)
+    ]);
+  } catch (error) {
+    // Keep scheduled maintenance non-blocking if a deployment is between
+    // migrations; the next scheduled run retries after the schema is ready.
+    console.error("Page-view rollup failed", error?.message || error);
+  }
 }
 
 /* Vector (semantic) search: products and queries are embedded with Workers AI
@@ -1461,7 +1710,7 @@ async function vectorSearchProducts(env, rawQuery, limit = 40) {
     const { results } = await env.DB.prepare(`${PRODUCT_CARD_SELECT} WHERE p.status = 'live' AND p.id IN (${placeholders}) GROUP BY p.id`)
       .bind(...hits).all();
     const byId = new Map(results.map(row => [String(row.id), row]));
-    const products = await withSizeStock(env, hits.map(id => byId.get(id)).filter(Boolean), formatProductCard);
+    const products = hits.map(id => byId.get(id)).filter(Boolean).map(formatProductCard);
     return { products, engine: "vector" };
   } catch {
     return null;
@@ -1588,16 +1837,21 @@ async function getProduct(env, user, reference, context = null) {
     .bind(resolvedId, canManage ? 1 : 0, sellerEmail)
     .first();
   if (!row) return json({ error: "Product not found" }, 404);
-  const [product] = await withSizeStock(env, [row]);
-  let colourways = [];
-  if (product.variant_group) {
+  let colourwayRows = [];
+  if (row.variant_group) {
     const { results } = await env.DB.prepare(`${PRODUCT_SELECT}
       WHERE p.variant_group = ? AND (p.status = 'live' OR ? = 1 OR LOWER(p.seller_email) = ?)
       GROUP BY p.id ORDER BY p.created_at ASC`)
-      .bind(product.variant_group, canManage ? 1 : 0, sellerEmail)
+      .bind(row.variant_group, canManage ? 1 : 0, sellerEmail)
       .all();
-    colourways = await withSizeStock(env, results);
+    colourwayRows = results;
   }
+  // Enrich the primary product and its colourways in one stock batch. The
+  // colourway query intentionally keeps its existing ordering and contents.
+  // withSizeStock deduplicates IDs, so the primary row is not queried twice.
+  const enriched = await withSizeStock(env, [row, ...colourwayRows]);
+  const product = enriched[0];
+  const colourways = enriched.slice(1);
   return json({ product, colourways });
 }
 
@@ -1863,10 +2117,42 @@ async function heroInsights(env) {
   });
 }
 
+function paymentGatewayStatus(env, settings = {}) {
+  const razorpayCredentials = Boolean(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET);
+  const razorpayWebhook = Boolean(env.RAZORPAY_WEBHOOK_SECRET);
+  const phonepeCredentials = Boolean(env.PHONEPE_CLIENT_ID && env.PHONEPE_CLIENT_SECRET && env.PHONEPE_CLIENT_VERSION);
+  const phonepeWebhook = Boolean(
+    (env.PHONEPE_WEBHOOK_SECRET && env.PHONEPE_WEBHOOK_ID) ||
+    (env.PHONEPE_WEBHOOK_USERNAME && env.PHONEPE_WEBHOOK_PASSWORD)
+  );
+  return {
+    razorpay: {
+      enabled: settings.razorpay_enabled !== false,
+      configured: razorpayCredentials,
+      webhook_ready: razorpayWebhook,
+      ready: razorpayCredentials && razorpayWebhook
+    },
+    phonepe: {
+      enabled: settings.phonepe_enabled !== false,
+      configured: phonepeCredentials,
+      webhook_ready: phonepeWebhook,
+      ready: phonepeCredentials && phonepeWebhook
+    }
+  };
+}
+
+function paymentMethods(env, settings = {}) {
+  const status = paymentGatewayStatus(env, settings);
+  const methods = [];
+  if (status.razorpay.enabled && status.razorpay.ready) methods.push({ id: "razorpay", label: "Razorpay", description: "Cards, UPI, netbanking and wallets" });
+  if (status.phonepe.enabled && status.phonepe.ready) methods.push({ id: "phonepe", label: "PhonePe", description: "UPI, cards and netbanking" });
+  return methods;
+}
+
 const STOREFRONT_DEFAULTS = {
   announcement: {
     visible: true,
-    text: "Complimentary shipping across India · Demo checkout available",
+    text: "Complimentary shipping across India · Secure checkout",
     items: []
   },
   trust_strip: {
@@ -1874,14 +2160,15 @@ const STOREFRONT_DEFAULTS = {
     items: [
       { id: "shipping", visible: true, title: "Free & Fast Shipping", body: "Complimentary on every order" },
       { id: "returns", visible: true, title: "7-Day Easy Returns", body: "Simple exchanges, no questions" },
-      { id: "cod", visible: true, title: "Demo Checkout", body: "No money is charged" }
+      { id: "secure", visible: true, title: "Secure Payments", body: "Protected checkout with trusted providers" }
     ]
   },
   fulfillment: {
     warehouse_address: ""
   },
   payments: {
-    cod_enabled: true
+    razorpay_enabled: true,
+    phonepe_enabled: true
   },
   support_contact: {
     visible: false,
@@ -1902,7 +2189,8 @@ function parseSettingObject(value) {
 async function storefrontSettingsObject(env, includePrivate = false) {
   const { results } = await env.DB.prepare("SELECT setting_key, value_json FROM storefront_settings").all();
   const raw = Object.fromEntries(results.map(row => [row.setting_key, parseSettingObject(row.value_json)]));
-  const announcementTextValue = announcementText(raw.announcement?.text, STOREFRONT_DEFAULTS.announcement.text);
+  const announcementTextValue = announcementText(raw.announcement?.text, STOREFRONT_DEFAULTS.announcement.text)
+    .replace(/demo checkout available/ig, "secure checkout");
   const allAnnouncementItems = normalizeAnnouncementItems(raw.announcement?.items);
   const now = Date.now();
   const announcement = {
@@ -1936,7 +2224,10 @@ async function storefrontSettingsObject(env, includePrivate = false) {
       warehouse_address: heroText(raw.fulfillment?.warehouse_address, STOREFRONT_DEFAULTS.fulfillment.warehouse_address, 320)
     },
     payments: {
-      cod_enabled: raw.payments?.cod_enabled === undefined ? STOREFRONT_DEFAULTS.payments.cod_enabled : Boolean(raw.payments.cod_enabled)
+      razorpay_enabled: raw.payments?.razorpay_enabled === undefined ? STOREFRONT_DEFAULTS.payments.razorpay_enabled : Boolean(raw.payments.razorpay_enabled),
+      phonepe_enabled: raw.payments?.phonepe_enabled === undefined ? STOREFRONT_DEFAULTS.payments.phonepe_enabled : Boolean(raw.payments.phonepe_enabled),
+      methods: paymentMethods(env, raw.payments),
+      gateway_status: paymentGatewayStatus(env, raw.payments)
     },
     support_contact: supportContact,
     seo: {
@@ -1998,7 +2289,8 @@ async function updateStorefrontSettings(request, env) {
     warehouse_address: heroText(nextFulfillment.warehouse_address, current.fulfillment.warehouse_address, 320)
   };
   const payments = {
-    cod_enabled: nextPayments.cod_enabled === undefined ? current.payments.cod_enabled : Boolean(nextPayments.cod_enabled)
+    razorpay_enabled: nextPayments.razorpay_enabled === undefined ? current.payments.razorpay_enabled : Boolean(nextPayments.razorpay_enabled),
+    phonepe_enabled: nextPayments.phonepe_enabled === undefined ? current.payments.phonepe_enabled : Boolean(nextPayments.phonepe_enabled)
   };
   const supportContact = {
     visible: nextSupportContact.visible === undefined ? current.support_contact.visible : Boolean(nextSupportContact.visible),
@@ -2025,7 +2317,15 @@ async function updateStorefrontSettings(request, env) {
     env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
       .bind("seo", JSON.stringify(seo))
   ]);
-  return json({ ok: true, announcement, trust_strip: trustStrip, fulfillment, payments, support_contact: supportContact, seo });
+  return json({
+    ok: true,
+    announcement,
+    trust_strip: trustStrip,
+    fulfillment,
+    payments: { ...payments, methods: paymentMethods(env, payments), gateway_status: paymentGatewayStatus(env, payments) },
+    support_contact: supportContact,
+    seo
+  });
 }
 
 function splitProfileName(value) {
@@ -2287,6 +2587,46 @@ async function updateProfile(request, env, user) {
   });
 }
 
+async function deleteCustomerAccount(request, env, user) {
+  const body = await readJson(request).catch(() => ({}));
+  if (String(body.confirm || "").trim().toUpperCase() !== "DELETE") {
+    return json({ error: "Type DELETE to confirm account removal" }, 400);
+  }
+  const email = String(user.email || "").trim().toLowerCase();
+  const anonymizedEmail = `deleted-${crypto.randomUUID().replace(/-/g, "")}@privacy.glamia.invalid`;
+  const statements = [
+    env.DB.prepare("UPDATE orders SET customer_email = ?, customer_name = 'Deleted account', shipping_json = '{}' WHERE customer_email = ?").bind(anonymizedEmail, email),
+    env.DB.prepare("UPDATE return_requests SET customer_email = ? WHERE customer_email = ?").bind(anonymizedEmail, email),
+    env.DB.prepare("UPDATE reviews SET user_email = ?, user_name = 'Deleted customer' WHERE user_email = ?").bind(anonymizedEmail, email),
+    env.DB.prepare("UPDATE product_questions SET customer_email = ?, customer_name = 'Deleted customer' WHERE customer_email = ?").bind(anonymizedEmail, email),
+    env.DB.prepare("UPDATE support_tickets SET customer_email = ?, customer_name = 'Deleted customer' WHERE customer_email = ?").bind(anonymizedEmail, email),
+    env.DB.prepare("UPDATE support_messages SET sender_email = ? WHERE sender_email = ?").bind(anonymizedEmail, email),
+    env.DB.prepare("UPDATE coupon_redemptions SET customer_email = ? WHERE customer_email = ?").bind(anonymizedEmail, email),
+    env.DB.prepare("UPDATE store_credit_accounts SET user_email = ? WHERE user_email = ?").bind(anonymizedEmail, email),
+    env.DB.prepare("UPDATE store_credit_ledger SET user_email = ? WHERE user_email = ?").bind(anonymizedEmail, email),
+    env.DB.prepare("DELETE FROM referral_codes WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM referral_rewards WHERE referred_email = ? OR referrer_email = ?").bind(email, email),
+    env.DB.prepare("DELETE FROM upload_usage WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM cart_adds WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM wishlist_adds WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM user_credentials WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM profile_phones WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM user_addresses WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM restock_subscriptions WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM customer_notifications WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM customer_push_tokens WHERE user_email = ?").bind(email),
+    env.DB.prepare(`
+      UPDATE users SET
+        email = ?, google_sub = ?, apple_sub = NULL, name = 'Deleted account', picture = '',
+        first_name = '', middle_name = '', last_name = '', phone = '', dob = '', gender = '',
+        dob_updated_at = NULL, auth_email_sent_at = NULL, session_version = COALESCE(session_version, 0) + 1
+      WHERE email = ?
+    `).bind(anonymizedEmail, `deleted:${crypto.randomUUID()}`, email)
+  ];
+  await env.DB.batch(statements);
+  return json({ ok: true });
+}
+
 function normalizeAddressInput(raw, fallbackId = null) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw httpError("Address details are required", 400);
@@ -2499,7 +2839,9 @@ async function replaceAddresses(request, env, user) {
   return listAddresses(env, user);
 }
 
-const MAX_VARIANT_IMAGES = 8;
+const MAX_PRODUCT_IMAGES = 15;
+const MIN_PRODUCT_IMAGES = 4;
+const MAX_VARIANT_IMAGES = 15;
 const MIN_VARIANT_IMAGES = 4;
 
 /* R2 keys are derived from the stored asset URLs — the single source of truth —
@@ -2556,9 +2898,22 @@ async function getSizeStockMap(env, productId) {
   return map;
 }
 
+function validateColorHex(value, label = "Colour swatch") {
+  const hex = String(value || "").trim();
+  if (!hex) return "";
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) throw httpError(`${label} must be a 6-digit hex colour`, 400);
+  return hex.toLowerCase();
+}
+
+function normalizeReturnable(value, fallback = 1) {
+  if (value === undefined || value === null || value === "") return fallback ? 1 : 0;
+  return value === true || value === 1 || value === "1" || String(value).trim().toLowerCase() === "true" || String(value).trim().toLowerCase() === "yes" ? 1 : 0;
+}
+
 function sanitizeVariants(variants) {
   return (variants || []).map(variant => ({
     color: String(variant.color || "").trim(),
+    color_hex: validateColorHex(variant.color_hex, "Variant colour swatch"),
     sizes: (variant.sizes || []).map(size => String(size || "").trim()).filter(Boolean),
     size_stock: variant.size_stock && typeof variant.size_stock === "object" ? variant.size_stock : null,
     stock: Math.max(0, Number(variant.stock) || 0),
@@ -2616,15 +2971,15 @@ function productInsertStatement(env, entry) {
   return env.DB.prepare(`
     INSERT INTO products (
       id, seller_email, name, category, brand, price, mrp, stock, rating, status, featured,
-      color, sizes_json, image_url, image_key, images_json, image_keys_json, thumbnail_url, thumbnail_key,
+      color, color_hex, sizes_json, image_url, image_key, images_json, image_keys_json, thumbnail_url, thumbnail_key,
       thumbnail_images_json, thumbnail_keys_json, thumbnail_source_url, material, description, specifications, variants_json, variant_group,
       subcategory, size_chart_url, cost_price, reorder_point, preorder_enabled, preorder_release_at,
-      preorder_limit, preorder_sold, hsn_sac_code, hsn_sac_type, gst_rate, gst_tax_inclusive
+      preorder_limit, preorder_sold, hsn_sac_code, hsn_sac_type, gst_rate, gst_tax_inclusive, returnable
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?
     )
   `).bind(
     entry.id,
@@ -2639,6 +2994,7 @@ function productInsertStatement(env, entry) {
     entry.status,
     entry.featured,
     entry.color,
+    entry.colorHex || "",
     JSON.stringify(entry.sizes),
     entry.images[0],
     entry.imageKeys[0] || null,
@@ -2665,7 +3021,8 @@ function productInsertStatement(env, entry) {
     entry.hsnSacCode || "",
     entry.hsnSacType || "HSN",
     entry.gstRate ?? null,
-    entry.gstTaxInclusive ?? 1
+    entry.gstTaxInclusive ?? 1,
+    entry.returnable ?? 1
   );
 }
 
@@ -2710,6 +3067,7 @@ async function createProduct(request, env, user) {
     status: "hold",
     featured: 0,
     color: product.color,
+    colorHex: validateColorHex(product.color_hex),
     sizes: product.sizes,
     images,
     imageKeys,
@@ -2731,7 +3089,8 @@ async function createProduct(request, env, user) {
     hsnSacCode: tax.hsn_sac_code,
     hsnSacType: tax.hsn_sac_type,
     gstRate: tax.gst_rate,
-    gstTaxInclusive: tax.gst_tax_inclusive
+    gstTaxInclusive: tax.gst_tax_inclusive,
+    returnable: product.returnable === undefined ? 1 : normalizeReturnable(product.returnable)
   }];
 
   const createdVariants = [];
@@ -2750,6 +3109,7 @@ async function createProduct(request, env, user) {
       status: "hold",
       featured: 0,
       color: variant.color,
+      colorHex: variant.color_hex,
       sizes: variant.sizes,
       images: variant.images,
       imageKeys: keysFromImages(variant.images),
@@ -2772,7 +3132,8 @@ async function createProduct(request, env, user) {
       hsnSacCode: tax.hsn_sac_code,
       hsnSacType: tax.hsn_sac_type,
       gstRate: tax.gst_rate,
-      gstTaxInclusive: tax.gst_tax_inclusive
+      gstTaxInclusive: tax.gst_tax_inclusive,
+      returnable: product.returnable === undefined ? 1 : normalizeReturnable(product.returnable)
     });
     createdVariants.push(id);
   }
@@ -2851,7 +3212,7 @@ async function updateProduct(request, env, id, adminUser = null) {
     }
   }
 
-    const catalogFields = ["name", "category", "brand", "price", "mrp", "color", "material", "sizes", "description", "specifications", "images", "thumbnail_urls", "thumbnail_keys", "thumbnail_source_url", "subcategory", "size_chart_url", "cost_price", "reorder_point", "variants"];
+    const catalogFields = ["name", "category", "brand", "price", "mrp", "color", "color_hex", "returnable", "material", "sizes", "description", "specifications", "images", "thumbnail_urls", "thumbnail_keys", "thumbnail_source_url", "subcategory", "size_chart_url", "cost_price", "reorder_point", "variants"];
   const hasCatalogEdit = catalogFields.some(field => body[field] !== undefined);
   if (hasCatalogEdit) {
     let currentImages = [];
@@ -2886,6 +3247,8 @@ async function updateProduct(request, env, id, adminUser = null) {
       mrp: body.mrp ?? current.mrp,
       stock: body.stock ?? current.stock,
       color: body.color ?? current.color,
+      color_hex: body.color_hex !== undefined ? validateColorHex(body.color_hex) : validateColorHex(current.color_hex),
+      returnable: body.returnable !== undefined ? normalizeReturnable(body.returnable) : normalizeReturnable(current.returnable),
       material: body.material ?? current.material,
       sizes: body.sizes ?? jsonArray(current.sizes_json),
       description: body.description ?? current.description,
@@ -2936,6 +3299,8 @@ async function updateProduct(request, env, id, adminUser = null) {
       mrp: validateMoney(merged.mrp, "MRP"),
       stock: validateStock(merged.stock, "Stock"),
       color: merged.color,
+      color_hex: merged.color_hex,
+      returnable: merged.returnable,
       material: merged.material,
       description: merged.description,
       specifications: merged.specifications,
@@ -2989,7 +3354,7 @@ async function updateProduct(request, env, id, adminUser = null) {
 
   const updateStatement = env.DB.prepare(`
     UPDATE products SET
-      name = ?, category = ?, brand = ?, price = ?, mrp = ?, stock = ?, color = ?, material = ?,
+      name = ?, category = ?, brand = ?, price = ?, mrp = ?, stock = ?, color = ?, color_hex = ?, returnable = ?, material = ?,
       description = ?, specifications = ?, sizes_json = ?, image_url = ?, image_key = ?, images_json = ?,
       image_keys_json = ?, thumbnail_url = ?, thumbnail_key = ?, thumbnail_images_json = ?, thumbnail_keys_json = ?, thumbnail_source_url = ?,
       variants_json = ?, status = ?, featured = ?, deal_ends_at = ?,
@@ -2998,7 +3363,7 @@ async function updateProduct(request, env, id, adminUser = null) {
       gst_rate = ?, gst_tax_inclusive = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
-    next.name, next.category, next.brand, next.price, next.mrp, next.stock, next.color, next.material,
+    next.name, next.category, next.brand, next.price, next.mrp, next.stock, next.color, next.color_hex ?? "", next.returnable ?? 1, next.material,
     next.description, next.specifications ?? "", next.sizes_json, next.image_url, next.image_key, next.images_json,
     next.image_keys_json, next.thumbnail_url ?? null, next.thumbnail_key ?? null, next.thumbnail_images_json ?? "[]", next.thumbnail_keys_json ?? "[]", next.thumbnail_source_url ?? "",
     next.variants_json, next.status, next.featured, next.deal_ends_at ?? null,
@@ -3010,6 +3375,10 @@ async function updateProduct(request, env, id, adminUser = null) {
   if (current.variant_group && body.status !== undefined) {
     updateStatements.push(env.DB.prepare("UPDATE products SET status = ? WHERE variant_group = ? AND id != ?")
       .bind(body.status, current.variant_group, id));
+  }
+  if (current.variant_group && body.returnable !== undefined) {
+    updateStatements.push(env.DB.prepare("UPDATE products SET returnable = ?, updated_at = CURRENT_TIMESTAMP WHERE variant_group = ? AND id != ?")
+      .bind(next.returnable ?? 1, current.variant_group, id));
   }
   updateStatements.push(updateStatement);
   await env.DB.batch(updateStatements);
@@ -3203,7 +3572,7 @@ async function dashboardStats(env) {
 }
 
 async function buildDashboardStats(env) {
-  const [salesResult, cartResult, wishResult, productResult, customerResult, orderCount, returnCount, stateOrdersResult, hourOrdersResult, recoveryResult, codResult, funnelResult, viewsTotalResult, viewsByDayResult, viewsByPathResult, viewsByReferrerResult, viewsByDeviceResult, viewsByCountryResult, viewsByHourResult, viewsByDayHourResult] = await Promise.all([
+  const [salesResult, cartResult, wishResult, productResult, customerResult, orderCount, returnCount, stateOrdersResult, hourOrdersResult, recoveryResult, paymentResult, funnelResult, viewsTotalResult, viewsByDayResult, viewsByPathResult, viewsByReferrerResult, viewsByDeviceResult, viewsByCountryResult, viewsByHourResult, viewsByDayHourResult] = await Promise.all([
     env.DB.prepare(`
       SELECT oi.product_id,
         SUM(MAX(0, oi.unit_price * oi.quantity - CAST(ROUND(
@@ -3296,7 +3665,6 @@ async function buildDashboardStats(env) {
       SELECT COUNT(*) AS total,
         SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
       FROM orders
-      WHERE LOWER(COALESCE(payment_method, 'cod')) IN ('cod', 'demo')
     `).first()
     , env.DB.prepare(`
       WITH cart_customers AS (
@@ -3313,46 +3681,46 @@ async function buildDashboardStats(env) {
         ) THEN 1 ELSE 0 END) AS purchasing_customers
       FROM cart_customers
     `).first(),
-    env.DB.prepare("SELECT COUNT(*) AS views FROM page_views WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days')").first(),
+    env.DB.prepare("SELECT COALESCE(SUM(views), 0) AS views FROM page_view_rollups WHERE day >= date('now', '+5 hours', '+30 minutes', '-29 days')").first(),
     env.DB.prepare(`
       WITH RECURSIVE days(day) AS (
         SELECT date('now', '+5 hours', '+30 minutes', '-29 days')
         UNION ALL SELECT date(day, '+1 day') FROM days WHERE day < date('now', '+5 hours', '+30 minutes')
       )
-      SELECT days.day,
-        COUNT(pv.id) AS views
+      SELECT days.day, COALESCE(SUM(r.views), 0) AS views
       FROM days
-      LEFT JOIN page_views pv
-        ON date(pv.created_at, '+5 hours', '+30 minutes') = days.day
+      LEFT JOIN page_view_rollups r ON r.day = days.day
       GROUP BY days.day
       ORDER BY days.day ASC
     `).all(),
-    env.DB.prepare("SELECT path, COUNT(*) AS views FROM page_views WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days') GROUP BY path ORDER BY views DESC LIMIT 8").all(),
-    env.DB.prepare("SELECT referrer_host AS source, COUNT(*) AS views FROM page_views WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days') AND referrer_host != '' GROUP BY referrer_host ORDER BY views DESC LIMIT 8").all(),
-    env.DB.prepare("SELECT device, COUNT(*) AS views FROM page_views WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days') GROUP BY device ORDER BY views DESC").all(),
-    env.DB.prepare("SELECT country, COUNT(*) AS views FROM page_views WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days') AND country != '' GROUP BY country ORDER BY views DESC LIMIT 8").all(),
+    env.DB.prepare("SELECT path, SUM(views) AS views FROM page_view_rollups WHERE day >= date('now', '+5 hours', '+30 minutes', '-29 days') GROUP BY path ORDER BY views DESC LIMIT 8").all(),
+    env.DB.prepare("SELECT referrer_host AS source, SUM(views) AS views FROM page_view_rollups WHERE day >= date('now', '+5 hours', '+30 minutes', '-29 days') AND referrer_host != '' GROUP BY referrer_host ORDER BY views DESC LIMIT 8").all(),
+    env.DB.prepare("SELECT device, SUM(views) AS views FROM page_view_rollups WHERE day >= date('now', '+5 hours', '+30 minutes', '-29 days') GROUP BY device ORDER BY views DESC").all(),
+    env.DB.prepare("SELECT country, SUM(views) AS views FROM page_view_rollups WHERE day >= date('now', '+5 hours', '+30 minutes', '-29 days') AND country != '' GROUP BY country ORDER BY views DESC LIMIT 8").all(),
     env.DB.prepare(`
       WITH RECURSIVE hours(hour) AS (
         SELECT 0
         UNION ALL
         SELECT hour + 1 FROM hours WHERE hour < 23
       )
-      SELECT hours.hour,
-        COUNT(pv.id) AS views
+      SELECT hours.hour, COALESCE(SUM(r.views), 0) AS views
       FROM hours
-      LEFT JOIN page_views pv
-        ON date(pv.created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days')
-        AND CAST(strftime('%H', datetime(pv.created_at, '+5 hours', '+30 minutes')) AS INTEGER) = hours.hour
+      LEFT JOIN (
+        SELECT hour, SUM(views) AS views
+        FROM page_view_rollups
+        WHERE day >= date('now', '+5 hours', '+30 minutes', '-29 days')
+        GROUP BY hour
+      ) r ON r.hour = hours.hour
       GROUP BY hours.hour
       ORDER BY hours.hour ASC
     `).all(),
     env.DB.prepare(`
       SELECT
-        date(created_at, '+5 hours', '+30 minutes') AS day,
-        CAST(strftime('%H', datetime(created_at, '+5 hours', '+30 minutes')) AS INTEGER) AS hour,
-        COUNT(*) AS views
-      FROM page_views
-      WHERE date(created_at, '+5 hours', '+30 minutes') >= date('now', '+5 hours', '+30 minutes', '-29 days')
+        day,
+        hour,
+        SUM(views) AS views
+      FROM page_view_rollups
+      WHERE day >= date('now', '+5 hours', '+30 minutes', '-29 days')
       GROUP BY day, hour
       ORDER BY day ASC, hour ASC
     `).all()
@@ -3448,8 +3816,8 @@ async function buildDashboardStats(env) {
   const totalOrders = Number(orderCount?.count || 0);
   const refundedOrCompleted = Number(returnCount?.count || 0);
   const lifetimeValues = customerResult.results.map(row => Number(row.total_spent || 0)).filter(value => value >= 0);
-  const codTotal = Number(codResult?.total || 0);
-  const codCancelled = Number(codResult?.cancelled || 0);
+  const paymentTotal = Number(paymentResult?.total || 0);
+  const paymentCancelled = Number(paymentResult?.cancelled || 0);
   const trackedCartCustomers = Number(funnelResult?.cart_customers || 0);
   const purchasingCustomers = Number(funnelResult?.purchasing_customers || 0);
   return {
@@ -3487,9 +3855,9 @@ async function buildDashboardStats(env) {
     analytics: {
       average_customer_lifetime_value: lifetimeValues.length ? Math.round(lifetimeValues.reduce((sum, value) => sum + value, 0) / lifetimeValues.length) : 0,
       customer_lifetime_values: customerResult.results.map(row => ({ email: row.customer_email, orders: Number(row.order_count || 0), value: Number(row.total_spent || 0) })).sort((a, b) => b.value - a.value).slice(0, 10),
-      cod_cancellation_rate: codTotal ? Math.round((codCancelled / codTotal) * 100) : 0,
-      cod_orders: codTotal,
-      cancelled_cod_orders: codCancelled,
+      payment_cancellation_rate: paymentTotal ? Math.round((paymentCancelled / paymentTotal) * 100) : 0,
+      payment_orders: paymentTotal,
+      cancelled_payment_orders: paymentCancelled,
       tracked_cart_customers: trackedCartCustomers,
       purchasing_customers: purchasingCustomers,
       tracked_cart_to_order_rate: trackedCartCustomers ? Math.round((purchasingCustomers / trackedCartCustomers) * 100) : 0
@@ -4183,7 +4551,7 @@ async function deleteReview(env, id) {
 }
 
 function formatPaymentMethod(value) {
-  const normalized = String(value || "demo").trim().toLowerCase();
+  const normalized = String(value || "pending").trim().toLowerCase();
   return ["cod", "demo"].includes(normalized) ? "demo" : normalized;
 }
 
@@ -4213,6 +4581,7 @@ function formatOrder(row) {
     total: row.total,
     status: row.status,
     payment_method: formatPaymentMethod(row.payment_method),
+    payment_gateway: row.payment_gateway || null,
     payment_status: row.payment_status || "pending",
     payment_reference: row.payment_reference || "",
     payment_updated_at: row.payment_updated_at || null,
@@ -4246,7 +4615,7 @@ async function listOrders(env, user, scope, searchParams = new URLSearchParams()
     const offset = limit ? (page - 1) * limit : 0;
     const { results } = await env.DB.prepare(`
       SELECT id, order_number, customer_email, customer_name, items_json, subtotal, discount,
-        coupon_code, total, status, payment_method, payment_status, payment_reference, payment_updated_at,
+        coupon_code, total, status, payment_method, payment_gateway, payment_status, payment_reference, payment_updated_at,
         tracking_token, tracking_number,
         order_type, replacement_for_order_id, replacement_request_id, packing_status, packed_at, packed_by, shipping_json,
         created_at, updated_at
@@ -4255,14 +4624,105 @@ async function listOrders(env, user, scope, searchParams = new URLSearchParams()
     `).bind(...(limit ? [limit, offset] : [])).all();
     const orders = results.map(formatOrder);
     if (!limit) return json({ orders });
-    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM orders").first();
-    const total = Number(count?.count || 0);
+    const total = await cachedCount(env, "admin-orders", "SELECT COUNT(*) AS count FROM orders");
     return json({ orders, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + orders.length < total } });
   }
   const { results } = await env.DB.prepare("SELECT * FROM orders WHERE customer_email = ? ORDER BY created_at DESC")
     .bind(String(user.email || "").trim().toLowerCase())
     .all();
   return json({ orders: results.map(formatOrder) });
+}
+
+async function listCustomerNotifications(env, user) {
+  const { results } = await env.DB.prepare(`
+    SELECT id, type, title, message, order_id, deep_link, read_at, created_at
+    FROM customer_notifications
+    WHERE user_email = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 100
+  `).bind(String(user.email || "").trim().toLowerCase()).all();
+  return json({ notifications: results || [] });
+}
+
+async function markCustomerNotificationsRead(request, env, user) {
+  const body = await readJson(request).catch(() => ({}));
+  const email = String(user.email || "").trim().toLowerCase();
+  const id = String(body.id || "").trim();
+  if (id) {
+    await env.DB.prepare("UPDATE customer_notifications SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE id = ? AND user_email = ?")
+      .bind(id, email).run();
+  } else {
+    await env.DB.prepare("UPDATE customer_notifications SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE user_email = ?")
+      .bind(email).run();
+  }
+  return json({ ok: true });
+}
+
+async function registerCustomerPushToken(request, env, user) {
+  const body = await readJson(request);
+  const token = String(body.token || "").trim();
+  const platform = String(body.platform || "unknown").trim().toLowerCase().slice(0, 20) || "unknown";
+  if (!token || token.length > 512) return json({ error: "A valid notification token is required" }, 400);
+  const email = String(user.email || "").trim().toLowerCase();
+  await env.DB.prepare(`
+    INSERT INTO customer_push_tokens (id, user_email, token, platform, active, updated_at)
+    VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+    ON CONFLICT(token) DO UPDATE SET
+      user_email = excluded.user_email,
+      platform = excluded.platform,
+      active = 1,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(crypto.randomUUID(), email, token, platform).run();
+  return json({ ok: true });
+}
+
+async function removeCustomerPushToken(request, env, user) {
+  const body = await readJson(request).catch(() => ({}));
+  const token = String(body.token || "").trim();
+  const email = String(user.email || "").trim().toLowerCase();
+  if (token) {
+    await env.DB.prepare("UPDATE customer_push_tokens SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE token = ? AND user_email = ?")
+      .bind(token, email).run();
+  } else {
+    await env.DB.prepare("UPDATE customer_push_tokens SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE user_email = ?")
+      .bind(email).run();
+  }
+  return json({ ok: true });
+}
+
+async function sendExpoPushMessages(tokens, message) {
+  const uniqueTokens = [...new Set(tokens.map(token => String(token || "").trim()).filter(Boolean))];
+  for (let index = 0; index < uniqueTokens.length; index += 100) {
+    const chunk = uniqueTokens.slice(index, index + 100);
+    try {
+      await fetch("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify(chunk.map(to => ({ to, sound: "default", title: message.title, body: message.body, data: message.data || {} })))
+      });
+    } catch {
+      // In-app notification history remains authoritative if a push provider
+      // or network is temporarily unavailable.
+    }
+  }
+}
+
+async function createCustomerNotification(env, { email, type, title, message, orderId = null, deepLink = "/orders", dedupeKey }) {
+  const customerEmail = String(email || "").trim().toLowerCase();
+  if (!customerEmail || !title || !message || !dedupeKey) return false;
+  const result = await env.DB.prepare(`
+    INSERT OR IGNORE INTO customer_notifications
+      (id, user_email, type, title, message, order_id, deep_link, dedupe_key)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    crypto.randomUUID(), customerEmail, String(type || "update").slice(0, 40),
+    String(title).slice(0, 160), String(message).slice(0, 1000), orderId, deepLink, dedupeKey
+  ).run();
+  if (!Number(result.meta?.changes || 0)) return false;
+  const { results } = await env.DB.prepare("SELECT token FROM customer_push_tokens WHERE user_email = ? AND active = 1 ORDER BY updated_at DESC LIMIT 20")
+    .bind(customerEmail).all();
+  if (results?.length) await sendExpoPushMessages(results.map(row => row.token), { title, body: message, data: { type, order_id: orderId, deep_link: deepLink } });
+  return true;
 }
 
 function employeePublicProfile(employee) {
@@ -4395,7 +4855,7 @@ function formatEmployeeOrder(row) {
     customer_name: row.customer_name || "Customer",
     customer_email: row.customer_email || "",
     total: row.total,
-    payment_status: row.payment_status || "demo",
+    payment_status: row.payment_status || "pending",
     order_type: row.order_type || "standard",
     status: row.status || "pending",
     packing_status: row.packing_status || "unpacked",
@@ -4487,6 +4947,14 @@ async function markEmployeeOrderPacked(env, id, employeeSession) {
     message: `${updated.order_number || updated.id} packed by ${employeeSession.employee.name}`,
     dedupeKey: `order-packed:${current.id}`,
     orderId: current.id
+  }).catch(() => null);
+  await createCustomerNotification(env, {
+    email: updated.customer_email,
+    type: "order_packed",
+    title: "Your order is packed",
+    message: `${updated.order_number || updated.id} has been packed and is being prepared for dispatch.`,
+    orderId: current.id,
+    dedupeKey: `customer-order:${current.id}:packed`
   }).catch(() => null);
   return json({ order: formatEmployeeOrder(updated), already_packed: false });
 }
@@ -4654,8 +5122,391 @@ async function loadSizeRowsByProduct(env, requested) {
   return grouped;
 }
 
-async function createOrder(request, env, user) {
+function bytesToHex(bytes) {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function hmacHex(value, secret) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(String(secret || "")),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  return bytesToHex(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(String(value || "")))));
+}
+
+async function sha256Hex(value) {
+  return bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value || "")))));
+}
+
+function safeEqualText(left, right) {
+  const a = new TextEncoder().encode(String(left || ""));
+  const b = new TextEncoder().encode(String(right || ""));
+  if (a.length !== b.length) return false;
+  let difference = 0;
+  for (let index = 0; index < a.length; index += 1) difference |= a[index] ^ b[index];
+  return difference === 0;
+}
+
+function paymentSiteOrigin(request, env) {
+  const configured = String(env.PUBLIC_SITE_URL || "").trim().replace(/\/$/, "");
+  if (/^https:\/\//i.test(configured)) return configured;
+  const url = new URL(request.url);
+  return PRODUCTION_HOSTNAMES.has(url.hostname) ? CANONICAL_ORIGIN : url.origin;
+}
+
+function providerError(response, provider) {
+  return response.json().catch(() => ({})).then((data) => {
+    const detail = String(data?.error?.description || data?.message || data?.code || "").trim();
+    const error = new Error(`${provider} could not start this payment${detail ? `: ${detail}` : ""}`);
+    error.status = 502;
+    return error;
+  });
+}
+
+async function razorpayRequest(env, path, init = {}) {
+  const keyId = String(env.RAZORPAY_KEY_ID || "").trim();
+  const keySecret = String(env.RAZORPAY_KEY_SECRET || "").trim();
+  if (!keyId || !keySecret) throw httpError("Razorpay is not configured on this deployment", 503);
+  const auth = btoa(`${keyId}:${keySecret}`);
+  return fetch(`${RAZORPAY_API_BASE}${path}`, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: `Basic ${auth}`,
+      ...(init.headers || {})
+    }
+  });
+}
+
+async function phonePeAccessToken(env) {
+  const environment = String(env.PHONEPE_ENV || "sandbox").trim().toLowerCase() === "production" ? "production" : "sandbox";
+  if (phonePeTokenCache.environment === environment && phonePeTokenCache.token && phonePeTokenCache.expiresAt > Date.now() + 60_000) {
+    return phonePeTokenCache.token;
+  }
+  const clientId = String(env.PHONEPE_CLIENT_ID || "").trim();
+  const clientSecret = String(env.PHONEPE_CLIENT_SECRET || "").trim();
+  const clientVersion = String(env.PHONEPE_CLIENT_VERSION || "").trim();
+  if (!clientId || !clientSecret || !clientVersion) throw httpError("PhonePe is not configured on this deployment", 503);
+  const tokenResponse = await fetch(environment === "production" ? PHONEPE_PRODUCTION_TOKEN_URL : PHONEPE_SANDBOX_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    body: new URLSearchParams({ client_id: clientId, client_version: clientVersion, client_secret: clientSecret, grant_type: "client_credentials" })
+  });
+  const data = await tokenResponse.json().catch(() => ({}));
+  if (!tokenResponse.ok || !data.access_token) throw httpError("PhonePe authorization failed. Check the PhonePe credentials and environment.", 502);
+  phonePeTokenCache = {
+    environment,
+    token: String(data.access_token),
+    expiresAt: Number(data.expires_at || 0) * 1000 || Date.now() + 10 * 60_000
+  };
+  return phonePeTokenCache.token;
+}
+
+async function phonePeRequest(env, path, init = {}) {
+  const environment = String(env.PHONEPE_ENV || "sandbox").trim().toLowerCase() === "production" ? "production" : "sandbox";
+  const base = environment === "production" ? PHONEPE_PRODUCTION_BASE : PHONEPE_SANDBOX_BASE;
+  const token = await phonePeAccessToken(env);
+  return fetch(`${base}${path}`, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      Authorization: `O-Bearer ${token}`,
+      ...(init.headers || {})
+    }
+  });
+}
+
+async function failGatewayOrder(env, orderId, reference = "") {
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`
+      INSERT OR IGNORE INTO order_stock_releases (order_id)
+      SELECT id FROM orders WHERE id = ? AND status != 'cancelled'
+    `).bind(orderId),
+    env.DB.prepare(`
+      UPDATE orders
+      SET status = 'cancelled', payment_status = 'failed', payment_reference = ?,
+        payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND payment_status != 'paid'
+    `).bind(reference || null, now, orderId)
+  ]);
+  invalidateProductEnrichment();
+}
+
+async function settleGatewayPayment(env, row, { status, paymentId = "", amount = null, reference = "" } = {}) {
+  if (!row) return null;
+  const expectedAmount = Math.round(Number(row.total || 0) * 100);
+  if (amount !== null && Number(amount) !== expectedAmount) {
+    console.error("payment_amount_mismatch", { order_id: row.id, expected: expectedAmount, received: amount });
+    return null;
+  }
+  const currentStatus = String(row.payment_status || "pending").trim().toLowerCase();
+  if (status === "paid") {
+    if (row.status === "cancelled" || currentStatus === "refunded") return formatOrder(row);
+    if (currentStatus === "paid") return formatOrder(row);
+    await env.DB.prepare(`
+      UPDATE orders
+      SET status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END,
+        payment_status = 'paid', payment_reference = ?, gateway_payment_id = ?,
+        payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status != 'cancelled'
+    `).bind(paymentId || reference || null, paymentId || null, new Date().toISOString(), row.id).run();
+    const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(row.id).first();
+    if (updated && !updated.confirmation_email_sent_at) {
+      const sent = await sendOrderEmail(env, updated, "confirmation");
+      if (sent) await env.DB.prepare("UPDATE orders SET confirmation_email_sent_at = CURRENT_TIMESTAMP WHERE id = ?").bind(row.id).run();
+    }
+    return formatOrder(updated);
+  }
+  if (status === "authorized") {
+    if (currentStatus === "paid" || row.status === "cancelled") return formatOrder(row);
+    await env.DB.prepare(`
+      UPDATE orders
+      SET payment_status = 'authorized', payment_reference = ?, gateway_payment_id = ?,
+        payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(paymentId || reference || null, paymentId || null, new Date().toISOString(), row.id).run();
+    const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(row.id).first();
+    return formatOrder(updated);
+  }
+  if (status === "failed" && currentStatus !== "paid" && currentStatus !== "refunded") {
+    await failGatewayOrder(env, row.id, paymentId || reference);
+    const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(row.id).first();
+    return formatOrder(updated);
+  }
+  return formatOrder(row);
+}
+
+async function paymentOrderForRequest(request, env, user, orderId, checkoutToken = "") {
+  const normalizedId = String(orderId || "").trim();
+  if (!normalizedId || normalizedId.length > 100) return null;
+  if (user?.email) {
+    return env.DB.prepare("SELECT * FROM orders WHERE id = ? AND customer_email = ? LIMIT 1")
+      .bind(normalizedId, String(user.email).trim().toLowerCase()).first();
+  }
+  const token = String(checkoutToken || "").trim();
+  if (!token) return null;
+  return env.DB.prepare("SELECT * FROM orders WHERE id = ? AND checkout_token = ? LIMIT 1")
+    .bind(normalizedId, token).first();
+}
+
+async function createRazorpayPayment(request, env, row) {
+  const response = await razorpayRequest(env, "/orders", {
+    method: "POST",
+    body: JSON.stringify({
+      amount: Math.round(Number(row.total || 0) * 100),
+      currency: "INR",
+      receipt: String(row.order_number || row.id).slice(0, 40),
+      notes: { glamia_order_id: row.id }
+    })
+  });
+  if (!response.ok) throw await providerError(response, "Razorpay");
+  const paymentOrder = await response.json();
+  if (!paymentOrder?.id) throw httpError("Razorpay returned an invalid order", 502);
+  await env.DB.prepare(`
+    UPDATE orders
+    SET gateway_order_id = ?, payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(paymentOrder.id, new Date().toISOString(), row.id).run();
+  return {
+    provider: "razorpay",
+    key_id: String(env.RAZORPAY_KEY_ID),
+    order_id: paymentOrder.id,
+    amount: Number(paymentOrder.amount),
+    currency: paymentOrder.currency || "INR",
+    checkout_script: RAZORPAY_CHECKOUT_SCRIPT
+  };
+}
+
+async function createPhonePePayment(request, env, row) {
+  const merchantOrderId = `PP-${String(row.id).replace(/-/g, "").slice(0, 55)}`;
+  const redirectUrl = `${paymentSiteOrigin(request, env)}/checkout?phonepe_return=${encodeURIComponent(row.id)}&checkout_token=${encodeURIComponent(row.checkout_token || "")}`;
+  const response = await phonePeRequest(env, "/checkout/v2/pay", {
+    method: "POST",
+    body: JSON.stringify({
+      merchantOrderId,
+      amount: Math.round(Number(row.total || 0) * 100),
+      expireAfter: 1800,
+      paymentFlow: { type: "PG_CHECKOUT", merchantUrls: { redirectUrl } },
+      metaInfo: { udf1: row.id, udf2: row.order_number || "" }
+    })
+  });
+  if (!response.ok) throw await providerError(response, "PhonePe");
+  const paymentOrder = await response.json();
+  const checkoutUrl = String(paymentOrder?.redirectUrl || "").trim();
+  if (!checkoutUrl) throw httpError("PhonePe did not return a checkout URL", 502);
+  await env.DB.prepare(`
+    UPDATE orders
+    SET gateway_order_id = ?, gateway_payment_id = ?, gateway_checkout_url = ?,
+      payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(merchantOrderId, paymentOrder.orderId || null, checkoutUrl, new Date().toISOString(), row.id).run();
+  return {
+    provider: "phonepe",
+    merchant_order_id: merchantOrderId,
+    checkout_url: checkoutUrl,
+    expires_at: paymentOrder.expireAt || null
+  };
+}
+
+async function createGatewayPayment(request, env, user) {
   const body = await readJson(request);
+  const provider = String(body.payment_method || "").trim().toLowerCase();
+  if (!["razorpay", "phonepe"].includes(provider)) throw httpError("Choose Razorpay or PhonePe", 400);
+  const localResponse = await createOrder(null, env, user, { allowGateway: true, body });
+  const localData = await localResponse.json().catch(() => ({}));
+  if (!localResponse.ok) return json(localData, localResponse.status);
+  const order = localData.order;
+  const row = await env.DB.prepare("SELECT * FROM orders WHERE id = ? LIMIT 1").bind(order?.id).first();
+  if (!row || row.payment_gateway !== provider) throw httpError("The payment order could not be prepared", 500);
+
+  if (provider === "razorpay" && row.gateway_order_id) {
+    return json({ order: formatOrder(row), payment: { provider, key_id: String(env.RAZORPAY_KEY_ID), order_id: row.gateway_order_id, amount: Math.round(Number(row.total || 0) * 100), currency: "INR", checkout_script: RAZORPAY_CHECKOUT_SCRIPT } });
+  }
+  if (provider === "phonepe" && row.gateway_checkout_url) {
+    return json({ order: formatOrder(row), payment: { provider, merchant_order_id: row.gateway_order_id, checkout_url: row.gateway_checkout_url } });
+  }
+
+  try {
+    const payment = provider === "razorpay"
+      ? await createRazorpayPayment(request, env, row)
+      : await createPhonePePayment(request, env, row);
+    const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(row.id).first();
+    return json({ order: formatOrder(updated), payment }, localData.idempotent ? 200 : 201);
+  } catch (error) {
+    await failGatewayOrder(env, row.id).catch(() => null);
+    throw error;
+  }
+}
+
+async function verifyRazorpayPayment(request, env, user) {
+  const body = await readJson(request);
+  const order = await paymentOrderForRequest(request, env, user, body.order_id, body.checkout_token);
+  if (!order || order.payment_gateway !== "razorpay") return json({ error: "Payment order not found" }, 404);
+  const paymentId = String(body.razorpay_payment_id || "").trim();
+  const returnedOrderId = String(body.razorpay_order_id || "").trim();
+  const signature = String(body.razorpay_signature || "").trim();
+  if (!paymentId || !returnedOrderId || !signature || returnedOrderId !== String(order.gateway_order_id || "")) {
+    return json({ error: "Razorpay payment response is invalid" }, 400);
+  }
+  const expected = await hmacHex(`${order.gateway_order_id}|${paymentId}`, env.RAZORPAY_KEY_SECRET);
+  if (!safeEqualText(expected, signature)) return json({ error: "Razorpay payment verification failed" }, 400);
+  const response = await razorpayRequest(env, `/payments/${encodeURIComponent(paymentId)}`, { method: "GET" });
+  if (!response.ok) return json({ error: "Razorpay payment status could not be checked. Your payment will be reconciled automatically." }, 502);
+  const payment = await response.json().catch(() => ({}));
+  if (String(payment.order_id || "") !== String(order.gateway_order_id || "") || String(payment.currency || "INR") !== "INR") {
+    return json({ error: "Razorpay payment details did not match this order" }, 400);
+  }
+  const amount = Number(payment.amount);
+  const paymentStatus = String(payment.status || "").toLowerCase();
+  const nextStatus = paymentStatus === "captured" ? "paid" : paymentStatus === "authorized" ? "authorized" : paymentStatus === "failed" ? "failed" : "pending";
+  const updated = await settleGatewayPayment(env, order, { status: nextStatus, paymentId, amount });
+  if (nextStatus === "pending") return json({ order: updated, payment_status: "pending" }, 202);
+  return json({ order: updated, payment_status: nextStatus });
+}
+
+async function getPhonePePaymentStatus(request, env, user, url) {
+  const orderId = url.searchParams.get("order_id") || url.searchParams.get("local_order_id");
+  const checkoutToken = url.searchParams.get("checkout_token") || "";
+  const order = await paymentOrderForRequest(request, env, user, orderId, checkoutToken);
+  if (!order || order.payment_gateway !== "phonepe") return json({ error: "Payment order not found" }, 404);
+  if (String(order.payment_status || "").toLowerCase() === "paid") return json({ order: formatOrder(order), payment_status: "paid" });
+  const merchantOrderId = String(order.gateway_order_id || "").trim();
+  if (!merchantOrderId) return json({ error: "PhonePe payment session is not ready" }, 409);
+  const response = await phonePeRequest(env, `/checkout/v2/order/${encodeURIComponent(merchantOrderId)}/status?details=false&errorContext=true`, { method: "GET" });
+  if (!response.ok) return json({ error: "PhonePe payment status could not be checked. Please try again." }, 502);
+  const status = await response.json().catch(() => ({}));
+  const state = String(status.state || "PENDING").toUpperCase();
+  const paymentDetail = Array.isArray(status.paymentDetails) ? status.paymentDetails.at(-1) : null;
+  const paymentId = String(paymentDetail?.transactionId || order.gateway_payment_id || "").trim();
+  const nextStatus = state === "COMPLETED" ? "paid" : state === "FAILED" ? "failed" : "pending";
+  const updated = await settleGatewayPayment(env, order, { status: nextStatus, paymentId, amount: status.amount == null ? null : Number(status.amount) });
+  if (nextStatus === "pending") return json({ order: updated, payment_status: "pending", provider_state: state }, 202);
+  return json({ order: updated, payment_status: nextStatus, provider_state: state });
+}
+
+async function handleRazorpayWebhook(request, env) {
+  const secret = String(env.RAZORPAY_WEBHOOK_SECRET || "").trim();
+  if (!secret) return json({ error: "Webhook secret is not configured" }, 503);
+  const rawBody = await request.text();
+  const signature = String(request.headers.get("X-Razorpay-Signature") || "").trim();
+  const expected = await hmacHex(rawBody, secret);
+  if (!signature || !safeEqualText(expected, signature)) return json({ error: "Invalid webhook signature" }, 401);
+  const payload = JSON.parse(rawBody || "{}");
+  const event = String(payload.event || "").trim().toLowerCase();
+  const payment = payload.payload?.payment?.entity || {};
+  const providerOrder = payload.payload?.order?.entity || {};
+  const providerOrderId = String(payment.order_id || providerOrder.id || "").trim();
+  if (!providerOrderId) return json({ ok: true });
+  const row = await env.DB.prepare("SELECT * FROM orders WHERE payment_gateway = 'razorpay' AND gateway_order_id = ? LIMIT 1").bind(providerOrderId).first();
+  if (!row) return json({ ok: true });
+  const status = event === "payment.captured" || event === "order.paid" ? "paid" : event === "payment.authorized" ? "authorized" : event === "payment.failed" ? "failed" : "pending";
+  await settleGatewayPayment(env, row, {
+    status,
+    paymentId: payment.id || row.gateway_payment_id || "",
+    amount: payment.amount ?? providerOrder.amount ?? null,
+    reference: providerOrderId
+  });
+  return json({ ok: true });
+}
+
+async function handlePhonePeWebhook(request, env) {
+  const rawBody = await request.text();
+  const hmacSecret = String(env.PHONEPE_WEBHOOK_SECRET || "").trim();
+  const expectedKeyId = String(env.PHONEPE_WEBHOOK_ID || "").trim();
+  const receivedKeyId = String(request.headers.get("x-phonepe-checksum-key-id") || "").trim();
+  let valid = false;
+  if (hmacSecret) {
+    const signature = String(request.headers.get("phonepe-checksum-signature") || "").trim();
+    valid = Boolean(signature) && (!expectedKeyId || expectedKeyId === receivedKeyId) && safeEqualText(await hmacHex(rawBody, hmacSecret), signature);
+  } else if (env.PHONEPE_WEBHOOK_USERNAME && env.PHONEPE_WEBHOOK_PASSWORD) {
+    const authorization = String(request.headers.get("Authorization") || "").trim();
+    valid = safeEqualText(await sha256Hex(`${env.PHONEPE_WEBHOOK_USERNAME}:${env.PHONEPE_WEBHOOK_PASSWORD}`), authorization);
+  }
+  if (!valid) return json({ error: "Invalid webhook authentication" }, 401);
+  const payload = JSON.parse(rawBody || "{}");
+  const event = String(payload.event || "").trim().toLowerCase();
+  const providerPayload = payload.payload || {};
+  const merchantOrderId = String(providerPayload.merchantOrderId || "").trim();
+  if (!merchantOrderId) return json({ ok: true });
+  const row = await env.DB.prepare("SELECT * FROM orders WHERE payment_gateway = 'phonepe' AND gateway_order_id = ? LIMIT 1").bind(merchantOrderId).first();
+  if (!row) return json({ ok: true });
+  const paymentDetail = Array.isArray(providerPayload.paymentDetails) ? providerPayload.paymentDetails.at(-1) : null;
+  const state = String(providerPayload.state || "").toUpperCase();
+  const status = event === "checkout.order.completed" || state === "COMPLETED" ? "paid" : event === "checkout.order.failed" || state === "FAILED" ? "failed" : "pending";
+  await settleGatewayPayment(env, row, {
+    status,
+    paymentId: paymentDetail?.transactionId || row.gateway_payment_id || "",
+    amount: providerPayload.amount == null ? null : Number(providerPayload.amount),
+    reference: merchantOrderId
+  });
+  return json({ ok: true });
+}
+
+async function expirePendingGatewayOrders(env) {
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT * FROM orders
+      WHERE payment_method IN ('razorpay', 'phonepe')
+        AND payment_status IN ('pending', 'authorized')
+        AND status = 'pending'
+        AND created_at <= datetime('now', '-45 minutes')
+      ORDER BY created_at ASC
+      LIMIT 50
+    `).all();
+    for (const row of results || []) await settleGatewayPayment(env, row, { status: "failed", reference: "expired" });
+  } catch (error) {
+    console.error("gateway_expiry_failed", String(error?.message || error || "Unknown gateway expiry error").slice(0, 300));
+  }
+}
+
+async function createOrder(request, env, user, { allowGateway = false, body: providedBody = null } = {}) {
+  const body = providedBody || await readJson(request);
   const requested = normalizeOrderItems(body.items);
   if (!requested.length) throw httpError("Your cart is empty", 400);
 
@@ -4671,14 +5522,18 @@ async function createOrder(request, env, user) {
     country: normalizedAddress.country
   };
 
-  const requestedPaymentMethod = String(body.payment_method || "demo").trim().toLowerCase();
-  if (requestedPaymentMethod && !["demo", "cod"].includes(requestedPaymentMethod)) {
-    throw httpError("Only demo payments are available right now. No money will be charged.", 400);
+  const requestedPaymentMethod = String(body.payment_method || "").trim().toLowerCase();
+  if (!["razorpay", "phonepe"].includes(requestedPaymentMethod)) {
+    throw httpError("Choose Razorpay or PhonePe", 400);
   }
-  const paymentMethod = "demo";
+  const gatewayPayment = ["razorpay", "phonepe"].includes(requestedPaymentMethod);
+  if (gatewayPayment && !allowGateway) {
+    throw httpError("Use the payment checkout to start a live payment", 400);
+  }
+  const paymentMethod = requestedPaymentMethod;
   const storefront = await storefrontSettingsObject(env);
-  if (!storefront.payments.cod_enabled) {
-    throw httpError("Demo checkout is currently unavailable. Please contact support for help.", 409);
+  if (gatewayPayment && !storefront.payments.methods.some((method) => method.id === paymentMethod)) {
+    throw httpError(`${paymentMethod === "razorpay" ? "Razorpay" : "PhonePe"} payments are not configured yet`, 409);
   }
   const customerEmail = user
     ? String(user.email || "").trim().toLowerCase()
@@ -4690,6 +5545,7 @@ async function createOrder(request, env, user) {
   if (checkoutTokenInput && !/^[A-Za-z0-9_-]{16,120}$/.test(checkoutTokenInput)) {
     throw httpError("Checkout session token is invalid. Refresh the checkout page and try again.", 400);
   }
+  let existingCheckout = null;
   if (checkoutTokenInput) {
     const existing = await env.DB.prepare("SELECT * FROM orders WHERE checkout_token = ? LIMIT 1")
       .bind(checkoutTokenInput).first();
@@ -4697,11 +5553,16 @@ async function createOrder(request, env, user) {
       if (String(existing.customer_email || "").trim().toLowerCase() !== customerEmail) {
         throw httpError("This checkout session is no longer valid. Refresh the checkout page and try again.", 409);
       }
-      return json({ order: formatOrder(existing), idempotent: true });
+      if (existing.status !== "cancelled" && String(existing.payment_status || "").toLowerCase() !== "failed") {
+        return json({ order: formatOrder(existing), idempotent: true });
+      }
+      existingCheckout = existing;
     }
   }
-  const checkoutToken = checkoutTokenInput || crypto.randomUUID().replace(/-/g, "");
-  const paymentStatus = "demo";
+  const checkoutToken = existingCheckout
+    ? crypto.randomUUID().replace(/-/g, "")
+    : checkoutTokenInput || crypto.randomUUID().replace(/-/g, "");
+  const paymentStatus = "pending";
   const trackingToken = crypto.randomUUID().replace(/-/g, "");
 
   const [catalog, sizeRowsByProduct] = await Promise.all([
@@ -4799,11 +5660,11 @@ async function createOrder(request, env, user) {
   const orderType = hasPreorder ? "preorder" : "standard";
 
   const orderInsertStatement = env.DB.prepare(`
-      INSERT INTO orders (id, order_number, tracking_token, checkout_token, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_status, shipping_json, order_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+      INSERT INTO orders (id, order_number, tracking_token, checkout_token, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_gateway, payment_status, shipping_json, order_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
     `).bind(
     id, orderNumber, trackingToken, checkoutToken, customerEmail, customerName, JSON.stringify(items), subtotal, discount,
-    couponCode, total, paymentMethod, paymentStatus, JSON.stringify(address), orderType
+    couponCode, total, paymentMethod, gatewayPayment ? paymentMethod : null, paymentStatus, JSON.stringify(address), orderType
   );
   // Insert first so the database stock trigger sees the available snapshot;
   // every following adjustment remains in the same atomic D1 batch.
@@ -4921,11 +5782,14 @@ async function createOrder(request, env, user) {
     dedupeKey: `order:${id}`,
     orderId: id
   }).catch(() => null);
-  const confirmationSent = await sendOrderEmail(env, created, "confirmation");
-  if (confirmationSent) {
-    await env.DB.prepare("UPDATE orders SET confirmation_email_sent_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(id).run();
-  }
+  await createCustomerNotification(env, {
+    email: created.customer_email,
+    type: "order_placed",
+    title: "Order placed",
+    message: `We’ve received ${created.order_number || orderNumber}. We’ll keep you updated as it moves.`,
+    orderId: id,
+    dedupeKey: `customer-order:${id}:placed`
+  }).catch(() => null);
   return json({ order: formatOrder(created) }, 201);
 }
 
@@ -4963,6 +5827,14 @@ async function cancelOwnOrder(request, env, user, id) {
     message: `${updated.customer_name || updated.customer_email} cancelled ${updated.order_number || updated.id}`,
     dedupeKey: `cancelled-order:${id}`,
     orderId: id
+  }).catch(() => null);
+  await createCustomerNotification(env, {
+    email: updated.customer_email,
+    type: "order_cancelled",
+    title: "Order cancelled",
+    message: `${updated.order_number || updated.id} has been cancelled.`,
+    orderId: id,
+    dedupeKey: `customer-order:${id}:cancelled`
   }).catch(() => null);
   if (Number(results[1]?.meta?.changes || 0) === 1) {
     await sendOrderEmail(env, updated, "cancelled");
@@ -5463,7 +6335,7 @@ async function exportBackup(env, adminUser) {
 }
 
 const ORDER_STATUSES = ["pending", "confirmed", "shipped", "delivered", "cancelled"];
-const PAYMENT_STATUSES = ["demo", "pending", "paid", "failed", "refunded", "not_required"];
+const PAYMENT_STATUSES = ["demo", "pending", "authorized", "paid", "failed", "refunded", "not_required"];
 
 async function updateOrderStatus(request, env, id, adminUser = null) {
   const body = await readJson(request);
@@ -5534,12 +6406,36 @@ async function updateOrderStatus(request, env, id, adminUser = null) {
       dedupeKey: `cancelled-order:${id}`,
       orderId: id
     }).catch(() => null);
+    await createCustomerNotification(env, {
+      email: updated.customer_email,
+      type: "order_cancelled",
+      title: "Order cancelled",
+      message: `${updated.order_number || updated.id} has been cancelled.`,
+      orderId: id,
+      dedupeKey: `customer-order:${id}:cancelled`
+    }).catch(() => null);
     await sendOrderEmail(env, updated, "cancelled");
   }
   if (nextStatus === "shipped" && current.status !== "shipped") {
+    await createCustomerNotification(env, {
+      email: updated.customer_email,
+      type: "order_shipped",
+      title: "Your order is on its way",
+      message: updated.tracking_number ? `${updated.order_number || updated.id} has shipped. Tracking number: ${updated.tracking_number}.` : `${updated.order_number || updated.id} has shipped.`,
+      orderId: id,
+      dedupeKey: `customer-order:${id}:shipped`
+    }).catch(() => null);
     await sendOrderEmail(env, updated, "shipped");
   }
   if (nextStatus === "delivered" && current.status !== "delivered" && !current.delivery_email_sent_at) {
+    await createCustomerNotification(env, {
+      email: updated.customer_email,
+      type: "order_delivered",
+      title: "Your order was delivered",
+      message: `${updated.order_number || updated.id} was marked delivered. We hope you enjoy it.`,
+      orderId: id,
+      dedupeKey: `customer-order:${id}:delivered`
+    }).catch(() => null);
     const deliverySent = await sendOrderEmail(env, updated, "delivery");
     if (deliverySent) {
       await env.DB.prepare("UPDATE orders SET delivery_email_sent_at = CURRENT_TIMESTAMP WHERE id = ?")
@@ -5561,6 +6457,8 @@ async function sendOrderEmail(env, row, type) {
   const order = formatOrder(row);
   const isReplacement = order.order_type === "replacement";
   const isPreorder = order.order_type === "preorder" || order.items.some(item => item.preorder);
+  const paymentMethod = formatPaymentMethod(order.payment_method);
+  const paymentStatus = String(order.payment_status || "pending").replace(/_/g, " ");
   const orderLabel = isReplacement ? "replacement order" : "order";
   const itemLines = order.items.map(item => {
     const selection = [item.size, item.variant, item.color].filter(Boolean).join(" · ");
@@ -5593,14 +6491,14 @@ async function sendOrderEmail(env, row, type) {
     : emailType === "shipped" && !trackingLine
       ? "Your tracking details will be shared as soon as they are available."
       : emailType === "payment"
-        ? `Payment status: ${String(order.payment_status || "pending").replace(/_/g, " ")}${order.payment_reference ? ` · Reference: ${order.payment_reference}` : ""}.`
+        ? `Payment status: ${paymentStatus}${order.payment_reference ? ` · Reference: ${order.payment_reference}` : ""}.`
       : "";
   const invoiceUrl = `${String(env.PUBLIC_SITE_URL || "https://glamiastore.com").replace(/\/$/, "")}/api/orders/${encodeURIComponent(order.id)}/invoice?token=${encodeURIComponent(order.tracking_token || "")}`;
   const htmlItems = order.items.map(item => {
     const selection = [item.size, item.variant, item.color].filter(Boolean).join(" · ");
     return `<li><strong>${escapeHtml(item.name)}</strong>${selection ? ` · ${escapeHtml(selection)}` : ""} · Qty ${Number(item.quantity) || 0} · ${formatInr(item.price * item.quantity)}</li>`;
   }).join("");
-  const htmlContent = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#241f18;line-height:1.6"><h1 style="letter-spacing:.18em">GLAMIA</h1><p>Hi ${escapeHtml(firstName)},</p><h2>${escapeHtml(eventLabel)}</h2><p>Order <strong>${escapeHtml(order.order_number)}</strong> · ${escapeHtml(formatOrderDate(eventTime))}</p>${statusLine ? `<p>${escapeHtml(statusLine)}</p>` : ""}${trackingLine ? `<p>${escapeHtml(trackingLine)}</p>` : ""}${preorderLine ? `<p>${escapeHtml(preorderLine)}</p>` : ""}<ul>${htmlItems}</ul><p>Subtotal: ${formatInr(order.subtotal)}<br>Discount: ${formatInr(order.discount)}<br><strong>Total: ${formatInr(order.total)}</strong></p><p>Payment: ${escapeHtml(formatPaymentMethod(order.payment_method).toUpperCase())} · ${escapeHtml(String(order.payment_status || "pending"))}</p>${shippingLine ? `<p>Delivery address: ${escapeHtml(shippingLine)}</p>` : ""}<p><a href="${escapeHtml(invoiceUrl)}">View / print invoice preview</a></p><p>Warmly,<br>Team Glamia</p></body></html>`;
+  const htmlContent = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#241f18;line-height:1.6"><h1 style="letter-spacing:.18em">GLAMIA</h1><p>Hi ${escapeHtml(firstName)},</p><h2>${escapeHtml(eventLabel)}</h2><p>Order <strong>${escapeHtml(order.order_number)}</strong> · ${escapeHtml(formatOrderDate(eventTime))}</p>${statusLine ? `<p>${escapeHtml(statusLine)}</p>` : ""}${trackingLine ? `<p>${escapeHtml(trackingLine)}</p>` : ""}${preorderLine ? `<p>${escapeHtml(preorderLine)}</p>` : ""}<ul>${htmlItems}</ul><p>Subtotal: ${formatInr(order.subtotal)}<br>Discount: ${formatInr(order.discount)}<br><strong>Total: ${formatInr(order.total)}</strong></p><p><strong>Payment method:</strong> ${escapeHtml(paymentMethod.toUpperCase())}<br><strong>Payment status:</strong> ${escapeHtml(paymentStatus)}</p>${shippingLine ? `<p>Delivery address: ${escapeHtml(shippingLine)}</p>` : ""}<p><a href="${escapeHtml(invoiceUrl)}">View / print invoice preview</a></p><p>Warmly,<br>Team Glamia</p></body></html>`;
   const textContent = [
     `Hi ${firstName},`,
     "",
@@ -5615,8 +6513,8 @@ async function sendOrderEmail(env, row, type) {
     `Subtotal: ${formatInr(order.subtotal)}`,
     `Discount: ${formatInr(order.discount)}`,
     `Total: ${formatInr(order.total)}`,
-    `Payment: ${formatPaymentMethod(order.payment_method).toUpperCase()}`,
-    `Payment status: ${order.payment_status || "pending"}`,
+    `Payment method: ${paymentMethod.toUpperCase()}`,
+    `Payment status: ${paymentStatus}`,
     `Invoice preview: ${invoiceUrl}`,
     shippingLine ? `Delivery address: ${shippingLine}` : "",
     "",
@@ -6358,6 +7256,43 @@ async function validateCoupon(request, env, user) {
   });
 }
 
+async function listAvailableCoupons(request, env, user) {
+  const body = await readJson(request);
+  const requested = normalizeOrderItems(body.items);
+  if (!requested.length) return json({ coupons: [] });
+
+  const { results } = await env.DB.prepare(
+    "SELECT * FROM coupons WHERE active = 1 ORDER BY created_at DESC LIMIT 25"
+  ).all();
+  const catalog = await loadLiveProductsById(env, requested);
+  const cartSubtotal = requested.reduce((sum, entry) => {
+    const row = catalog.get(entry.id);
+    return sum + (row ? effectivePrice(row) * Math.max(1, Math.floor(Number(entry.quantity) || 1)) : 0);
+  }, 0);
+  const coupons = [];
+
+  for (const coupon of results || []) {
+    if (await couponAvailability(coupon, env, user)) continue;
+    if (couponMinimumCartError(coupon, cartSubtotal)) continue;
+    const eligibleSubtotal = couponEligibleSubtotal(coupon, requested, catalog);
+    if (eligibleSubtotal <= 0) continue;
+    coupons.push({
+      code: coupon.code,
+      type: coupon.type,
+      value: Number(coupon.value || 0),
+      discount: couponDiscount(coupon, eligibleSubtotal),
+      min_cart_value: coupon.min_cart_value ?? null,
+      starts_at: coupon.starts_at || null,
+      ends_at: coupon.ends_at || null,
+      scope: coupon.scope || "all",
+      scope_value: coupon.scope_value || "",
+      targets: couponTargetRules(coupon)
+    });
+  }
+
+  return json({ coupons });
+}
+
 async function listCoupons(env) {
   const [couponRows, emailTargetRows] = await env.DB.batch([
     env.DB.prepare(`
@@ -6638,12 +7573,13 @@ function validateProduct(product, { requireImages = true } = {}) {
   }
   const price = validateMoney(product.price, "Price");
   const mrp = validateMoney(product.mrp, "MRP");
+  validateColorHex(product.color_hex);
   validateStock(product.stock);
   if (price > mrp) throw httpError("MRP should be higher than price", 400);
   validateSizeList(product.sizes);
   validateSizeStockObject(product.size_stock);
-  if (!Array.isArray(product.images) || !product.images.length || (requireImages && (product.images.length < 4 || product.images.length > 6))) {
-    throw httpError("Add between 4 and 6 images (first is the thumbnail)", 400);
+  if (!Array.isArray(product.images) || !product.images.length || (requireImages && (product.images.length < MIN_PRODUCT_IMAGES || product.images.length > MAX_PRODUCT_IMAGES))) {
+    throw httpError(`Add between ${MIN_PRODUCT_IMAGES} and ${MAX_PRODUCT_IMAGES} images (first is the thumbnail)`, 400);
   }
   product.images.forEach(image => validateImageUrl(image));
   if (product.variants !== undefined) {
@@ -6657,6 +7593,7 @@ function validateProduct(product, { requireImages = true } = {}) {
       const color = String(variant.color).trim().toLowerCase();
       if (colors.has(color)) throw httpError("Variant colours must be unique", 400);
       colors.add(color);
+      validateColorHex(variant.color_hex, "Variant colour swatch");
       validateSizeList(variant.sizes);
       if (!Array.isArray(variant.images) || variant.images.length < MIN_VARIANT_IMAGES || variant.images.length > MAX_VARIANT_IMAGES) {
         throw httpError(`Each variant needs ${MIN_VARIANT_IMAGES}–${MAX_VARIANT_IMAGES} images`, 400);
@@ -6693,7 +7630,7 @@ function productPublicationIssues(product) {
   try { sizes = JSON.parse(product?.sizes_json || "[]"); } catch {}
   if (!images.length && product?.image_url) images = [product.image_url];
   if (!thumbnails.length && product?.thumbnail_url) thumbnails = [product.thumbnail_url];
-  if (images.length < 4 || images.length > 6) issues.push("Add between 4 and 6 product images");
+  if (images.length < MIN_PRODUCT_IMAGES || images.length > MAX_PRODUCT_IMAGES) issues.push(`Add between ${MIN_PRODUCT_IMAGES} and ${MAX_PRODUCT_IMAGES} product images`);
   if (!thumbnails.length || !images.includes(product?.thumbnail_source_url || thumbnails[0])) issues.push("Choose a thumbnail from the product images");
   if (!sizes.length) issues.push("Add at least one size");
   if (product?.preorder_enabled && product?.preorder_limit !== null && product?.preorder_limit !== undefined && Number(product.preorder_sold || 0) >= Number(product.preorder_limit)) {
@@ -6724,6 +7661,8 @@ function formatProduct(row) {
     status: row.status,
     featured: Boolean(row.featured),
     color: row.color,
+    color_hex: row.color_hex || "",
+    returnable: row.returnable === undefined || row.returnable === null ? true : Boolean(row.returnable),
     variant_group: row.variant_group || null,
     deal_ends_at: row.deal_ends_at || null,
     deal_starts_at: row.deal_starts_at || null,
@@ -6777,6 +7716,8 @@ function formatProductCard(row) {
     status: row.status,
     featured: Boolean(row.featured),
     color: row.color,
+    color_hex: row.color_hex || "",
+    returnable: row.returnable === undefined || row.returnable === null ? true : Boolean(row.returnable),
     material: row.material || "",
     sizes: jsonArray(row.sizes_json),
     image: thumbnails[0] || row.image_url || "",
@@ -6800,13 +7741,19 @@ function formatProductCard(row) {
 
 async function currentUser(request, env) {
   const cookies = parseCookies(request.headers.get("Cookie") || "");
-  const session = cookies[HOST_SESSION_COOKIE] || cookies[SESSION_COOKIE];
+  const session = mobileBearerToken(request) || cookies[HOST_SESSION_COOKIE] || cookies[SESSION_COOKIE];
   if (!session) return null;
   try {
     return await verifySession(session, env, request);
   } catch {
     return null;
   }
+}
+
+function mobileBearerToken(request) {
+  if (request.headers.get("X-Glamia-Mobile") !== "1") return "";
+  const header = String(request.headers.get("Authorization") || "").trim();
+  return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
 }
 
 async function signSession(user, env) {
@@ -6893,6 +7840,7 @@ function requireAdmin(user) {
 }
 
 function assertSameOrigin(request, url) {
+  if (request.headers.get("X-Glamia-Mobile") === "1") return;
   if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return;
   const origin = request.headers.get("Origin");
   if (origin && origin !== url.origin) throw httpError("Cross-origin requests are not allowed", 403);
@@ -7033,7 +7981,13 @@ function withSecurityHeaders(response) {
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   headers.set("X-Permitted-Cross-Domain-Policies", "none");
   headers.set("X-Frame-Options", "DENY");
-  headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'sha256-On1TqejLHzYPtlgCG4EQtHKn2f1u8Plk+C210XpYbec=' https://accounts.google.com https://www.googletagmanager.com; style-src 'self' 'sha256-RU4sU0AaS8IBGZx8XrGt/pa9A5SLA3dQszGeqT5L3Kw=' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com; frame-src https://accounts.google.com; form-action 'self'");
+  // Native clients use bearer sessions rather than browser cookies. The
+  // wildcard is safe here because the app never sends credentials as cookies;
+  // it also keeps the Expo web preview able to call the same API.
+  headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("Access-Control-Allow-Headers", "Accept, Content-Type, Authorization, X-Glamia-Mobile, X-Requested-With");
+  headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
+  headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'sha256-On1TqejLHzYPtlgCG4EQtHKn2f1u8Plk+C210XpYbec=' https://accounts.google.com https://www.googletagmanager.com https://checkout.razorpay.com; style-src 'self' 'sha256-RU4sU0AaS8IBGZx8XrGt/pa9A5SLA3dQszGeqT5L3Kw=' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://api.razorpay.com; frame-src https://accounts.google.com https://api.razorpay.com https://*.razorpay.com; form-action 'self'");
   headers.set("Strict-Transport-Security", "max-age=31536000");
   if (headers.get("Content-Type")?.includes("application/json")) {
     headers.set("X-Robots-Tag", "noindex, nofollow");

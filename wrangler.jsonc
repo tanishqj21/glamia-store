@@ -40,12 +40,18 @@
 	},
 	"vars": {
 		"GOOGLE_CLIENT_ID": "831595711865-ofo1b36f728opnm2h6rs7i2e9l0jrs3r.apps.googleusercontent.com",
+		"GOOGLE_ANDROID_CLIENT_ID": "831595711865-mutldba04pp08m9p6s0mb18ud0i7pj5d.apps.googleusercontent.com,831595711865-lbhrva8k2kcp14a22m8e48as0akmv345.apps.googleusercontent.com",
+		"APPLE_CLIENT_ID": "com.glamia.store",
 		"GA4_MEASUREMENT_ID": "G-YB686J9CE4",
 		"ADMIN_EMAILS": [
 			"tanishqj29@gmail.com",
   			"glamia.apparels@gmail.com"
 		],
 		"BREVO_FROM_NAME": "Glamia",
-		"BREVO_FROM_EMAIL": "support@glamiastore.com"
+		"BREVO_FROM_EMAIL": "support@glamiastore.com",
+		"RAZORPAY_KEY_ID": "rzp_live_Td7I9Ih5JumPl1",
+		"PHONEPE_ENV": "production",
+		"PHONEPE_CLIENT_VERSION": "1",
+		"PUBLIC_SITE_URL": "https://glamiastore.com"
 	}
 }

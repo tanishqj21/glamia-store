@@ -25,6 +25,95 @@ function pageLabel(path) {
   return value === "/" ? "Home" : value;
 }
 
+const ANALYTICS_CHART_COLORS = [
+  "#6366f1", "#f59e0b", "#10b981", "#ef4444", "#3b82f6", "#ec4899",
+  "#14b8a6", "#f97316", "#8b5cf6", "#84cc16", "#06b6d4", "#eab308",
+];
+
+function analyticsChartColor(index) {
+  return ANALYTICS_CHART_COLORS[index % ANALYTICS_CHART_COLORS.length];
+}
+
+function AnalyticsTrafficChart({ daily }) {
+  const [view, setView] = useState("bar");
+  const [hovered, setHovered] = useState(-1);
+  const [selected, setSelected] = useState(-1);
+  const values = useMemo(() => daily.map((item) => Math.max(0, Number(item.page_views || 0))), [daily]);
+  const max = Math.max(1, ...values);
+  const activeIndex = hovered >= 0 ? hovered : selected;
+  const activeItem = activeIndex >= 0 ? daily[activeIndex] : null;
+  const activeValue = activeIndex >= 0 ? values[activeIndex] : 0;
+  const chartWidth = Math.max(620, daily.length * 34);
+  const chartBaseline = 176;
+  const chartHeight = 132;
+  const chartPadding = 24;
+  const points = daily.map((item, index) => {
+    const x = daily.length > 1
+      ? chartPadding + (index / (daily.length - 1)) * (chartWidth - chartPadding * 2)
+      : chartWidth / 2;
+    const y = chartBaseline - (values[index] / max) * chartHeight;
+    return { item, index, x, y, value: values[index] };
+  });
+  const linePoints = points.map(({ x, y }) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const select = (index) => {
+    setSelected((current) => (current === index ? -1 : index));
+    setHovered(index);
+  };
+  const selectOnKey = (event, index) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    select(index);
+  };
+  const pointLabel = (item, value) => `${dateLabel(item.date)}: ${count(value)} page views`;
+
+  return <section className="google-analytics-daily">
+    <div className="google-analytics-list-heading">
+      <div>
+        <p className="eyebrow">Traffic trend</p>
+        <span>Page views by day</span>
+      </div>
+      <div className="chart-heading-tools">
+        <span className="chart-hint">Click a day for details</span>
+        <div className="chart-toggle" role="group" aria-label="Google Analytics traffic chart type">
+          <button type="button" className={view === "bar" ? "active" : ""} onClick={() => { setView("bar"); setHovered(-1); }}>Bars</button>
+          <button type="button" className={view === "line" ? "active" : ""} onClick={() => { setView("line"); setHovered(-1); }}>Trend</button>
+        </div>
+      </div>
+    </div>
+    {activeItem && <div className="google-analytics-chart-callout" style={{ "--chart-color": analyticsChartColor(activeIndex) }} aria-live="polite"><i /><strong>{dateLabel(activeItem.date)}</strong><b>{count(activeValue)}</b><small>page views</small></div>}
+    {daily.length ? view === "bar" ? (
+      <div className="google-analytics-daily-chart" role="group" aria-label="Google Analytics page views by day">
+        {daily.map((item, index) => {
+          const value = values[index];
+          const height = Math.max(5, (value / max) * 100);
+          return <button type="button" className={`google-analytics-day chart-series-${index % ANALYTICS_CHART_COLORS.length} ${hovered === index ? "is-hovered" : ""} ${selected === index ? "is-selected" : ""}`} key={item.date || index} title={pointLabel(item, value)} aria-label={`Select ${pointLabel(item, value)}`} aria-pressed={selected === index} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(-1)} onFocus={() => setHovered(index)} onBlur={() => setHovered(-1)} onClick={() => select(index)} onKeyDown={(event) => selectOnKey(event, index)}><span>{count(value)}</span><i style={{ height: `${height}%` }} /><small>{index % 3 === 0 || index === daily.length - 1 ? dateLabel(item.date) : ""}</small></button>;
+        })}
+      </div>
+    ) : (
+      <div className="google-analytics-line-wrap" onMouseLeave={() => setHovered(-1)}>
+        <svg className="google-analytics-line-chart" width={chartWidth} height="220" viewBox={`0 0 ${chartWidth} 220`} role="group" aria-label="Google Analytics page views trend by day">
+          <defs>
+            <linearGradient id="google-analytics-line-gradient" x1="0" x2="1" y1="0" y2="0">
+              {ANALYTICS_CHART_COLORS.slice(0, 6).map((color, index) => <stop key={color} offset={`${index * 20}%`} stopColor={color} />)}
+            </linearGradient>
+            <linearGradient id="google-analytics-area-gradient" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="#6366f1" stopOpacity=".22" />
+              <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {[0, 1, 2, 3].map((row) => {
+            const y = chartBaseline - (row / 3) * chartHeight;
+            return <line className="google-analytics-chart-gridline" key={row} x1={chartPadding} x2={chartWidth - chartPadding} y1={y} y2={y} />;
+          })}
+          <polygon className="google-analytics-line-area" points={`${chartPadding},${chartBaseline} ${linePoints} ${chartWidth - chartPadding},${chartBaseline}`} />
+          <polyline className="google-analytics-line" points={linePoints} />
+          {points.map(({ item, index, x, y, value }) => <g key={item.date || index} className={`google-analytics-line-point ${hovered === index ? "is-hovered" : ""} ${selected === index ? "is-selected" : ""}`} role="button" tabIndex="0" focusable="true" aria-label={`Select ${pointLabel(item, value)}`} aria-pressed={selected === index} onMouseEnter={() => setHovered(index)} onFocus={() => setHovered(index)} onClick={() => select(index)} onKeyDown={(event) => selectOnKey(event, index)}><circle cx={x} cy={y} r={hovered === index || selected === index ? 6 : 4} style={{ "--chart-color": analyticsChartColor(index) }} /><title>{pointLabel(item, value)}</title>{(index % 3 === 0 || index === daily.length - 1) && <text x={x} y="204" textAnchor="middle">{dateLabel(item.date)}</text>}</g>)}
+        </svg>
+      </div>
+    ) : <div className="empty-state">No Google Analytics data yet.</div>}
+  </section>;
+}
+
 function AnalyticsList({ title, items, labelKey, metricKey, metricLabel }) {
   return (
     <section className="google-analytics-list">
@@ -68,7 +157,6 @@ export function GoogleAnalyticsView() {
   const data = state.data;
   const summary = data?.summary || {};
   const daily = data?.daily || [];
-  const maxDailyViews = useMemo(() => Math.max(1, ...daily.map((item) => Number(item.page_views || 0))), [daily]);
 
   return (
     <section className="dashboard-section google-analytics-section" aria-labelledby="google-analytics-heading">
@@ -129,21 +217,7 @@ export function GoogleAnalyticsView() {
             <article><span>Engagement rate</span><strong>{percentage(summary.engagement_rate)}</strong><small>engaged sessions</small></article>
           </div>
           <div className="google-analytics-detail-grid">
-            <section className="google-analytics-daily">
-              <div className="google-analytics-list-heading">
-                <p className="eyebrow">Traffic trend</p>
-                <span>Page views by day</span>
-              </div>
-              {daily.length ? (
-                <div className="google-analytics-daily-chart" role="img" aria-label="Google Analytics page views by day">
-                  {daily.map((item, index) => {
-                    const value = Number(item.page_views || 0);
-                    const height = Math.max(5, (value / maxDailyViews) * 100);
-                    return <div className="google-analytics-day" key={item.date || index} title={`${dateLabel(item.date)}: ${count(value)} page views`}><span>{count(value)}</span><i style={{ height: `${height}%` }} /><small>{index % 3 === 0 || index === daily.length - 1 ? dateLabel(item.date) : ""}</small></div>;
-                  })}
-                </div>
-              ) : <div className="empty-state">No Google Analytics data yet.</div>}
-            </section>
+            <AnalyticsTrafficChart daily={daily} />
             <AnalyticsList title="Top pages" items={(data.top_pages || []).map((item) => ({ ...item, path: pageLabel(item.path) }))} labelKey="path" metricKey="page_views" metricLabel="views" />
           </div>
           <div className="google-analytics-detail-grid google-analytics-audience-grid">
@@ -156,4 +230,3 @@ export function GoogleAnalyticsView() {
     </section>
   );
 }
-

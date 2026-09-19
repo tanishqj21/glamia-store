@@ -21,7 +21,7 @@ export function ImageManager({
   onUpload,
   uploading = false,
   min = 4,
-  max = 6,
+  max = 15,
   label = "Product images"
 }) {
   const images = normalizeImages(value);

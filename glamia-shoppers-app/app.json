@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Glamia Store",
+    "slug": "glamia-store",
+    "version": "1.0.0",
+    "icon": "./assets/glamia-icon.png",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "glamia-store",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.glamia.store",
+      "usesAppleSignIn": true
+    },
+    "android": {
+      "package": "com.glamia.store",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/glamia-icon.png",
+        "backgroundColor": "#151515"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-notifications",
+      "expo-apple-authentication"
+    ],
+    "extra": {
+      "apiBaseUrl": "https://glamiastore.com",
+      "googleWebClientId": "",
+      "googleAndroidClientId": "",
+      "googleIosClientId": "",
+      "eas": {
+        "projectId": "acc99b34-5113-4550-a675-0c56e41a2e3d"
+      }
+    },
+    "owner": "tanishqj21"
+  }
+}

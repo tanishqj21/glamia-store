@@ -8,3 +8,19 @@ GA4_MEASUREMENT_ID=G-XXXXXXXXXX
 GA4_PROPERTY_ID=replace-with-ga4-property-id
 GA4_CLIENT_EMAIL=service-account-name@your-project.iam.gserviceaccount.com
 GA4_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nreplace-with-private-key\n-----END PRIVATE KEY-----\n
+# Razorpay Standard Checkout. Keep the secret and webhook secret private.
+RAZORPAY_KEY_ID=rzp_live_replace_me
+RAZORPAY_KEY_SECRET=replace-with-razorpay-key-secret
+RAZORPAY_WEBHOOK_SECRET=replace-with-razorpay-webhook-secret
+
+# PhonePe Standard Checkout v2. Use PHONEPE_ENV=production for live payments.
+PHONEPE_ENV=sandbox
+PHONEPE_CLIENT_ID=replace-with-phonepe-client-id
+PHONEPE_CLIENT_SECRET=replace-with-phonepe-client-secret
+PHONEPE_CLIENT_VERSION=1
+# Prefer the HMAC webhook method. PHONEPE_WEBHOOK_ID is the key id from the dashboard.
+PHONEPE_WEBHOOK_SECRET=replace-with-phonepe-webhook-secret
+PHONEPE_WEBHOOK_ID=replace-with-phonepe-webhook-id
+# Optional SHA webhook fallback if the PhonePe webhook is configured with username/password.
+PHONEPE_WEBHOOK_USERNAME=
+PHONEPE_WEBHOOK_PASSWORD=

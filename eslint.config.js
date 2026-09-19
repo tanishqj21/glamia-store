@@ -4,7 +4,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 
 export default [
   {
-    ignores: ["node_modules/**", "public/**", "test-results/**", ".wrangler/**", ".wrangler-state/**", ".dev-vars*", "*.config.js"]
+    ignores: ["node_modules/**", "public/**", "test-results/**", ".wrangler/**", ".wrangler-state/**", ".dev-vars*", "*.config.js", "glamia-shoppers-app/**", "glamia-packer-app/**"]
   },
   js.configs.recommended,
   {

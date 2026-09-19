@@ -2,9 +2,11 @@
 .env
 .env.*
 !.dev.vars.example
+!glamia-shoppers-app/.env.example
 .wrangler/
 .wrangler-state/
 node_modules/
 .expo/
 dist/
 test-results/
+tmp/

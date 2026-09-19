@@ -4,12 +4,12 @@ import { apiFetch } from "../lib/api";
 import { taxRuleFor } from "./TaxCodePicker";
 
 const BULK_HEADERS = [
-  "Name", "Category", "Subcategory", "Brand", "Price", "MRP", "Colour", "Material", "HSN Code", "Tax Code Type", "GST Rate (%)", "Price Includes GST", "Description", "Sizes", "Stock by Size", "Images", "Size Chart URL",
+  "Name", "Category", "Subcategory", "Brand", "Price", "MRP", "Colour", "Material", "HSN Code", "Tax Code Type", "GST Rate (%)", "Price Includes GST", "Returnable", "Description", "Sizes", "Stock by Size", "Images", "Size Chart URL",
 ];
 
 const TEMPLATE_ROW = [
   "Pearl Button Knit Polo", "Women", "Tops", "Aster Lane", 2299, 3499, "Pearl", "Ribbed Cotton Knit", "6109", "HSN", 12, "Yes",
-  "A soft ribbed knit polo with pearl buttons and a polished fit.", "XS|S|M|L", "XS:6|S:10|M:12|L:8",
+  "Yes", "A soft ribbed knit polo with pearl buttons and a polished fit.", "XS|S|M|L", "XS:6|S:10|M:12|L:8",
   "https://example.com/front.jpg|https://example.com/back.jpg|https://example.com/detail.jpg|https://example.com/look.jpg", "",
 ];
 
@@ -42,6 +42,7 @@ function normalizeRow(raw, index, categories, subcategories) {
   const hsnSacType = (cell(raw, "Tax Code Type") || cell(raw, "HSN / SAC Type") || "HSN").toUpperCase();
   const gstRateInput = cell(raw, "GST Rate (%)") || cell(raw, "GST Rate");
   const taxInclusiveInput = cell(raw, "Price Includes GST") || cell(raw, "GST Inclusive");
+  const returnableInput = cell(raw, "Returnable") || cell(raw, "Returns");
   const description = cell(raw, "Description");
   const sizes = splitList(cell(raw, "Sizes"));
   const images = splitList(cell(raw, "Images"));
@@ -67,7 +68,7 @@ function normalizeRow(raw, index, categories, subcategories) {
   if (sizes.some((size) => size.length > 10)) errors.push("size labels must be 10 characters or fewer");
   const stock = Object.values(sizeStock).reduce((sum, value) => sum + value, 0);
   if (stock < 1) errors.push("stock by size must include at least one unit");
-  if (images.length < 4 || images.length > 6) errors.push("add 4–6 image URLs separated by |");
+  if (images.length < 4 || images.length > 15) errors.push("add 4–15 image URLs separated by |");
   if (images.some((url) => !(/^(https?:\/\/|\/api\/assets\/)/i.test(url)))) errors.push("images must be HTTPS URLs or uploaded asset URLs");
 
   return {
@@ -78,6 +79,7 @@ function normalizeRow(raw, index, categories, subcategories) {
       name, category: categoryMatch || category, subcategory: subcategoryMatch?.name || "", brand,
       price, mrp, color, material, hsn_sac_code: hsnSacCode, hsn_sac_type: hsnSacType,
       gst_rate: gstRate, gst_tax_inclusive: !["no", "false", "0", "n"].includes(taxInclusiveInput.toLowerCase()),
+      returnable: !["no", "false", "0", "n"].includes(returnableInput.toLowerCase()),
       description, sizes, size_stock: sizeStock, stock, images,
       thumbnail_urls: images.slice(0, 1), image_keys: [], variants: [], size_chart_url: cell(raw, "Size Chart URL"), reorder_point: 15,
     },
@@ -87,7 +89,7 @@ function normalizeRow(raw, index, categories, subcategories) {
 function downloadTemplate() {
   const workbook = XLSX.utils.book_new();
   const products = XLSX.utils.aoa_to_sheet([BULK_HEADERS, TEMPLATE_ROW]);
-  products["!cols"] = BULK_HEADERS.map((header, index) => ({ wch: index === 8 ? 16 : index === 12 ? 52 : index === 15 ? 70 : Math.max(16, header.length + 2) }));
+  products["!cols"] = BULK_HEADERS.map((header, index) => ({ wch: index === 8 ? 16 : index === 13 ? 52 : index === 16 ? 70 : Math.max(16, header.length + 2) }));
   XLSX.utils.book_append_sheet(workbook, products, "Products");
   const instructions = XLSX.utils.aoa_to_sheet([
     ["Glamia bulk listing template"],
@@ -99,7 +101,8 @@ function downloadTemplate() {
     ["Tax Code Type", "Use HSN for goods or SAC for services. Defaults to HSN when blank."],
     ["GST Rate (%)", "Optional confirmed rate. If blank, known apparel/footwear defaults are applied when available."],
     ["Price Includes GST", "Use Yes or No. Defaults to Yes when blank."],
-    ["Images", "Add 4 to 6 HTTPS image URLs separated with |. The first image becomes the thumbnail."],
+    ["Returnable", "Use Yes or No. Defaults to Yes when blank; No marks the listing as final sale."],
+    ["Images", "Add 4 to 15 HTTPS image URLs separated with |. The first image becomes the thumbnail."],
     ["Category and Subcategory", "Use names that already exist in the store category catalogue."],
   ]);
   instructions["!cols"] = [{ wch: 24 }, { wch: 100 }];

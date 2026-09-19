@@ -8,7 +8,8 @@ Customer-facing apparel marketplace on a Cloudflare Worker backend with D1, R2 p
 - `public/` — static frontend (`index.html`, `app.js`, `styles.css`) served by Workers Assets.
 - `migrations/` — D1 schema and seed data.
 - `scripts/smoke-test.mjs` — end-to-end API smoke test (run against `wrangler dev`).
-- `employee-app/` — separate Expo/React Native packing app for Android and iOS. It uses the same Worker/D1 order data through employee-only bearer APIs.
+- `glamia-shoppers-app/` — separate Expo/React Native customer app for Android and iOS. It uses the same live catalog, account, order, and payment APIs as the website.
+- `glamia-packer-app/` — separate Expo/React Native packing app for Android and iOS. It uses the same Worker/D1 order data through employee-only bearer APIs.
 
 ## Storefront UX
 
@@ -19,7 +20,7 @@ The brand mark opens the home page (there is no Store tab). The design theme is 
 - **Share button** — on each product page: opens the native share sheet on phones (`navigator.share`), otherwise copies the product link to the clipboard (async Clipboard API with an `execCommand` fallback).
 
 - **Header** — category nav with active underline (left), centered GLAMIA wordmark, live **search bar**, wishlist, theme toggle, and cart with count badge (right); an announcement bar sits above.
-- **Home** — auto-rotating **hero carousel** (per-category "Explore" slides with product frames, arrows, and dots), a trust strip (free shipping / 7-day returns / demo checkout), a centered **New In** row, a full-width editorial promo banner, shop-by-category tiles, then the live catalog with **category/price filters and sorting** in a sticky Refine sidebar.
+- **Home** — auto-rotating **hero carousel** (per-category "Explore" slides with product frames, arrows, and dots), a trust strip (free shipping / 7-day returns / secure payments), a centered **New In** row, a full-width editorial promo banner, shop-by-category tiles, then the live catalog with **category/price filters and sorting** in a sticky Refine sidebar.
 - **Product cards** — discount badge, wishlist heart, hover **quick-add bar** (always visible on touch), image swap on hover, and clear **Pre-order** labels for reserved stock.
 - **Verified-purchase reviews** — reviews are purchase-gated, and every review card carries a **✓ Verified purchase** badge.
 - **Related products** — "You may also like" on product pages (same category, excluding the current listing and its colourway siblings).
@@ -31,7 +32,7 @@ The brand mark opens the home page (there is no Store tab). The design theme is 
 - **Wishlist** — ♥ any product (header heart icon); saved per account in the browser.
 - **Login / signup** — modal with **Continue with Google** or **Continue as guest** (one Google account covers sign-up and sign-in).
 - **Cart** — quantity controls, coupon codes (`GLAMIA10` 10% off, `FLAT200` ₹200 off seeded), then Proceed to Checkout.
-- **Checkout & payments** — pick a saved address (or add one inline), reserve eligible **pre-order** pieces, then place a clearly labelled **Demo payment** order. Pre-order release dates and remaining reservation capacity are shown where configured. No money is charged and no real payment method is accepted until a payment gateway is integrated.
+- **Checkout & payments** — apply a coupon from the shopping bag or checkout, pick a saved address (or add one inline), choose Razorpay or PhonePe, then complete the order. Live gateway orders are created server-side, verified against provider responses, reconciled through webhooks, and expire safely if left unpaid. Pre-order release dates and remaining reservation capacity are shown where configured.
 - **Address management** — Address Book with multiple addresses, set-default, edit, delete; used at checkout.
 - **Order history & tracking** — every order with payment status, coupon, delivery address, and a **tracking timeline** (Order placed → Confirmed → Shipped → Delivered).
 - **Order numbers** — `GM-DDMMYYYY-XXX-NNNNN` (e.g. `GM-12092026-MSW-00001`): IST order date, initials of the first item's product name (up to three letters), and a globally sequential counter stored atomically in D1 (migration `0050`). Gaps can appear if a checkout fails after the number is taken; historical orders placed before the change keep their old numbers.
@@ -51,7 +52,7 @@ Admins additionally get the Admin console tab (products, inventory, orders, cust
 Reach it from the header **Admin** tab or the user dropdown. Sections:
 
 - **Dashboard** — total sales, order count, average order value, low-stock count, a 7-day revenue chart, and recent orders.
-- **Add Product** — the listing form: category, subcategory, brand, price/MRP, material, details, **4–6 images** (R2 upload or URL with a preview for every image; admins can move any image to the first or last position and select a separate thumbnail), **per-size stock** (add each size with its own quantity — the total is computed), optional **pre-order** release date and reservation limit, and **colourways**: each colourway (own colour, per-size stock, and **4–8 images**) is published as a **standalone linked listing** that inherits the parent's name, brand, price, and description. Linked listings share a variant group: the catalog shows one card per colour (with the colour under the name and sibling swatches), product pages have a "More colours" navigator, and **status changes (Go Live / Hold / Archive) apply to the whole group** while stock is managed per colourway and per size. Editing a listing edits just that colourway.
+- **Add Product** — the listing form: category, subcategory, brand, price/MRP, material, details, **4–15 images** (R2 upload or URL with a preview for every image; admins can move any image to the first or last position and select a separate thumbnail), **per-size stock** (add each size with its own quantity — the total is computed), optional **pre-order** release date and reservation limit, and **colourways**: each colourway (own colour, per-size stock, and **4–15 images**) is published as a **standalone linked listing** that inherits the parent's name, brand, price, and description. Linked listings share a variant group: the catalog shows one card per colour (with the colour under the name and sibling swatches), product pages have a "More colours" navigator, and **status changes (Go Live / Hold / Archive) apply to the whole group** while stock is managed per colourway and per size. Editing a listing edits just that colourway.
 - **All Products** — the full catalog with filters (Live / On hold / Archived) and per-product actions: **Go Live**, **Put on Hold**, **Archive**/Restore, Feature/Unfeature, Edit, Delete. Admins can export CSV or XLSX and apply bulk status updates.
 - **Inventory** — per-product stock with inline edit and low-stock highlighting (archived listings excluded). Listings with size rows show **per-size stock inputs**; sold-out sizes render crossed-out and unselectable on the product page.
 - **Orders** — every order with items, coupon, total, and a status dropdown (pending → confirmed → shipped → delivered / cancelled); returns/refunds track eligibility, refund amount, notes, and processing time.
@@ -62,7 +63,7 @@ Reach it from the header **Admin** tab or the user dropdown. Sections:
 - **System health** — check D1 health, inspect Brevo email delivery attempts, retry failed email events, and download a JSON data backup.
 - **Employees** — create, disable, and reset individual packing-team app credentials. Employee actions are restricted to the packing queue and recorded in a separate audit trail.
 
-## Employee packing app
+## Glamia Packer App
 
 The employee app is intentionally separate from the buyer storefront and admin console. Admins create credentials under **Admin → Employees**. Each employee can sign in, view non-cancelled orders waiting to be packed, open item/size/colourway/quantity/shipping details, and mark an order as **Packed**.
 
@@ -71,7 +72,7 @@ Packing is stored independently from shipping: marking an order packed never mar
 Run the app from its own directory:
 
 ```bash
-cd employee-app
+cd glamia-packer-app
 npm install
 npx expo start
 ```
@@ -141,6 +142,24 @@ npx wrangler secret put SESSION_SECRET
 npx wrangler secret put BREVO_API_KEY
 ```
 
+To enable live checkout, add the provider credentials as Worker secrets/bindings. The site will keep live methods hidden until the matching provider credentials and webhook verification secret are present:
+
+```bash
+npx wrangler secret put RAZORPAY_KEY_SECRET
+npx wrangler secret put RAZORPAY_WEBHOOK_SECRET
+npx wrangler secret put PHONEPE_CLIENT_ID
+npx wrangler secret put PHONEPE_CLIENT_SECRET
+npx wrangler secret put PHONEPE_WEBHOOK_SECRET
+npx wrangler secret put PHONEPE_WEBHOOK_ID
+```
+
+Set `RAZORPAY_KEY_ID`, `PHONEPE_CLIENT_VERSION`, `PHONEPE_ENV`, and (optionally) `PUBLIC_SITE_URL` in the Worker bindings. Configure these webhook URLs in the provider dashboards:
+
+- `https://glamiastore.com/api/payments/webhooks/razorpay` with `payment.captured`, `payment.failed`, and `order.paid` events.
+- `https://glamiastore.com/api/payments/webhooks/phonepe` with `checkout.order.completed` and `checkout.order.failed` events, using PhonePe HMAC authentication.
+
+Use provider test credentials with `PHONEPE_ENV=sandbox` and a Razorpay test key first. Switch Razorpay to live keys and PhonePe to `PHONEPE_ENV=production` only after the end-to-end payment and webhook checks pass.
+
 Verify `support@glamiastore.com` (or the approved sender domain) in Brevo before setting `BREVO_API_KEY`. The Worker records every transactional email attempt in D1, retries transient failures automatically every five minutes, and exposes failed events for manual retry in Admin → System health.
 
 5b. (Optional) Connect Google Analytics 4 to Admin → Dashboard. In Google Cloud, enable the Google Analytics Data API and create a service account. Add that service account email as a **Viewer** in the GA4 property’s Property access management, then set the property ID and service-account credentials locally in `.dev.vars`:
@@ -172,7 +191,7 @@ npm run deploy
 
 ## Production Cutover Rule
 
-Before the final production-ready deployment, explicitly confirm a clean start. Clear demo/customer data such as Google-authenticated users, sessions, carts, wishlists, orders, reviews, support conversations, analytics, and other test records. Preserve only the product listings created for the production catalog, including their approved product media and inventory details. Do not perform this reset during ordinary demo deployments. Keep checkout in Demo mode until Razorpay confirms production access and the live payment integration has been separately verified.
+Before the final production-ready deployment, explicitly confirm a clean start. Clear demo/customer data such as Google-authenticated users, sessions, carts, wishlists, orders, reviews, support conversations, analytics, and other test records. Preserve only the product listings created for the production catalog, including their approved product media and inventory details. Do not perform this reset during ordinary deployments. Verify Razorpay and PhonePe live payments end-to-end before launch.
 
 ## What Is Protected
 
@@ -197,14 +216,19 @@ Before the final production-ready deployment, explicitly confirm a clean start. 
 | GET | `/api/products` | public (live only; `?scope=seller` / `?scope=admin`) |
 | GET | `/api/search` | public (`?q=` semantic vector search, keyword fallback) |
 | POST | `/api/admin/search/reindex` | admin (re-embed all live products into Vectorize) |
-| POST | `/api/products` | signed-in sellers (4–6 images, created on hold for admin approval) |
+| POST | `/api/products` | signed-in sellers (4–15 images, created on hold for admin approval) |
 | DELETE | `/api/products/:id` | owner or admin |
 | GET | `/api/products/:id/reviews` | public (visible only; signed-in callers also get purchase eligibility + own review) |
 | POST | `/api/products/:id/reviews` | signed-in purchasers only (1 per product, editable) |
 | DELETE | `/api/products/:id/reviews` | signed-in (delete own review) |
 | GET | `/api/my/reviews` | signed-in (own review history) |
 | GET | `/api/orders` | signed-in (own; `?scope=admin` for all) |
-| POST | `/api/orders` | signed-in or guest (items, coupon, demo payment, address) |
+| POST | `/api/orders` | legacy order endpoint; live checkout uses `/api/payments/create` with items, coupon, and address |
+| POST | `/api/payments/create` | signed-in or guest (Razorpay or PhonePe order creation) |
+| POST | `/api/payments/razorpay/verify` | signed-in or guest (server-side signature and capture verification) |
+| GET | `/api/payments/phonepe/status` | signed-in or guest (PhonePe order status reconciliation) |
+| POST | `/api/payments/webhooks/razorpay` | provider callback (signature verified) |
+| POST | `/api/payments/webhooks/phonepe` | provider callback (HMAC/SHA verified) |
 | GET | `/api/order-tracking` | public with order number + checkout email, or opaque tracking token |
 | POST | `/api/orders/:id/cancel` | owner (pending/confirmed orders) |
 | POST | `/api/orders/:id/returns` | owner (delivered orders) |
