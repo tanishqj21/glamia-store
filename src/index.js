@@ -582,9 +582,9 @@ async function isKnownSpaFallback(path, env) {
    Open Graph/Twitter tags, canonical URL and Product JSON-LD in the HTML;
    known crawlers receive a self-contained static rendering inside #root so
    indexing never depends on browser-side API requests. */
-function storefrontResourceHints(path) {
-  if (path === '/') return '';
-  const type = path === '/cart' ? 'CartPage' : path === '/checkout' ? 'CheckoutPage'
+function storefrontResourceHints(path, storefront = 'glamia') {
+  if (path === '/' && storefront !== 'wibrawl') return '';
+  const type = path === '/' ? 'catalogue' : path === '/cart' ? 'CartPage' : path === '/checkout' ? 'CheckoutPage'
     : ['/profile', '/address', '/orders', '/wishlist', '/reviews'].includes(path) ? 'AccountPages'
     : /^\/(?!admin\/|category\/)[^/]+\/[^/]+\/[^/]+$/.test(path) ? 'ProductDetailPage'
     : ['/login', '/contact', '/support', '/policies'].includes(path) ? 'PublicPages' : 'catalogue';
@@ -860,10 +860,11 @@ async function renderPublicPage(request, env, ctx) {
   html = html
     .replace(/<title>.*?<\/title>/, `<title>${escapeHtml(title)}</title>`)
     .replace(/<meta name="description" content="[^"]*"\s*\/>/, `<meta name="description" content="${escapeHtml(description)}" />`)
-    .replace("</head>", `${metaTags}${headExtras}${isBot || renderedFirstScreen ? '' : storefrontResourceHints(path)}</head>`);
+    .replace("</head>", `${metaTags}${headExtras}${isBot || renderedFirstScreen ? '' : storefrontResourceHints(path, storefront)}</head>`);
   // The common font characters are already in the verified first-screen CSS.
   // Keep the ordinary font files for all other characters and private routes.
-  if (renderedFirstScreen || (path === '/' && !isBot)) html = html.replace(/<link\b[^>]*\bas="font"[^>]*>/g, '');
+  if (renderedFirstScreen || (path === '/' && storefront !== 'wibrawl' && !isBot)) html = html.replace(/<link\b[^>]*\bas="font"[^>]*>/g, '');
+  if (storefront === 'wibrawl') html = html.replace(/<link\b[^>]*href="\/fonts\/cormorant[^>]*\bas="font"[^>]*>/g, '');
   if (isBot && botContent) {
     html = html
       .replace('<div id="root"></div>', `<div id="root">${botContent}</div>`)

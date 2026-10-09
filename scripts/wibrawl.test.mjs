@@ -108,6 +108,15 @@ test('production CSP permits the exact built theme scripts', () => {
   assert.ok(!csp.includes("'unsafe-inline'"));
 });
 
+test('the homepage discovers its application, chosen campaign and display font early', async t => {
+  const {env} = fixture(t);
+  const html = await (await worker.renderPublicPage(new Request(WIBRAWL_ORIGIN),env)).text();
+  assert.match(html, /rel="modulepreload"[^>]+\/assets\/main-/);
+  assert.match(html, /href="\/fonts\/jost-[^"]+" as="font"/);
+  assert.ok(!/<link[^>]+href="\/fonts\/cormorant[^>]+as="font"/.test(html));
+  assert.match(html, /preload.imageSrcset/);
+});
+
 test('direct product links render the Wibrawl header and footer before JavaScript', async t => {
   const {db,env} = fixture(t);
   const path = worker.canonicalProductPath(worker.formatProduct(db.prepare("SELECT * FROM products WHERE id='wb'").get()));

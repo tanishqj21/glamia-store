@@ -18,7 +18,7 @@ async function context(viewport,{signedIn=false,empty=false,failure=false,...opt
     const url=new URL(route.request().url()), path=url.pathname;
     let result={};
     if(path==='/api/session')result={user:signedIn?{email:'fixture@example.com',name:'Fixture Buyer',role:'customer'}:null};
-    else if(path==='/api/storefront-settings')result={announcement:{visible:false},trust_strip:{visible:false},seo:{},customer_experience:{}};
+    else if(path==='/api/storefront-settings')result={announcement:{visible:false},trust_strip:{visible:false},seo:{},customer_experience:{},socials:{instagram:'https://www.instagram.com/fixture'}};
     else if(path==='/api/categories')result={categories:['Admin Custom Tees'],subcategories:[{category:'Admin Custom Tees',name:'Original Prints'}]};
     else if(path==='/api/products'){
       assert.ok(url.searchParams.has('wibrawl-preview'),'Local API must keep storefront scope');

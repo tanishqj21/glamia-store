@@ -70,8 +70,8 @@
       "_jsx-runtime-D3jfb0Ew.js"
     ]
   },
-  "_ReturnStatusCard-D_aAS8Kb.js": {
-    "file": "assets/ReturnStatusCard-D_aAS8Kb.js",
+  "_ReturnStatusCard-wvZ54u0x.js": {
+    "file": "assets/ReturnStatusCard-wvZ54u0x.js",
     "name": "ReturnStatusCard",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
@@ -127,7 +127,7 @@
     "name": "workspaceAccess"
   },
   "index.html": {
-    "file": "assets/index-B_MCHCpt.js",
+    "file": "assets/index-DFK1Sv_1.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -135,7 +135,7 @@
       "src/main.jsx"
     ],
     "css": [
-      "assets/index-BrV8E_dU.css"
+      "assets/index-1WMVoX3K.css"
     ]
   },
   "src/components/AboutPage.jsx": {
@@ -149,7 +149,7 @@
     ]
   },
   "src/components/AccountPages.jsx": {
-    "file": "assets/AccountPages-C0KH39gz.js",
+    "file": "assets/AccountPages-CX7ar3mE.js",
     "name": "AccountPages",
     "src": "src/components/AccountPages.jsx",
     "isDynamicEntry": true,
@@ -163,7 +163,7 @@
       "_Reviews-CIzrLeNA.js",
       "_Icon-QcDBXQVF.js",
       "_CancellationRefundCard-C3S8TZgx.js",
-      "_ReturnStatusCard-D_aAS8Kb.js",
+      "_ReturnStatusCard-wvZ54u0x.js",
       "_OrderDetails-CySZ0Zk3.js",
       "_AccountLayout-C1boTaS1.js"
     ]
@@ -180,7 +180,7 @@
     ]
   },
   "src/components/AdminCare.jsx": {
-    "file": "assets/AdminCare-DzKuwsHj.js",
+    "file": "assets/AdminCare-2zotU7IB.js",
     "name": "AdminCare",
     "src": "src/components/AdminCare.jsx",
     "isDynamicEntry": true,
@@ -192,7 +192,7 @@
       "_SupportOrderContext-3OOpGH4f.js",
       "_Icon-QcDBXQVF.js",
       "_CancellationRefundCard-C3S8TZgx.js",
-      "_ReturnStatusCard-D_aAS8Kb.js",
+      "_ReturnStatusCard-wvZ54u0x.js",
       "src/components/AdminWorkspace.jsx",
       "src/main.jsx"
     ]
@@ -231,7 +231,7 @@
     ]
   },
   "src/components/AdminMerchandising.jsx": {
-    "file": "assets/AdminMerchandising-Bn5_2MRG.js",
+    "file": "assets/AdminMerchandising-DFbOhz68.js",
     "name": "AdminMerchandising",
     "src": "src/components/AdminMerchandising.jsx",
     "isDynamicEntry": true,
@@ -244,7 +244,7 @@
     ]
   },
   "src/components/AdminOperations.jsx": {
-    "file": "assets/AdminOperations-DAqVzARm.js",
+    "file": "assets/AdminOperations-n0bm7dCV.js",
     "name": "AdminOperations",
     "src": "src/components/AdminOperations.jsx",
     "isDynamicEntry": true,
@@ -271,7 +271,7 @@
     ]
   },
   "src/components/AdminWorkspace.jsx": {
-    "file": "assets/AdminWorkspace-8DjoFNlb.js",
+    "file": "assets/AdminWorkspace-hjrG5bQt.js",
     "name": "AdminWorkspace",
     "src": "src/components/AdminWorkspace.jsx",
     "isDynamicEntry": true,
@@ -305,7 +305,7 @@
     ]
   },
   "src/components/BulkListingView.jsx": {
-    "file": "assets/BulkListingView-C_2YpXzt.js",
+    "file": "assets/BulkListingView-a_z1rC1Q.js",
     "name": "BulkListingView",
     "src": "src/components/BulkListingView.jsx",
     "isDynamicEntry": true,
@@ -316,7 +316,7 @@
     ]
   },
   "src/components/CartPage.jsx": {
-    "file": "assets/CartPage-CEeBlpwe.js",
+    "file": "assets/CartPage-CFeJFA9I.js",
     "name": "CartPage",
     "src": "src/components/CartPage.jsx",
     "isDynamicEntry": true,
@@ -393,7 +393,7 @@
     ]
   },
   "src/components/ProductDetailPage.jsx": {
-    "file": "assets/ProductDetailPage-BUbKBrCu.js",
+    "file": "assets/ProductDetailPage-BP1Q9Qvn.js",
     "name": "ProductDetailPage",
     "src": "src/components/ProductDetailPage.jsx",
     "isDynamicEntry": true,
@@ -420,7 +420,7 @@
     ]
   },
   "src/components/QuickView.jsx": {
-    "file": "assets/QuickView-DGNRyWY3.js",
+    "file": "assets/QuickView-9NMrVZAy.js",
     "name": "QuickView",
     "src": "src/components/QuickView.jsx",
     "isDynamicEntry": true,
@@ -468,7 +468,7 @@
     ]
   },
   "src/main.jsx": {
-    "file": "assets/main-4xBWUs4f.js",
+    "file": "assets/main-CW35MLkv.js",
     "name": "main",
     "src": "src/main.jsx",
     "isDynamicEntry": true,
@@ -497,19 +497,19 @@
     ]
   },
   "glamia-product-styles.css": {
-    "file": "assets/product-styles-009615a8.css",
+    "file": "assets/product-styles-3888905a.css",
     "src": "glamia-product-styles.css"
   },
   "glamia-catalogue-styles.css": {
-    "file": "assets/catalogue-styles-d96f1cf3.css",
+    "file": "assets/catalogue-styles-106e06c2.css",
     "src": "glamia-catalogue-styles.css"
   },
   "glamia-cart-styles.css": {
-    "file": "assets/cart-styles-bfa94b97.css",
+    "file": "assets/cart-styles-aed73845.css",
     "src": "glamia-cart-styles.css"
   },
   "glamia-homepage-styles.css": {
-    "file": "assets/homepage-styles-d96f1cf3.css",
+    "file": "assets/homepage-styles-106e06c2.css",
     "src": "glamia-homepage-styles.css"
   }
 }

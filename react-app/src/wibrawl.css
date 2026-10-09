@@ -107,6 +107,7 @@
 .wibrawl-shell .product-info>p { color:var(--muted); }
 .wibrawl-shell .empty-state { background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:64px 24px; }
 .wibrawl-shell .empty-state h2 { font-size:32px; letter-spacing:-.04em; }
+.wibrawl-shell .empty-state h2 { color:var(--ink); }
 .wibrawl-shell .empty-state p { color:var(--muted); }
 .wibrawl-skeleton { display:grid; grid-template-columns:repeat(4,1fr); gap:24px; }
 .wibrawl-skeleton>div { height:300px; background:var(--surface-strong); border-radius:4px; }
@@ -125,6 +126,7 @@
 .wibrawl-shell .footer-nav-groups a:hover,.wibrawl-shell .footer-policy-nav>span { color:var(--ink); }
 :root[data-brand="wibrawl"] .wibrawl-shell .footer-policy-nav>span { color:var(--ink); }
 .wibrawl-shell .footer-social-links a { color:var(--ink); border-color:var(--line); }
+.wibrawl-shell .footer-socials-copy>span { color:var(--ink); }
 .wibrawl-footer-origin { display:block; margin-top:28px; color:var(--muted); font-size:12px; }
 .wibrawl-footer-origin a { text-underline-offset:4px; }
 .wibrawl-about { padding-block:80px; }
