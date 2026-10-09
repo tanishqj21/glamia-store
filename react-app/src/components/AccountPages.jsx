@@ -162,7 +162,7 @@ function ProfilePanel({ user }) {
   );
 }
 
-export function ProfileCompletionPage({ user, onComplete }) {
+export function ProfileCompletionPage({ user, onComplete, brandName = "Glamia" }) {
   const [profile, setProfile] = useState(null);
   const [form, setForm] = useState(profileForm({}, true));
   const [status, setStatus] = useState("");
@@ -224,7 +224,7 @@ export function ProfileCompletionPage({ user, onComplete }) {
       <section className="account-page profile-completion-page">
         <p className="eyebrow">One last step</p>
         <h1 className="page-title">Complete your profile.</h1>
-        <p className="profile-completion-intro">Welcome to Glamia, {user?.name || "member"}. Add these details before you continue so your account, orders, and reviews use the right information.</p>
+        <p className="profile-completion-intro">Welcome to {brandName}, {user?.name || "member"}. Add these details before you continue so your account, orders, and reviews use the right information.</p>
         <section className="account-panel profile-completion-panel" aria-labelledby="profile-completion-title">
           <div className="profile-edit-heading"><div><p className="eyebrow">Required account details</p><h2 id="profile-completion-title">Tell us about you.</h2></div><p className="muted">Your name is shown with an uppercase first letter.</p></div>
           <form className="account-form" onSubmit={save}>

@@ -115,6 +115,8 @@
 .wibrawl-shell .secondary-action,.wibrawl-shell .quick-view-dialog { border-radius:4px; }
 .wibrawl-shell .size-list button.selected { background:var(--accent); color:#18221a; border-color:var(--accent); }
 .wibrawl-shell .detail-copy h1 { font-size:clamp(30px,3.5vw,48px); letter-spacing:-.04em; }
+.wibrawl-shell .login-page h1 { font-size:clamp(40px,6vw,76px); line-height:1; letter-spacing:-.055em; }
+.wibrawl-shell .login-page h1 span { color:var(--accent-text); }
 .wibrawl-shell .cart-summary,.wibrawl-shell .account-card { border-radius:4px; }
 .wibrawl-manifesto { padding:clamp(54px,7vw,108px) clamp(24px,5vw,76px); display:grid; grid-template-columns:1fr 1.6fr; gap:48px; border-top:1px solid var(--line); }
 .wibrawl-manifesto>p { color:var(--muted); font-size:20px; margin:4px 0 0; line-height:1.4; }

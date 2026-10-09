@@ -106,6 +106,7 @@ test('production CSP permits the exact built theme scripts', () => {
     assert.ok(csp.includes(`'sha256-${createHash('sha256').update(code).digest('base64')}'`));
   }
   assert.ok(!csp.includes("'unsafe-inline'"));
+  assert.ok(csp.includes('https://accounts.google.com/gsi/style'));
 });
 
 test('the homepage discovers its application, chosen campaign and display font early', async t => {

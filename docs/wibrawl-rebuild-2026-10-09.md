@@ -33,6 +33,8 @@ Shipped files: `public/wibrawl/gaming-campaign-640.webp`, `gaming-campaign-960.w
 - Existing coupon lifecycle and Glamia server-rendering tests pass.
 - Playwright fixtures verify desktop and mobile themes, device preference changes, explicit theme persistence, guest and signed-in account menus, credit balance, admin categories, keyboard menu controls, quick view, product size selection, cart quantities and empty/error states.
 - WCAG A/AA automated scans pass for both themes at desktop and mobile widths. No horizontal overflow at 1440, 390 or 360 pixels.
+- Live checks verify both themes, saved preferences, cart and about routes, the Glamia header link and storefront API separation. Glamia retains its existing inventory; Wibrawl starts empty until products are assigned through admin.
+- Mobile Lighthouse improved from performance 59 to 81 after early campaign-image and application preloads. The second audit recorded LCP 3.5 seconds, TBT 100 ms and CLS 0.039; accessibility, best practices and SEO each scored 100. These are individual simulated mobile runs, not field performance measurements.
 - Required self-hosted fonts, invoice dependencies and manifest-referenced product images are included so GitHub builds do not depend on untracked workstation files.
 
 Reproduce:
@@ -46,3 +48,5 @@ node scripts/wibrawl-browser-test.mjs
 ```
 
 Production publishing must first apply the additive `0111_wibrawl_storefront_scope.sql` migration. The three Cloudflare custom domains are declared together to preserve Glamia's existing root and www routes. Deploy from a reviewed Git snapshot with current assets and the previous manifest's chunks retained for existing browser tabs.
+
+The migration was applied and the storefront deployed on Cloudflare. Google initially rejected the new subdomain; the owner added `https://wibrawl.glamiastore.com` to the existing web OAuth client's authorized JavaScript origins. The site CSP permits Google's exact `https://accounts.google.com/gsi/style` stylesheet endpoint, as specified in [Google Identity Services setup](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid). Login and profile-completion copy now use Wibrawl branding while sharing the existing authentication flow.
