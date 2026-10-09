@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { merchantConfig, merchantOffers } from '../src/google-merchant.js';
+import { merchantConfig, merchantOffers, merchantAdmin } from '../src/google-merchant.js';
 
 const product = {
   id: 'e2aeb883-b86f-4cc2-83db-46ff23d4c312', name: 'Night Suit — Chocolate Brown',
@@ -32,6 +32,18 @@ test('Unpublished products disappear and nonreturnable products get a no-returns
   assert.equal(offers[0].input.productAttributes.returns[0].windowType, 'NO_RETURNS');
 });
 
+test('only sample listings are excluded; real Wibrawl listings link to their own storefront', async () => {
+  const sizes = [{size:'L',stock:0}];
+  for (const storefront_visibility of ['glamia', 'both', 'wibrawl']) {
+    assert.deepEqual(await merchantOffers({...product, storefront_visibility}, sizes, {isSample:true}, helpers), []);
+    const offers = await merchantOffers({...product, storefront_visibility}, sizes, {}, helpers);
+    assert.equal(offers.length, 1);
+    const origin = storefront_visibility === 'wibrawl' ? 'https://wibrawl.glamiastore.com/' : 'https://glamiastore.com/';
+    assert.ok(offers[0].input.productAttributes.link.startsWith(origin));
+    assert.ok(offers[0].input.productAttributes.imageLink.startsWith(origin));
+  }
+});
+
 test('A product with declared sizes cannot silently use aggregate stock', async () => {
   await assert.rejects(merchantOffers(product, [], {}, helpers), /Size-level inventory is missing/);
 });
@@ -41,4 +53,24 @@ test('Merchant credentials remain disabled until configured and enabled', () => 
   assert.equal(config.configured, true);
   assert.equal(config.enabled, false);
   assert.equal(config.source, 'accounts/5859812746/dataSources/10750523846');
+});
+
+test('Google metadata edits preserve a sample flag until it is explicitly cleared', async () => {
+  let saved = {isSample:true};
+  const env = {MERCHANT_SYNC_ENABLED:'false', DB:{prepare(sql) {
+    let values=[];
+    return {bind(...args){values=args;return this;},
+      async first(){return sql.includes('FROM products')?{id:'sample'}:{metadata_json:JSON.stringify(saved)};},
+      async run(){if(sql.startsWith('INSERT INTO merchant_product_details'))saved=JSON.parse(values[1]);return {};}};
+  },async batch(statements){return Promise.all(statements.map(statement=>statement.run()));}}};
+  const put = body => {
+    const request=new Request('https://glamiastore.com/api/admin/google-merchant/details/sample',{method:'PUT',body:JSON.stringify(body)});
+    return merchantAdmin(request,env,new URL(request.url),{},helpers);
+  };
+  assert.equal((await put({gender:'UNISEX'})).status,200);
+  assert.deepEqual(saved,{isSample:true,gender:'UNISEX'});
+  await assert.rejects(put({isSample:'false'}),/flag must be true or false/);
+  assert.equal(saved.isSample,true);
+  assert.equal((await put({gender:'UNISEX',isSample:false})).status,200);
+  assert.equal(saved.isSample,undefined);
 });

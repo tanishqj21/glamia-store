@@ -1,4 +1,5 @@
 // Merchant API v1. Only offers owned by this API source are changed or removed.
+import { WIBRAWL_ORIGIN } from './storefront-identity.js';
 const BASE = 'https://merchantapi.googleapis.com';
 const encoder = new TextEncoder();
 let cachedToken = { email: '', token: '', until: 0 };
@@ -49,9 +50,9 @@ async function google(config, path, method = 'GET', body) {
 }
 
 export async function merchantOffers(product, sizes, metadata, helpers, now = Date.now()) {
-  if (!product || product.status !== 'live') return [];
+  if (!product || product.status !== 'live' || metadata.isSample === true) return [];
   const p = product;
-  const origin = 'https://glamiastore.com';
+  const origin = p.storefront_visibility === 'wibrawl' ? WIBRAWL_ORIGIN : 'https://glamiastore.com';
   const imageValues = parse(p.images_json || '[]', []);
   const images = [...new Set([...(Array.isArray(imageValues) ? imageValues : []), p.image_url].filter(Boolean).map(value => new URL(value, origin).href))];
   if (!p.name || !p.description || !images.length || !Number.isFinite(Number(helpers.price(p))) || !(Number(helpers.price(p)) > 0)) throw issue('Add a product title, description, image and valid price before Google submission.');
@@ -236,7 +237,12 @@ export async function merchantAdmin(request, env, url, ctx, helpers) {
     if (raw.length > 16000) throw issue('Product metadata is too large', 413);
     const data = parse(raw, null);
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw issue('Provide product metadata as an object.');
+    const existing = await env.DB.prepare('SELECT metadata_json FROM merchant_product_details WHERE product_id=?').bind(id).first();
     const metadata = {};
+    // Ordinary Google metadata edits must not turn a preview into a real offer.
+    if (data.isSample !== undefined && typeof data.isSample !== 'boolean') throw issue('Sample listing flag must be true or false.');
+    const isSample = data.isSample === undefined ? parse(existing?.metadata_json || '{}', {}).isSample : data.isSample;
+    if (isSample === true) metadata.isSample = true;
     if (data.gender) { if (!['MALE', 'FEMALE', 'UNISEX'].includes(data.gender)) throw issue('Invalid gender'); metadata.gender = data.gender; }
     if (data.ageGroup) { if (!['ADULT', 'KIDS', 'TODDLER', 'INFANT', 'NEWBORN'].includes(data.ageGroup)) throw issue('Invalid age group'); metadata.ageGroup = data.ageGroup; }
     if (data.mpn) metadata.mpn = String(data.mpn).trim().slice(0, 70);
