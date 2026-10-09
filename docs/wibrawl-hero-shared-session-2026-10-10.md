@@ -17,3 +17,7 @@ node --experimental-vm-modules --experimental-sqlite scripts/storefront-session-
 node --experimental-vm-modules --experimental-sqlite scripts/wibrawl-hero-browser-test.mjs
 node scripts/wibrawl-browser-test.mjs
 ```
+
+Published on 2026-10-10 to all three existing custom domains. Migration 0112 was applied successfully; Cloudflare version is `70b2c23f-e0e1-4336-9197-fd388dbf10cf`. All 83 server regression tests passed. Browser checks passed for existing login migration in both directions, shared sign-out, admin create/edit and storefront filtering, both carousel themes at 1440/360 pixels, reduced motion, CTA navigation and automated carousel accessibility. Existing shopping/theme/menu checks also passed.
+
+Anonymous live checks confirmed the root/www Glamia carousel remains at one slide and Wibrawl has zero configured slides with its original hero fallback. Credentialed bridge responses permit only owned origins; untrusted origins return 403. Live Glamia and Wibrawl loaded without browser errors, with no horizontal overflow in either mobile theme. No live merchandising or account records were created for verification.

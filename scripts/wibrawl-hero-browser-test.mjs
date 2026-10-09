@@ -89,5 +89,3 @@ try {
   assert.deepEqual(errors,[]);
   console.log('Hero Studio storefront switching, product filtering, create/edit, live display, CTA, mobile themes and carousel accessibility passed.');
 } finally {await browser.close();db.close();}
-
-
