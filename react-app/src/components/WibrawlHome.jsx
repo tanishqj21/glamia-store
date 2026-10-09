@@ -1,13 +1,60 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { collectionNames } from '../../../src/storefront-identity.js';
 import { Link } from './Header';
 
-export function WibrawlHome({ theme, onNavigate, children }) {
+export function WibrawlCarousel({ slides, onNavigate }) {
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [visible, setVisible] = useState(() => !document.hidden);
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const motion = event => setReducedMotion(event.matches);
+    const visibility = () => setVisible(!document.hidden);
+    media.addEventListener('change', motion);
+    document.addEventListener('visibilitychange', visibility);
+    return () => { media.removeEventListener('change', motion); document.removeEventListener('visibilitychange', visibility); };
+  }, []);
+  useEffect(() => { setIndex(0); }, [slides]);
+  useEffect(() => {
+    if (slides.length < 2 || paused || reducedMotion || hovered || focused || !visible) return;
+    const timer = window.setInterval(() => setIndex(current => (current + 1) % slides.length), 6000);
+    return () => window.clearInterval(timer);
+  }, [slides.length, paused, reducedMotion, hovered, focused, visible]);
+  const slide = slides[index] || slides[0];
+  const select = next => { setPaused(true); setIndex((next + slides.length) % slides.length); };
+  return <section className="wibrawl-carousel" aria-label="Wibrawl featured collections" aria-roledescription="carousel"
+    onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+    onFocusCapture={() => setFocused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}>
+    <div className="wibrawl-hero wibrawl-edited-hero" role="group" aria-roledescription="slide" aria-live={paused ? 'polite' : 'off'} aria-label={`${index + 1} of ${slides.length}`}>
+      <div className="wibrawl-hero-copy">
+        <p className="wibrawl-kicker">{slide.eyebrow}</p>
+        <h1 id="wibrawl-title">{slide.title}</h1>
+        <p className="wibrawl-hero-intro">{slide.tagline}</p>
+        {slide.words?.length > 0 && <div className="wibrawl-hero-words">{slide.words.map(word => <span key={word}>{word}</span>)}</div>}
+        <div className="wibrawl-hero-actions"><Link className="wibrawl-primary-action" href={slide.cta_category ? `/category/${encodeURIComponent(slide.cta_category)}` : '/just-arrived'} onNavigate={onNavigate}>{slide.cta_label || 'Shop the edit'}</Link></div>
+      </div>
+      <div className={`wibrawl-hero-visual wibrawl-hero-frames wibrawl-hero-frames-${slide.frames.length}`}>
+        {slide.frames.map(frame => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate} aria-label={`Shop ${frame.name}`}><img src={frame.image} alt={frame.name} width="960" height="1200" fetchPriority="high" decoding="async" /></Link>)}
+      </div>
+    </div>
+    {slides.length > 1 && <div className="wibrawl-carousel-controls">
+      <button type="button" onClick={() => select(index - 1)} aria-label="Previous hero slide">Prev</button>
+      <div className="wibrawl-carousel-pages" role="group" aria-label="Choose hero slide">{slides.map((item, position) => <button type="button" key={item.id} aria-label={`Show hero slide ${position + 1}`} aria-current={position === index ? 'true' : undefined} onClick={() => select(position)}>{position + 1}</button>)}</div>
+      <button type="button" onClick={() => select(index + 1)} aria-label="Next hero slide">Next</button>
+      {!reducedMotion && <button type="button" onClick={() => setPaused(current => !current)}>{paused ? 'Play carousel' : 'Pause carousel'}</button>}
+    </div>}
+  </section>;
+}
+
+export function WibrawlHome({ theme, slides = [], onNavigate, children }) {
   const names = collectionNames(theme);
   const gaming = theme === 'gaming';
   const campaign = gaming ? 'gaming' : 'sports';
   return <div className={`wibrawl-home wibrawl-home-${theme}`}>
-    <section className="wibrawl-hero" aria-labelledby="wibrawl-title">
+    {slides.length ? <WibrawlCarousel slides={slides} onNavigate={onNavigate} /> : <section className="wibrawl-hero" aria-labelledby="wibrawl-title">
       <div className="wibrawl-hero-copy">
         <p className="wibrawl-kicker">Pick your side.</p>
         <h1 id="wibrawl-title"><span className="wibrawl-hero-line">WEAR YOUR</span><span>WORLD.</span></h1>
@@ -20,7 +67,7 @@ export function WibrawlHome({ theme, onNavigate, children }) {
       <figure className="wibrawl-hero-visual">
         <img key={campaign} src={`/wibrawl/${campaign}-campaign-960.webp`} srcSet={`/wibrawl/${campaign}-campaign-640.webp 640w, /wibrawl/${campaign}-campaign-960.webp 960w`} sizes="(max-width: 700px) 100vw, 50vw" width="960" height="1200" alt={gaming ? 'Wibrawl campaign concept: original manga artwork on a black graphic tee.' : 'Wibrawl campaign concept: original manga basketball artwork on a light graphic tee.'} fetchPriority="high" decoding="async" />
       </figure>
-    </section>
+    </section>}
     <div className="wibrawl-culture-strip" aria-label="Made for your interests">
       {['Gaming', 'Anime', 'Sports', 'Movies', 'Music', 'Memes'].map(interest => <span key={interest}>{interest}</span>)}
     </div>

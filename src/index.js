@@ -14,10 +14,11 @@ import { attachCancellationRefunds, cancellationRefundView } from "./cancellatio
 import { purchasedReturnLines, supportLineReferences } from './support-return-access.js';
 import { storefrontCss, storefrontStyleHash, storefrontScriptHashes, storefrontStyleFiles, storefrontDeferredStyleFile, storefrontRoutePreloads, storefrontRouteCriticalStyles } from './storefront-styles.js';
 import { inlineProductImage } from './product-image-bootstrap.js';
-import { WIBRAWL_HOSTNAME, WIBRAWL_ORIGIN, storefrontForUrl } from './storefront-identity.js';
+import { WIBRAWL_HOSTNAME, WIBRAWL_ORIGIN, STOREFRONT_ORIGINS, storefrontForUrl } from './storefront-identity.js';
 
 const SESSION_COOKIE = "mm_session";
 const HOST_SESSION_COOKIE = "__Host-mm_session";
+const SHARED_SESSION_COOKIE = "__Secure-mm_shared_session";
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60;
 const DAILY_UPLOAD_LIMIT = 50 * 1024 * 1024;
 const GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
@@ -242,6 +243,9 @@ export default {
         const response = cacheTtl
           ? await cachedPublicResponse(request, ctx, cacheTtl, () => routeApi(request, requestEnv, url, ctx))
           : await routeApi(request, requestEnv, url, ctx);
+        if (response.ok && !["GET", "HEAD", "OPTIONS"].includes(request.method) && /^\/api\/(admin|employee)\/hero(?:\/|$)/.test(url.pathname)) {
+          await invalidateHeroCache(request, adminHeroStorefront(request));
+        }
         if (response.ok && !["GET", "HEAD", "OPTIONS"].includes(request.method) && /\/(products|orders|returns|payments)(\/|$)/.test(url.pathname)) {
           scheduleMerchantSync(env, ctx, { path: canonicalProductPath, price: currentSellingPrice });
         }
@@ -1065,6 +1069,24 @@ async function invalidateStorefrontCache(request) {
   catch (error) { console.error("Storefront cache invalidation failed", error); }
 }
 
+async function invalidateHeroCache(request, storefront) {
+  const cache = globalThis.caches?.default;
+  if (!cache) return;
+  const requestUrl = new URL(request.url);
+  const origins = STOREFRONT_ORIGINS.includes(requestUrl.origin)
+    ? storefront === "wibrawl" ? [WIBRAWL_ORIGIN] : STOREFRONT_ORIGINS.slice(0, 2)
+    : [requestUrl.origin];
+  try {
+    await Promise.all(origins.flatMap(origin => [null, 'interactive', 'crawler'].map(mode => {
+      const url = new URL(mode ? '/' : '/api/hero?cache=1', origin);
+      if (['localhost', '127.0.0.1'].includes(url.hostname) && storefront === 'wibrawl') url.searchParams.set('wibrawl-preview', '1');
+      url.searchParams.set('__glamia_cache', PUBLIC_CACHE_VERSION);
+      if (mode) url.searchParams.set('__glamia_render', mode);
+      return cache.delete(new Request(url, {method:'GET'}));
+    })));
+  } catch (error) { console.error('Hero cache invalidation failed', error); }
+}
+
 async function routeApi(request, env, url, ctx) {
   const path = url.pathname;
   // Native Expo clients do not have a browser Origin/Referer. Their explicit
@@ -1416,12 +1438,12 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "GET" && path === "/api/employee/hero") {
     const employeeSession = await requireEmployee(request, env);
     requireEmployeePermission(employeeSession, "hero");
-    return listHeroSlides(env, true);
+    return listHeroSlides(env, true, adminHeroStorefront(request));
   }
   if (request.method === "GET" && path === "/api/employee/hero/insights") {
     const employeeSession = await requireEmployee(request, env);
     requireEmployeePermission(employeeSession, "hero");
-    return heroInsights(env);
+    return heroInsights(env, adminHeroStorefront(request));
   }
   if (request.method === "POST" && path === "/api/employee/hero") {
     const employeeSession = await requireEmployee(request, env);
@@ -1437,7 +1459,7 @@ async function routeApi(request, env, url, ctx) {
   if (employeeHero && request.method === "DELETE") {
     const employeeSession = await requireEmployee(request, env);
     requireEmployeePermission(employeeSession, "hero");
-    return deleteHeroSlide(env, decodeURIComponent(employeeHero[1]));
+    return deleteHeroSlide(env, decodeURIComponent(employeeHero[1]), adminHeroStorefront(request));
   }
   if (request.method === "GET" && path === "/api/employee/orders") {
     const employeeSession = await requireEmployee(request, env);
@@ -1497,11 +1519,17 @@ async function routeApi(request, env, url, ctx) {
     });
   }
 
+  if (request.method === "GET" && path === "/api/session/storefront-bridge") {
+    return bridgeStorefrontSession(request, user);
+  }
+
   if (request.method === "GET" && path === "/api/session") {
     const profileStatus = user && user.role !== "admin"
       ? await getProfileCompletionStatus(env, user)
       : { profile_complete: true, needs_profile_completion: false };
-    return json({ user, ...profileStatus });
+    const response = json({ user, ...profileStatus });
+    promoteStorefrontSession(request, user, response);
+    return response;
   }
 
   if (request.method === "POST" && path === "/api/auth/signup") {
@@ -1552,6 +1580,7 @@ async function routeApi(request, env, url, ctx) {
     const response = json({ user: null });
     response.headers.append("Set-Cookie", clearSessionCookie(request, HOST_SESSION_COOKIE));
     response.headers.append("Set-Cookie", clearSessionCookie(request, SESSION_COOKIE));
+    if (sharedSessionHost(request)) response.headers.append("Set-Cookie", clearSessionCookie(request, SHARED_SESSION_COOKIE));
     return response;
   }
 
@@ -1625,7 +1654,7 @@ async function routeApi(request, env, url, ctx) {
   }
 
   if (request.method === "GET" && path === "/api/hero") {
-    return listHeroSlides(env, false);
+    return listHeroSlides(env, false, storefrontForRequest(request.url));
   }
 
   if (request.method === "GET" && path === "/api/storefront-settings") {
@@ -2093,12 +2122,12 @@ async function routeApi(request, env, url, ctx) {
 
   if (request.method === "GET" && path === "/api/admin/hero") {
     requireAdmin(user);
-    return listHeroSlides(env, true);
+    return listHeroSlides(env, true, adminHeroStorefront(request));
   }
 
   if (request.method === "GET" && path === "/api/admin/hero/insights") {
     requireAdmin(user);
-    return heroInsights(env);
+    return heroInsights(env, adminHeroStorefront(request));
   }
 
   if (request.method === "GET" && path === "/api/admin/storefront-settings") {
@@ -2153,7 +2182,7 @@ async function routeApi(request, env, url, ctx) {
   }
   if (adminHero && request.method === "DELETE") {
     requireAdmin(user);
-    return deleteHeroSlide(env, decodeURIComponent(adminHero[1]));
+    return deleteHeroSlide(env, decodeURIComponent(adminHero[1]), adminHeroStorefront(request));
   }
 
   if (request.method === "GET" && path === "/api/admin/coupons") {
@@ -3125,6 +3154,7 @@ function formatHeroSlide(row, productsById) {
     }));
   return {
     id: row.id,
+    storefront: row.storefront || "glamia",
     variant: "editorial",
     eyebrow: row.eyebrow,
     title: row.title,
@@ -3141,17 +3171,24 @@ function formatHeroSlide(row, productsById) {
   };
 }
 
-async function listHeroSlides(env, admin = false) {
+function adminHeroStorefront(request) {
+  const url = new URL(request.url);
+  const storefront = url.searchParams.get("storefront") || storefrontForRequest(url);
+  if (!["glamia", "wibrawl"].includes(storefront)) throw httpError("Unknown storefront", 400);
+  return storefront;
+}
+
+async function listHeroSlides(env, admin = false, storefront = "glamia") {
   const slideQuery = admin
-    ? "SELECT * FROM hero_slides ORDER BY position ASC, created_at ASC"
-    : "SELECT * FROM hero_slides WHERE active = 1 ORDER BY position ASC, created_at ASC";
-  const { results: rows } = await env.DB.prepare(slideQuery).all();
+    ? "SELECT * FROM hero_slides WHERE storefront = ? ORDER BY position ASC, created_at ASC"
+    : "SELECT * FROM hero_slides WHERE storefront = ? AND active = 1 ORDER BY position ASC, created_at ASC";
+  const { results: rows } = await env.DB.prepare(slideQuery).bind(storefront).all();
   // Hero frames need only their linked products, not the entire catalog and review aggregates.
   const ids = [...new Set(rows.flatMap(row => heroArray(row.product_ids_json).slice(0, 3)).filter(id => typeof id === "string" && id.trim()))];
   const productsById = new Map();
   for (let offset = 0; offset < ids.length; offset += 80) {
     const batch = ids.slice(offset, offset + 80);
-    const { results } = await env.DB.prepare(`SELECT id, name, image_url, thumbnail_url, color FROM products WHERE status = 'live' AND id IN (${batch.map(() => "?").join(",")})`).bind(...batch).all();
+    const { results } = await env.DB.prepare(`SELECT id, name, image_url, thumbnail_url, color FROM products WHERE status = 'live' AND id IN (${batch.map(() => "?").join(",")}) AND storefront_visibility IN (?, 'both')`).bind(...batch, storefront).all();
     for (const product of results) productsById.set(product.id, { ...product, image: admin ? product.image_url : product.thumbnail_url || product.image_url });
   }
   const slides = rows.map(row => formatHeroSlide(row, productsById));
@@ -3196,7 +3233,7 @@ function heroProductIds(body) {
   return [...new Set(body.product_ids.map(id => String(id || "").trim()).filter(Boolean))].slice(0, 3);
 }
 
-async function validateHeroPayload(body, env) {
+async function validateHeroPayload(body, env, storefront = "glamia") {
   const title = heroText(body.title, "", 100);
   const tagline = heroText(body.tagline, "", 240);
   if (title.length < 2 || title.length > 100) throw httpError("Hero headline must be 2–100 characters", 400);
@@ -3205,17 +3242,17 @@ async function validateHeroPayload(body, env) {
   if (!productIds.length) throw httpError("Select at least one live product for the hero slide", 400);
   if (productIds.length > 3) throw httpError("A hero slide can show at most 3 products", 400);
   const placeholders = productIds.map(() => "?").join(",");
-  const { results } = await env.DB.prepare(`SELECT id FROM products WHERE id IN (${placeholders}) AND status = 'live'`)
-    .bind(...productIds).all();
+  const { results } = await env.DB.prepare(`SELECT id FROM products WHERE id IN (${placeholders}) AND status = 'live' AND storefront_visibility IN (?, 'both')`)
+    .bind(...productIds, storefront).all();
   const liveIds = new Set(results.map(row => row.id));
   const missing = productIds.find(id => !liveIds.has(id));
-  if (missing) throw httpError("Hero slides can only use live products", 400);
+  if (missing) throw httpError("Hero slides can only use live products available on this storefront", 400);
   const words = Array.isArray(body.words)
     ? [...new Set(body.words.map(word => String(word || "").trim().toUpperCase()).filter(Boolean))].slice(0, 5)
     : [];
   return {
     variant: "editorial",
-    eyebrow: heroText(body.eyebrow, "The Glamia Edit", 60),
+    eyebrow: heroText(body.eyebrow, storefront === "wibrawl" ? "The Wibrawl Edit" : "The Glamia Edit", 60),
     title,
     tagline,
     ctaLabel: heroText(body.cta_label, "Shop now", 40),
@@ -3229,24 +3266,26 @@ async function validateHeroPayload(body, env) {
 
 async function createHeroSlide(request, env) {
   const body = await readJson(request);
-  const next = await validateHeroPayload(body, env);
-  const last = await env.DB.prepare("SELECT COALESCE(MAX(position), -1) AS position FROM hero_slides").first();
+  const storefront = adminHeroStorefront(request);
+  const next = await validateHeroPayload(body, env, storefront);
+  const last = await env.DB.prepare("SELECT COALESCE(MAX(position), -1) AS position FROM hero_slides WHERE storefront = ?").bind(storefront).first();
   const id = crypto.randomUUID();
-  const position = next.position ?? Number(last?.position || -1) + 1;
+  const position = next.position ?? Number(last?.position ?? -1) + 1;
   await env.DB.prepare(`
     INSERT INTO hero_slides (
       id, variant, eyebrow, title, tagline, cta_label, cta_category, product_ids_json,
-      words_json, position, active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      words_json, position, active, storefront
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id, next.variant, next.eyebrow, next.title, next.tagline, next.ctaLabel, next.ctaCategory,
-    JSON.stringify(next.productIds), JSON.stringify(next.words), position, next.active ? 1 : 0
+    JSON.stringify(next.productIds), JSON.stringify(next.words), position, next.active ? 1 : 0, storefront
   ).run();
   return json({ ok: true, id }, 201);
 }
 
 async function updateHeroSlide(request, env, id) {
-  const current = await env.DB.prepare("SELECT * FROM hero_slides WHERE id = ?").bind(id).first();
+  const storefront = adminHeroStorefront(request);
+  const current = await env.DB.prepare("SELECT * FROM hero_slides WHERE id = ? AND storefront = ?").bind(id, storefront).first();
   if (!current) return json({ error: "Hero slide not found" }, 404);
   const body = await readJson(request);
   const merged = {
@@ -3261,7 +3300,7 @@ async function updateHeroSlide(request, env, id) {
     active: body.active === undefined ? Boolean(current.active) : body.active,
     position: body.position === undefined ? Number(current.position) : body.position
   };
-  const next = await validateHeroPayload(merged, env);
+  const next = await validateHeroPayload(merged, env, storefront);
   await env.DB.prepare(`
     UPDATE hero_slides SET variant = ?, eyebrow = ?, title = ?, tagline = ?, cta_label = ?,
       cta_category = ?, product_ids_json = ?, words_json = ?, position = ?,
@@ -3274,13 +3313,13 @@ async function updateHeroSlide(request, env, id) {
   return json({ ok: true, id });
 }
 
-async function deleteHeroSlide(env, id) {
-  const result = await env.DB.prepare("DELETE FROM hero_slides WHERE id = ?").bind(id).run();
+async function deleteHeroSlide(env, id, storefront = "glamia") {
+  const result = await env.DB.prepare("DELETE FROM hero_slides WHERE id = ? AND storefront = ?").bind(id, storefront).run();
   if (!result.meta.changes) return json({ error: "Hero slide not found" }, 404);
   return json({ ok: true });
 }
 
-async function heroInsights(env) {
+async function heroInsights(env, storefront = "glamia") {
   const [productRows, salesRows, cartRows, wishRows] = await Promise.all([
     allProductRows(env),
     env.DB.prepare(`
@@ -3304,7 +3343,7 @@ async function heroInsights(env) {
     env.DB.prepare("SELECT product_id, quantity FROM cart_adds").all(),
     env.DB.prepare("SELECT product_id FROM wishlist_adds").all()
   ]);
-  const products = productRows.map(formatProduct);
+  const products = productRows.filter(row => [storefront, "both"].includes(row.storefront_visibility || "glamia")).map(formatProduct);
   const metrics = {};
   const ensure = id => (metrics[id] ||= { units: 0, revenue: 0, orders: 0, cancelled: 0, cart_adds: 0, wishlists: 0 });
   for (const row of salesRows.results) {
@@ -11188,7 +11227,7 @@ function formatProductCard(row) {
 
 async function currentUser(request, env) {
   const cookies = parseCookies(request.headers.get("Cookie") || "");
-  const session = mobileBearerToken(request) || cookies[HOST_SESSION_COOKIE] || cookies[SESSION_COOKIE];
+  const session = mobileBearerToken(request) || (sharedSessionHost(request) && cookies[SHARED_SESSION_COOKIE]) || cookies[HOST_SESSION_COOKIE] || cookies[SESSION_COOKIE];
   if (!session) return null;
   try {
     return await resolveWebsiteWorkspaceIdentity(await verifySession(session, env, request), env, request);
@@ -11478,10 +11517,10 @@ function withSecurityHeaders(response) {
   // Native clients use bearer sessions rather than browser cookies. The
   // wildcard is safe here because the app never sends credentials as cookies;
   // it also keeps the Expo web preview able to call the same API.
-  headers.set("Access-Control-Allow-Origin", "*");
+  if (!headers.has("Access-Control-Allow-Origin")) headers.set("Access-Control-Allow-Origin", "*");
   headers.set("Access-Control-Allow-Headers", "Accept, Content-Type, Authorization, X-Glamia-Mobile, X-Requested-With");
   headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
-  headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'sha256-QDL1JU0g6O+naM0GHg1SrXz5jfV62Pk3CmUPnu1n1kY=' 'sha256-On1TqejLHzYPtlgCG4EQtHKn2f1u8Plk+C210XpYbec=' https://accounts.google.com https://www.googletagmanager.com https://checkout.razorpay.com https://static.cloudflareinsights.com; style-src 'self' 'sha256-RU4sU0AaS8IBGZx8XrGt/pa9A5SLA3dQszGeqT5L3Kw=' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://api.razorpay.com https://cloudflareinsights.com; frame-src https://accounts.google.com https://api.razorpay.com https://*.razorpay.com; form-action 'self'");
+  headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'sha256-QDL1JU0g6O+naM0GHg1SrXz5jfV62Pk3CmUPnu1n1kY=' 'sha256-On1TqejLHzYPtlgCG4EQtHKn2f1u8Plk+C210XpYbec=' https://accounts.google.com https://www.googletagmanager.com https://checkout.razorpay.com https://static.cloudflareinsights.com; style-src 'self' 'sha256-RU4sU0AaS8IBGZx8XrGt/pa9A5SLA3dQszGeqT5L3Kw=' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://glamiastore.com https://www.glamiastore.com https://wibrawl.glamiastore.com https://accounts.google.com https://www.googleapis.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://api.razorpay.com https://cloudflareinsights.com; frame-src https://accounts.google.com https://api.razorpay.com https://*.razorpay.com; form-action 'self'");
   headers.set("Content-Security-Policy", headers.get("Content-Security-Policy").replace("style-src 'self'", `style-src 'self' 'sha256-${storefrontStyleHash}'`));
   for (const hash of storefrontScriptHashes) headers.set('Content-Security-Policy', headers.get('Content-Security-Policy').replace("script-src 'self'", `script-src 'self' 'sha256-${hash}'`));
   headers.set('Content-Security-Policy', headers.get('Content-Security-Policy').replace("style-src 'self'", "style-src 'self' https://accounts.google.com/gsi/style"));
@@ -11495,18 +11534,47 @@ function withSecurityHeaders(response) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+// Only the three owned HTTPS storefronts share a browser session. Workers.dev,
+// previews and native bearer clients retain their existing isolated behavior.
+function sharedSessionHost(request) {
+  return STOREFRONT_ORIGINS.includes(new URL(request.url).origin);
+}
+
+function promoteStorefrontSession(request, user, response) {
+  if (!user || !sharedSessionHost(request) || mobileBearerToken(request)) return;
+  const cookies = parseCookies(request.headers.get("Cookie") || "");
+  if (cookies[SHARED_SESSION_COOKIE]) return;
+  const token = cookies[HOST_SESSION_COOKIE] || cookies[SESSION_COOKIE];
+  if (token) response.headers.append("Set-Cookie", makeSessionCookie(request, token, Math.max(0, user.exp - Math.floor(Date.now() / 1000))));
+}
+
+function bridgeStorefrontSession(request, user) {
+  const origin = request.headers.get("Origin");
+  if (!sharedSessionHost(request) || !STOREFRONT_ORIGINS.includes(origin)) {
+    return json({ error: "Storefront origin is not allowed" }, 403);
+  }
+  const response = json({ shared: Boolean(user) }, 200, {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Credentials": "true",
+    "Vary": "Origin",
+    "Cache-Control": "no-store"
+  });
+  promoteStorefrontSession(request, user, response);
+  return response;
+}
+
 function sessionCookieName(request) {
-  return new URL(request.url).protocol === "https:" ? HOST_SESSION_COOKIE : SESSION_COOKIE;
+  return sharedSessionHost(request) ? SHARED_SESSION_COOKIE : new URL(request.url).protocol === "https:" ? HOST_SESSION_COOKIE : SESSION_COOKIE;
 }
 
 function makeSessionCookie(request, token, maxAge = SESSION_MAX_AGE) {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return `${sessionCookieName(request)}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secure}`;
+  return `${sessionCookieName(request)}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secure}${sharedSessionHost(request) ? "; Domain=glamiastore.com" : ""}`;
 }
 
 function clearSessionCookie(request, name) {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`;
+  return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}${name === SHARED_SESSION_COOKIE && sharedSessionHost(request) ? "; Domain=glamiastore.com" : ""}`;
 }
 
 async function hashIdentifier(value) {

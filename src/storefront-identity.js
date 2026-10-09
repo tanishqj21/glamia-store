@@ -1,6 +1,9 @@
 // One source of truth for the storefront's public hostname and collection names.
 export const WIBRAWL_HOSTNAME = 'wibrawl.glamiastore.com';
 export const WIBRAWL_ORIGIN = `https://${WIBRAWL_HOSTNAME}`;
+export const STOREFRONT_ORIGINS = Object.freeze([
+  'https://glamiastore.com', 'https://www.glamiastore.com', WIBRAWL_ORIGIN
+]);
 
 export function isWibrawlUrl(input) {
   const url = input instanceof URL ? input : new URL(input);

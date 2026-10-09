@@ -299,12 +299,12 @@ test("hero loads only linked live products and never scans the entire catalog", 
   const queries = [], bindings = [];
   const env = { DB: { prepare: sql => {
     queries.push(sql);
-    return { all: async () => ({ results: [{ id: "slide", product_ids_json: '["p1", "p2"]', active: 1 }] }), bind: (...ids) => { bindings.push(...ids); return { all: async () => ({ results: [{ id: "p1", name: "Dress", image_url: "/image.png", color: "Blue" }] }) }; } };
+    return { bind: (...ids) => { bindings.push(...ids); return { all: async () => ({ results: sql.includes('FROM hero_slides') ? [{ id: "slide", product_ids_json: '["p1", "p2"]', active: 1 }] : [{ id: "p1", name: "Dress", image_url: "/image.png", color: "Blue" }] }) }; } };
   } } };
   const data = await (await worker.listHeroSlides(env)).json();
   assert.equal(queries.length, 2);
   assert.match(queries[1], /status = 'live' AND id IN/);
-  assert.deepEqual(bindings, ["p1", "p2"]);
+  assert.deepEqual(bindings, ["glamia", "p1", "p2", "glamia"]);
   assert.equal(data.slides[0].frames[0].image, "/image.png");
 });
 

@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { Icon } from "./Icon";
 import { PhoneField } from "./PhoneField";
 import { CinematicReel } from "./CinematicReel";
+import { WibrawlCarousel } from "./WibrawlHome";
+import { storefrontForUrl } from '../../../src/storefront-identity.js';
 
 const INSIGHT_LABELS = {
   best_selling: "Best selling",
@@ -51,14 +53,20 @@ function InsightCard({ label, products, onUse }) {
   </section>;
 }
 
-function emptyHeroForm() {
-  return { variant: "editorial", eyebrow: "The Glamia Edit", title: "", tagline: "", cta_label: "Shop the edit", cta_category: "", words: "", active: true, position: "" };
+function emptyHeroForm(storefront = "glamia") {
+  return { variant: "editorial", eyebrow: storefront === "wibrawl" ? "The Wibrawl Edit" : "The Glamia Edit", title: "", tagline: "", cta_label: "Shop the edit", cta_category: "", words: "", active: true, position: "" };
 }
 
 export function HeroStudioView({ products, categories }) {
+  const [storefront, setStorefront] = useState(() => storefrontForUrl(window.location.href));
+  const [previewTheme, setPreviewTheme] = useState("gaming");
+  const loadGeneration = useRef(0);
+  const heroEndpoint = `/api/admin/hero?storefront=${storefront}`;
+  const slideEndpoint = id => `/api/admin/hero/${encodeURIComponent(id)}?storefront=${storefront}`;
+  const brand = storefront === "wibrawl" ? "Wibrawl" : "Glamia";
   const [slides, setSlides] = useState([]);
   const [insights, setInsights] = useState({ recommendations: {}, return_note: "" });
-  const [form, setForm] = useState(emptyHeroForm);
+  const [form, setForm] = useState(() => emptyHeroForm(storefront));
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [editingId, setEditingId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -67,20 +75,22 @@ export function HeroStudioView({ products, categories }) {
   const [previewIndex, setPreviewIndex] = useState(0);
   const [previewPaused, setPreviewPaused] = useState(false);
 
-  const liveProducts = useMemo(() => products.filter((product) => product.status === "live"), [products]);
+  const liveProducts = useMemo(() => products.filter((product) => product.status === "live" && [storefront, "both"].includes(product.storefront_visibility || "glamia")), [products, storefront]);
   const liveProductIds = new Set(liveProducts.map((product) => product.id));
 
   async function load() {
+    const generation = ++loadGeneration.current;
     setError("");
     try {
-      const [slidesResponse, insightsResponse] = await Promise.all([apiFetch("/api/admin/hero"), apiFetch("/api/admin/hero/insights")]);
+      const [slidesResponse, insightsResponse] = await Promise.all([apiFetch(heroEndpoint), apiFetch(`/api/admin/hero/insights?storefront=${storefront}`)]);
       const [slideData, insightData] = await Promise.all([readResponse(slidesResponse, "Hero slides could not be loaded"), readResponse(insightsResponse, "Hero insights could not be loaded")]);
+      if (generation !== loadGeneration.current) return;
       setSlides(slideData.slides || []);
       setInsights(insightData);
-    } catch (requestError) { setError(requestError.message); }
+    } catch (requestError) { if (generation === loadGeneration.current) setError(requestError.message); }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); return () => { loadGeneration.current++; }; }, [storefront]);
   useEffect(() => { if (previewIndex >= slides.length && slides.length) setPreviewIndex(0); }, [previewIndex, slides.length]);
   useEffect(() => { if (previewPaused || slides.length < 2) return undefined; const timer = window.setInterval(() => setPreviewIndex((index) => (index + 1) % slides.length), 6000); return () => window.clearInterval(timer); }, [previewPaused, slides.length]);
 
@@ -118,7 +128,7 @@ export function HeroStudioView({ products, categories }) {
   }
 
   function resetForm() {
-    setEditingId(""); setForm(emptyHeroForm()); setSelectedProducts([]); setStatus("");
+    setEditingId(""); setForm(emptyHeroForm(storefront)); setSelectedProducts([]); setStatus("");
   }
 
   async function submit(event) {
@@ -126,7 +136,7 @@ export function HeroStudioView({ products, categories }) {
     try {
       if (!selectedProducts.length) throw new Error("Select at least one live product frame.");
       const payload = { ...form, variant: "editorial", words: form.words.split(",").map((word) => word.trim()).filter(Boolean), product_ids: selectedProducts, position: form.position === "" ? null : Number(form.position) };
-      const response = await apiFetch(editingId ? `/api/admin/hero/${encodeURIComponent(editingId)}` : "/api/admin/hero", { method: editingId ? "PATCH" : "POST", body: JSON.stringify(payload) });
+      const response = await apiFetch(editingId ? slideEndpoint(editingId) : heroEndpoint, { method: editingId ? "PATCH" : "POST", body: JSON.stringify(payload) });
       await readResponse(response, "Hero slide could not be saved");
       const message = editingId ? "Hero slide updated." : "Hero slide published.";
       resetForm(); setStatus(message); await load();
@@ -136,21 +146,28 @@ export function HeroStudioView({ products, categories }) {
   async function deleteSlide(slide) {
     if (!window.confirm(`Delete “${slide.title}”?`)) return;
     setBusy(true); setError("");
-    try { const response = await apiFetch(`/api/admin/hero/${encodeURIComponent(slide.id)}`, { method: "DELETE" }); await readResponse(response, "Hero slide could not be deleted"); if (editingId === slide.id) resetForm(); setStatus("Hero slide deleted."); await load(); } catch (requestError) { setError(requestError.message); } finally { setBusy(false); }
+    try { const response = await apiFetch(slideEndpoint(slide.id), { method: "DELETE" }); await readResponse(response, "Hero slide could not be deleted"); if (editingId === slide.id) resetForm(); setStatus("Hero slide deleted."); await load(); } catch (requestError) { setError(requestError.message); } finally { setBusy(false); }
   }
 
   return <><section className="admin-panel admin-wide-panel merch-workspace">
-    <div className="admin-panel-heading"><div><p className="eyebrow">Merchandising</p><h2>Hero Studio</h2><p className="muted">Build the exact carousel shown on the home page using live catalog frames and store signals.</p></div><span>{slides.length} slides</span></div>
+    <div className="admin-panel-heading"><div><p className="eyebrow">Merchandising</p><h2>Hero Studio</h2><p className="muted">Build the {brand} home carousel using live products assigned to this storefront.</p><label className="wibrawl-admin-visibility">Storefront<select aria-label="Hero storefront" value={storefront} disabled={busy} onChange={event => { const next = event.target.value; loadGeneration.current++; setStorefront(next); setSlides([]); setInsights({ recommendations: {} }); setEditingId(""); setForm(emptyHeroForm(next)); setSelectedProducts([]); setPreviewIndex(0); setStatus(""); setError(""); }}><option value="glamia">Glamia</option><option value="wibrawl">Wibrawl</option></select></label></div><span>{slides.length} slides</span></div>
     
+
     <div className="merch-preview-dock">
       <div className="merch-preview-heading"><div><p className="eyebrow">Live preview</p><strong>Updates as you edit</strong></div><span>Desktop composition</span></div>
-      <section className={`merch-hero-preview merch-hero-preview-${previewVariant}`} aria-label="Hero Studio live preview">
+      {storefront === "wibrawl" ? <>
+        <label className="wibrawl-admin-visibility">Preview theme<select aria-label="Wibrawl preview theme" value={previewTheme} onChange={event => setPreviewTheme(event.target.value)}><option value="gaming">Gaming</option><option value="sports">Sports</option></select></label>
+        <div className={`wibrawl-admin-preview wibrawl-home-${previewTheme}`} data-preview-theme={previewTheme}>
+          {previewProducts.length ? <WibrawlCarousel slides={[{ id: editingId || previewSlide?.id || "preview", eyebrow: previewEyebrow || "The Wibrawl Edit", title: previewTitle || "Wear your world.", tagline: previewTagline || "Tees for everything you're into.", cta_label: (previewUsesForm ? form.cta_label : previewSlide?.cta_label) || "Shop the edit", cta_category: (previewUsesForm ? form.cta_category : previewSlide?.cta_category) || "", words: previewWords, frames: previewProducts.map(product => ({id:product.id,name:product.name,image:imageFor(product)})) }]} onNavigate={() => {}} /> : <p className="wibrawl-preview-empty">Select 1–3 live Wibrawl products to preview your slide.</p>}
+        </div>
+        {slides.length > 0 && <div className="wibrawl-carousel-controls" role="group" aria-label="Preview a saved Wibrawl slide">{slides.map((item, position) => <button type="button" key={item.id} onClick={() => { resetForm(); setPreviewIndex(position); }} aria-current={position === previewIndex ? "true" : undefined}>Slide {position + 1}</button>)}</div>}
+      </> : <section className={`merch-hero-preview merch-hero-preview-${previewVariant}`} aria-label="Hero Studio live preview">
       <div className="merch-preview-copy"><p className="eyebrow">{previewEyebrow || "The Glamia Edit"}</p><h3>{previewTitle || "Everyday pieces, beautifully composed."}</h3><p>{previewTagline || "Build a considered edit from the products already live in your store."}</p>{previewWords.length > 0 && <div className="merch-preview-words">{previewWords.map((word) => <span key={word}>{word}</span>)}</div>}</div>
        <div className={`merch-preview-stage merch-preview-frame-count-${previewProducts.length}`}>{previewProducts.length ? previewProducts.map((product, productIndex) => imageFor(product) ? <div className={`merch-preview-frame merch-preview-frame-${productIndex}`} key={product.id || productIndex}><img src={imageFor(product)} alt={product.name || "Selected hero product"} /></div> : null) : <div className="merch-preview-placeholder"><span>Select 1–3 live product frames below</span></div>}</div>
-      <button type="button" className="merch-preview-arrow merch-preview-prev" aria-label="Previous hero slide" onClick={() => { setPreviewPaused(true); setPreviewIndex((index) => slides.length ? (index - 1 + slides.length) % slides.length : 0); }}><Icon name="chevronLeft" /></button><button type="button" className="merch-preview-arrow merch-preview-next" aria-label="Next hero slide" onClick={() => { setPreviewPaused(true); setPreviewIndex((index) => slides.length ? (index + 1) % slides.length : 0); }}><Icon name="chevronRight" /></button>
+      <button type="button" className="merch-preview-arrow merch-preview-prev" aria-label="Previous hero slide" onClick={() => { setPreviewPaused(true); setPreviewIndex((index) => slides.length ? (index - 1 + slides.length) % slides.length : 0); }}>{storefront === "wibrawl" ? "Prev" : <Icon name="chevronLeft" />}</button><button type="button" className="merch-preview-arrow merch-preview-next" aria-label="Next hero slide" onClick={() => { setPreviewPaused(true); setPreviewIndex((index) => slides.length ? (index + 1) % slides.length : 0); }}>{storefront === "wibrawl" ? "Next" : <Icon name="chevronRight" />}</button>
       {slides.length > 0 && <div className="merch-preview-progress" role="group" aria-label={`Hero preview slide ${previewIndex + 1} of ${slides.length}`}>{slides.map((slideItem, itemIndex) => <button type="button" key={slideItem.id || itemIndex} className={itemIndex === previewIndex ? "active" : ""} onClick={() => { setPreviewPaused(true); setPreviewIndex(itemIndex); }} aria-label={`Show hero preview slide ${itemIndex + 1}`} />)}</div>}
       <button type="button" className="merch-preview-pause" onClick={() => setPreviewPaused((paused) => !paused)}>{previewPaused ? "Play preview" : "Pause preview"}</button>
-      </section>
+      </section>}
     </div>
     <div className="merch-studio-grid">
       <form id="hero-slide-form" className="merch-form" onSubmit={submit}>
@@ -162,8 +179,8 @@ export function HeroStudioView({ products, categories }) {
       </form>
       <aside className="merch-insights"><div className="merch-section-heading"><div><p className="eyebrow">Merchandising signals</p><h3>What should lead?</h3></div></div><p className="muted">{insights.return_note || "Rankings use current store activity and sales data."}</p>{Object.entries(INSIGHT_LABELS).map(([key, label]) => <InsightCard key={key} label={label} products={insights.recommendations?.[key] || []} onUse={() => applyInsight(key)} />)}</aside>
     </div>
-    <div className="merch-published"><div className="merch-section-heading"><div><p className="eyebrow">Published order</p><h3>Home carousel slides</h3></div><span>Drag-free ordering via position</span></div>{slides.length ? <div className="merch-slide-list">{slides.map((slide, index) => <article className={`merch-slide-row ${slide.active ? "" : "is-draft"} ${previewIndex === index ? "is-previewing" : ""}`} key={slide.id} onClick={() => setPreviewIndex(index)}><div className="merch-slide-frames">{(slide.frames || []).map((frame) => imageFor(frame) ? <img key={frame.id} src={imageFor(frame)} alt={frame.name || slide.title} loading="lazy" /> : null)}</div><div className="merch-slide-copy"><strong>{slide.title}</strong><span>{slide.tagline}</span><small>Editorial · {slide.active ? "Published" : "Draft"} · position {slide.position} · {(slide.frames || []).length} frame{(slide.frames || []).length === 1 ? "" : "s"}</small></div><div className="merch-slide-actions"><button type="button" className="secondary-action" onClick={(event) => { event.stopPropagation(); editSlide(slide); }}>Edit</button><button type="button" className="danger-action" onClick={(event) => { event.stopPropagation(); deleteSlide(slide); }} disabled={busy}>Delete</button></div></article>)}</div> : <div className="empty-state">No hero slides yet. Create the first one above.</div>}</div>
-  </section><CinematicReelStudio products={products} /></>;
+    <div className="merch-published"><div className="merch-section-heading"><div><p className="eyebrow">Published order</p><h3>Home carousel slides</h3></div><span>Drag-free ordering via position</span></div>{slides.length ? <div className="merch-slide-list">{slides.map((slide, index) => <article className={`merch-slide-row ${slide.active ? "" : "is-draft"} ${previewIndex === index ? "is-previewing" : ""}`} key={slide.id} onClick={() => setPreviewIndex(index)}><div className="merch-slide-frames">{(slide.frames || []).map((frame) => imageFor(frame) ? <img key={frame.id} src={imageFor(frame)} alt={frame.name || slide.title} loading="lazy" /> : null)}</div><div className="merch-slide-copy"><strong>{slide.title}</strong><span>{slide.tagline}</span><small>Editorial · {slide.active ? "Published" : "Draft"} · position {slide.position} · {(slide.frames || []).length} frame{(slide.frames || []).length === 1 ? "" : "s"}</small></div><div className="merch-slide-actions"><button type="button" className="secondary-action" onClick={(event) => { event.stopPropagation(); editSlide(slide); }}>Edit</button><button type="button" className="danger-action" onClick={(event) => { event.stopPropagation(); deleteSlide(slide); }} disabled={busy}>Delete</button></div></article>)}</div> : <div className="empty-state">No {brand} hero slides yet. Create the first one above.</div>}</div>
+  </section>{storefront === "glamia" && <CinematicReelStudio products={products} />}</>;
 }
 
 const DEFAULT_CINEMATIC_REEL = {
