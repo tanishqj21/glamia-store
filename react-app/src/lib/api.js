@@ -78,6 +78,11 @@ export function apiFetch(input, init = {}) {
   if (requestInit.body && !isFormData && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
 
   const url = new URL(requestKey(input), window.location.origin);
+  // Local previews use the same storefront scope as the real subdomain.
+  if (["localhost", "127.0.0.1"].includes(url.hostname) && document.documentElement.dataset.brand === "wibrawl" && url.pathname.startsWith("/api/") && typeof input === "string") {
+    url.searchParams.set("wibrawl-preview", "1");
+    input = url.href;
+  }
   // Public catalog requests omit cookies so signed-in shoppers can share edge-cached data.
   const publicRead = method === "GET" && url.origin === window.location.origin
     && (["/api/hero", "/api/categories", "/api/storefront-settings", "/api/search"].includes(url.pathname)

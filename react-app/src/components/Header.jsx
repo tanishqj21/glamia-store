@@ -6,6 +6,7 @@ import { money, sellingPrice, productUrl } from '../lib/commerce';
 import { adminLandingPath } from '../lib/workspaceAccess';
 import { Icon } from './Icon';
 import { CreditsBalance } from './CreditsBalance';
+import { WIBRAWL_ORIGIN, collectionNames } from '../../../src/storefront-identity.js';
 
 function Link({ href, onNavigate, children, className = "", ...props }) {
   return <a {...props} className={className} href={href} onClick={(event) => { props.onClick?.(event); if (!event.defaultPrevented && !event.button && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !props.target && href.startsWith("/")) { event.preventDefault(); onNavigate(href); } }}>{children}</a>;
@@ -58,11 +59,11 @@ function categoryHref(category, subcategory = "", subSubcategory = "") {
   return `/category/${encodeURIComponent(category)}${queryString ? `?${queryString}` : ""}`;
 }
 
-function DrawerCategory({ node, category, onNavigate, closeMenu, depth = 0 }) {
+function DrawerCategory({ node, category, onNavigate, closeMenu, arrowFree = false, depth = 0 }) {
   const hasChildren = depth === 0 || node.children?.length > 0;
   const href = depth === 0 ? categoryHref(category) : depth === 1 ? categoryHref(category, node.name) : categoryHref(category, node.parentSubcategory, node.name);
   if (!hasChildren) return <Link className={`drawer-leaf drawer-leaf-${depth}`} href={href} onNavigate={(nextHref) => { closeMenu(); onNavigate(nextHref); }}>{node.name}</Link>;
-  return <details className={`drawer-category drawer-category-${depth}`}><summary><span>{node.name}</span><Icon name="chevronDown" size={16} /></summary><div className="drawer-category-children"><Link className="drawer-view-all" href={href} onNavigate={(nextHref) => { closeMenu(); onNavigate(nextHref); }}>View all {node.name}</Link>{node.children.map((child) => <DrawerCategory key={child.name} node={{ ...child, parentSubcategory: node.name }} category={category} onNavigate={onNavigate} closeMenu={closeMenu} depth={depth + 1} />)}</div></details>;
+  return <details className={`drawer-category drawer-category-${depth}`}><summary><span>{node.name}</span>{arrowFree ? <span className="drawer-expand" aria-hidden="true">+</span> : <Icon name="chevronDown" size={16} />}</summary><div className="drawer-category-children"><Link className="drawer-view-all" href={href} onNavigate={(nextHref) => { closeMenu(); onNavigate(nextHref); }}>View all {node.name}</Link>{node.children.map((child) => <DrawerCategory key={child.name} node={{ ...child, parentSubcategory: node.name }} category={category} onNavigate={onNavigate} closeMenu={closeMenu} arrowFree={arrowFree} depth={depth + 1} />)}</div></details>;
 }
 
 function Header({ onNavigate, query, setQuery, dark, setDark, wibrawlMode = false, themeMode = "sports", setThemeMode, menuOpen, setMenuOpen, categories, categoryData: providedCategoryData, products = [], wishlistCount, cartCount = 0, user, storefront, onBeforeLogout, onLogout, adminMode = false }) {
@@ -71,6 +72,24 @@ function Header({ onNavigate, query, setQuery, dark, setDark, wibrawlMode = fals
   const [drawerCategoryData, setDrawerCategoryData] = useState(null);
   const searchRef = useRef(null);
   const accountRef = useRef(null);
+  const drawerRef = useRef(null);
+  useEffect(() => {
+    if (!menuOpen || adminMode) return undefined;
+    const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    drawerRef.current?.querySelector('button')?.focus();
+    function keyboard(event) {
+      if (event.key === 'Escape') { event.preventDefault(); setMenuOpen(false); }
+      if (event.key !== 'Tab') return;
+      const controls = [...(drawerRef.current?.querySelectorAll('a,button,summary,input,select,[tabindex="0"]') || [])].filter(element => element.getClientRects().length);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+    document.addEventListener('keydown', keyboard);
+    return () => { document.removeEventListener('keydown', keyboard); document.body.style.overflow = previousOverflow; previousFocus?.focus(); };
+  }, [menuOpen, adminMode, setMenuOpen]);
   useEffect(() => {
     const closeOutside = event => {
       if (accountRef.current?.open && !accountRef.current.contains(event.target)) accountRef.current.open = false;
@@ -155,23 +174,23 @@ function Header({ onNavigate, query, setQuery, dark, setDark, wibrawlMode = fals
   function toggleMenu() {
     setMenuOpen((open) => !open);
   }
+  const names = collectionNames(themeMode);
   const collectionLinks = wibrawlMode
-    ? themeMode === "gaming"
-      ? [["/offers", "Loot Deals"], ["/just-arrived", "Just Spawned"], ["/best-sellers", "Current Meta"]]
-      : [["/offers", "Matchday Deals"], ["/just-arrived", "New Signings"], ["/best-sellers", "League Leaders"]]
+    ? [["/just-arrived", names.arrived], ["/best-sellers", names.best], ["/offers", names.offers]]
     : [["/offers", "Offers"], ["/just-arrived", "Just arrived"], ["/best-sellers", "Best sellers"]];
+  const themeControl = <div className="wibrawl-theme-toggle" role="group" aria-label="Choose a Wibrawl theme"><button type="button" aria-pressed={themeMode === "gaming"} onClick={() => setThemeMode("gaming")}>Gaming</button><button type="button" aria-pressed={themeMode === "sports"} onClick={() => setThemeMode("sports")}>Sports</button></div>;
   return <>
     {!adminMode && <AnnouncementBar announcement={storefront?.announcement} />}
     <header className={`site-header ${adminMode ? "admin-site-header" : ""}`}>
       {!adminMode && <button className="menu-button" aria-label="Open menu" aria-expanded={menuOpen} aria-controls="shop-menu" onClick={toggleMenu}><span /><span /><span /></button>}
-      {!adminMode && <nav className="quick-links" aria-label="Collections">{collectionLinks.map(([href, label]) => <Link key={href} href={href} onNavigate={onNavigate}>{label}</Link>)}{!wibrawlMode && <a className="wibrawl-store-link" href="https://wibrawl.glamia.com">Wibrawl</a>}</nav>}
+      {!adminMode && !wibrawlMode && <nav className="quick-links" aria-label="Collections">{collectionLinks.map(([href, label]) => <Link key={href} href={href} onNavigate={onNavigate}>{label}</Link>)}{!wibrawlMode && <a className="wibrawl-store-link" href={WIBRAWL_ORIGIN}>Wibrawl</a>}</nav>}
       <Link className={`wordmark ${wibrawlMode ? "wibrawl-wordmark" : ""}`} href="/" onNavigate={onNavigate}>{wibrawlMode ? <><span className="wibrawl-mark" aria-hidden="true">WB</span><span>WIBRAWL</span></> : <><img src="/glamia-g-mark-96.webp" alt="G" width="42" height="42" /><span>LAMIA</span></>}<span className="sr-only"> home</span></Link>
       <div className="header-tools">
         {!adminMode && <>
         <div className="search-suggest" ref={searchRef}>
           <form className="search-box" role="search" onSubmit={submitSearch}>
             <label className="sr-only" htmlFor="reactSearch">Search products</label>
-            <input id="reactSearch" value={query} onChange={(event) => { setQuery(event.target.value); setHighlightIndex(-1); setSearchFocused(true); }} onFocus={() => setSearchFocused(true)} onMouseDown={() => setSearchFocused(true)} onKeyDown={onSearchKeyDown} placeholder={wibrawlMode ? "Search tees and fandoms" : "Search the edit"} type="search" autoComplete="off" role="combobox" aria-expanded={searchOpen} aria-controls="search-suggest-list" aria-activedescendant={searchOpen && highlightIndex >= 0 ? `search-suggest-option-${highlightIndex}` : undefined} />
+            <input id="reactSearch" value={query} onChange={(event) => { setQuery(event.target.value); setHighlightIndex(-1); setSearchFocused(true); }} onFocus={() => setSearchFocused(true)} onMouseDown={() => setSearchFocused(true)} onKeyDown={onSearchKeyDown} placeholder={wibrawlMode ? "Find your next favourite tee" : "Search the edit"} type="search" autoComplete="off" role="combobox" aria-expanded={searchOpen} aria-controls="search-suggest-list" aria-activedescendant={searchOpen && highlightIndex >= 0 ? `search-suggest-option-${highlightIndex}` : undefined} />
             <Icon name="search" size={18} />
           </form>
           {searchOpen && <div className="search-suggest-panel" id="search-suggest-list" role="listbox" aria-label="Search suggestions">
@@ -184,13 +203,14 @@ function Header({ onNavigate, query, setQuery, dark, setDark, wibrawlMode = fals
           </div>}
         </div>
         </>}
-{user ? <details name="glamia-account-navigation" className="account-menu" ref={accountRef}><summary aria-label="Open account menu"><span className="account-avatar">{String(user.name || user.email || "A").trim().charAt(0).toUpperCase()}</span><span className="account-menu-name">{String(user.name || "Account").split(" ")[0]}</span>{!wibrawlMode && <span className="account-chevron"><Icon name="chevronDown" size={14} /></span>}</summary><div className="account-menu-panel" role="menu">{user.role === "admin" && <Link role="menuitem" className="account-menu-link" href={adminLandingPath(user)} onNavigate={navigateFromAccount}>Admin console</Link>}<Link role="menuitem" className="account-menu-link" href="/profile" onNavigate={navigateFromAccount}>Profile</Link><Link role="menuitem" className="account-menu-link" href="/address" onNavigate={navigateFromAccount}>Saved addresses</Link><Link role="menuitem" className="account-menu-link" href="/wishlist" onNavigate={navigateFromAccount}>Wishlist <span className="account-menu-count">{wishlistCount || 0}</span></Link><Link role="menuitem" className="account-menu-link" href="/orders" onNavigate={navigateFromAccount}>Your orders</Link><button role="menuitem" className="account-menu-link account-menu-logout" type="button" onClick={logout} disabled={loggingOut}>{loggingOut ? "Logging out…" : "Log out"}</button>{logoutError && <p className="account-menu-error" role="alert">{logoutError}</p>}</div></details> : <Link className="login-link" href="/login" onNavigate={onNavigate}>Log in</Link>}
-        {wibrawlMode ? <div className="wibrawl-theme-toggle" role="group" aria-label="Choose a Wibrawl theme"><button type="button" aria-pressed={themeMode === "gaming"} onClick={() => setThemeMode("gaming")}>Gaming</button><button type="button" aria-pressed={themeMode === "sports"} onClick={() => setThemeMode("sports")}>Sports</button></div> : <button className="tool-button theme-toggle" onClick={() => setDark((value) => !value)} aria-label="Toggle dark mode" title="Toggle dark mode"><Icon name={dark ? "sun" : "moon"} size={18} /></button>}
+{user ? <details name="glamia-account-navigation" className="account-menu" ref={accountRef}><summary aria-label="Open account menu"><span className="account-avatar">{String(user.name || user.email || "A").trim().charAt(0).toUpperCase()}</span><span className="account-menu-name">{String(user.name || "Account").split(" ")[0]}</span>{!wibrawlMode && <span className="account-chevron"><Icon name="chevronDown" size={14} /></span>}</summary><div className="account-menu-panel" role="menu">{user.role === "admin" && <Link role="menuitem" className="account-menu-link" href={adminLandingPath(user)} onNavigate={navigateFromAccount}>Admin console</Link>}<Link role="menuitem" className="account-menu-link" href="/profile" onNavigate={navigateFromAccount}>Profile</Link><Link role="menuitem" className="account-menu-link" href="/address" onNavigate={navigateFromAccount}>Saved addresses</Link><Link role="menuitem" className="account-menu-link" href="/wishlist" onNavigate={navigateFromAccount}>Wishlist <span className="account-menu-count">{wishlistCount || 0}</span></Link><Link role="menuitem" className="account-menu-link" href="/orders" onNavigate={navigateFromAccount}>Your orders</Link><button role="menuitem" className="account-menu-link account-menu-logout" type="button" onClick={logout} disabled={loggingOut}>{loggingOut ? "Logging out…" : "Log out"}</button>{logoutError && <p className="account-menu-error" role="alert">{logoutError}</p>}</div></details> : wibrawlMode ? <details name="glamia-account-navigation" className="account-menu wibrawl-guest-account" ref={accountRef}><summary aria-label="Open account menu"><span>Account</span><span className="wibrawl-account-plus" aria-hidden="true">+</span></summary><nav className="account-menu-panel" aria-label="Your account"><Link className="account-menu-link" href="/login" onNavigate={navigateFromAccount}>Log in / Sign up</Link><Link className="account-menu-link" href="/orders" onNavigate={navigateFromAccount}>Your orders</Link><Link className="account-menu-link" href="/wishlist" onNavigate={navigateFromAccount}>Wishlist <span className="account-menu-count">{wishlistCount || 0}</span></Link><Link className="account-menu-link" href="/credits" onNavigate={navigateFromAccount}>Store credits</Link></nav></details> : <Link className="login-link" href="/login" onNavigate={onNavigate}>Log in</Link>}
+        {wibrawlMode ? (adminMode ? themeControl : null) : <button className="tool-button theme-toggle" onClick={() => setDark((value) => !value)} aria-label="Toggle dark mode" title="Toggle dark mode"><Icon name={dark ? "sun" : "moon"} size={18} /></button>}
         {!adminMode && <CreditsBalance user={user} onNavigate={onNavigate} showWhenSignedOut={wibrawlMode} />}
         {!adminMode && <Link className="tool-button cart-link" href="/cart" onNavigate={onNavigate} aria-label={`Open cart, ${cartCount || 0} item${cartCount === 1 ? "" : "s"}`}><Icon name="bag" size={19} />{cartCount > 0 && <span className="cart-count">{cartCount}</span>}</Link>}
       </div>
     </header>
-    {!adminMode && menuOpen && <div className="menu-layer"><button className="menu-backdrop" type="button" aria-label="Close menu" onClick={() => setMenuOpen(false)} /><aside id="shop-menu" className="menu-drawer" aria-label="Shop menu"><button className="drawer-close" onClick={() => setMenuOpen(false)} aria-label="Close shop menu"><Icon name="close" size={20} /></button><p className="eyebrow">Shop {wibrawlMode ? "Wibrawl" : "Glamia"}</p><h2>{wibrawlMode ? "Pick your side." : "Find your next edit."}</h2><div className="drawer-categories">{categoryTree.map((node) => <DrawerCategory key={node.name} node={node} category={node.name} onNavigate={onNavigate} closeMenu={() => setMenuOpen(false)} />)}</div><Link className="drawer-account-link" href="/profile" onNavigate={(href) => { setMenuOpen(false); onNavigate(href); }}>Your account</Link></aside></div>}
+    {wibrawlMode && !adminMode && <div className="wibrawl-navigation"><nav aria-label="Collections">{collectionLinks.map(([href, label]) => <Link key={href} href={href} onNavigate={onNavigate}>{label}</Link>)}</nav>{themeControl}</div>}
+    {!adminMode && menuOpen && <div className="menu-layer"><button className="menu-backdrop" type="button" aria-label="Close menu" onClick={() => setMenuOpen(false)} /><aside id="shop-menu" className="menu-drawer" ref={drawerRef} role="dialog" aria-modal="true" aria-labelledby="shop-menu-title"><button className="drawer-close" onClick={() => setMenuOpen(false)} aria-label="Close shop menu"><Icon name="close" size={20} /></button><p className="eyebrow">Shop {wibrawlMode ? "Wibrawl" : "Glamia"}</p><h2 id="shop-menu-title">{wibrawlMode ? "Pick your side." : "Find your next edit."}</h2>{wibrawlMode && <nav className="wibrawl-drawer-collections" aria-label="Collections">{collectionLinks.map(([href,label]) => <Link key={href} href={href} onNavigate={(next) => { setMenuOpen(false); onNavigate(next); }}>{label}</Link>)}</nav>}<div className="drawer-categories">{categoryTree.map((node) => <DrawerCategory key={node.name} node={node} category={node.name} onNavigate={onNavigate} closeMenu={() => setMenuOpen(false)} arrowFree={wibrawlMode} />)}</div><Link className="drawer-account-link" href="/profile" onNavigate={(href) => { setMenuOpen(false); onNavigate(href); }}>Your account</Link></aside></div>}
   </>;
 }
 

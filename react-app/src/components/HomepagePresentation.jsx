@@ -48,29 +48,4 @@ function HomepageEditorial({ onNavigate }) {
   </section>;
 }
 
-function WibrawlHero({ products = [], categories = [], theme = "sports", onNavigate }) {
-  const featured = products.filter((product) => product.image_url || product.thumbnail_url).slice(0, 3);
-  const themeName = theme === "gaming" ? "Gaming" : "Sports";
-  return <section className={`wibrawl-hero wibrawl-hero-${theme}`} aria-labelledby="wibrawl-title">
-    <div className="wibrawl-hero-copy">
-      <p className="wibrawl-kicker"><span /> Wibrawl / {themeName} mode</p>
-      <h1 id="wibrawl-title">Pick your side.<br /><span>Wear your world.</span></h1>
-      <p className="wibrawl-hero-intro">The tee for what you play, watch, follow, and love.</p>
-      <div className="wibrawl-hero-actions">
-        <button className="wibrawl-primary-action" type="button" onClick={() => onNavigate("/just-arrived")}>Shop {theme === "gaming" ? "Just Spawned" : "New Signings"}</button>
-        <button className="wibrawl-secondary-action" type="button" onClick={() => onNavigate("/best-sellers")}>See {theme === "gaming" ? "Current Meta" : "League Leaders"}</button>
-      </div>
-      {categories.length > 1 && <nav className="wibrawl-category-picks" aria-label="Shop categories">{categories.filter((category) => category !== "All").slice(0, 5).map((category) => <button key={category} type="button" onClick={() => onNavigate(`/category/${encodeURIComponent(category)}`)}>{category}</button>)}</nav>}
-    </div>
-    <div className="wibrawl-hero-stage" aria-label="Featured Wibrawl styles">
-      {featured.length ? featured.map((product, index) => <button type="button" className={`wibrawl-look wibrawl-look-${index + 1}`} key={product.id} aria-label={`Shop ${product.name}`} onClick={() => onNavigate(productUrl(product))}>
-        <img src={product.thumbnail_url || product.image_url} alt="" loading={index === 0 ? "eager" : "lazy"} />
-        <span>{product.name}</span>
-      </button>) : <div className="wibrawl-hero-art" aria-hidden="true"><span className="wibrawl-art-ring" /><span className="wibrawl-art-stamp">WB</span><strong>THE<br />NEXT<br /><em>DROP</em></strong><small>YOUR SIDE. YOUR STORY.</small></div>}
-      <span className="wibrawl-stage-index">01 / {String(Math.max(featured.length, 1)).padStart(2, "0")}</span>
-    </div>
-  </section>;
-}
-
-
-export { StorePromises, CampaignFeature, CinematicHero, HomepageEditorial, WibrawlHero };
+export { StorePromises, CampaignFeature, CinematicHero, HomepageEditorial };

@@ -12,7 +12,7 @@ export function criticalStorefrontCss(css, additionalClass = () => false) {
     if (rule.parent.type === 'atrule' && /keyframes$/i.test(rule.parent.name)) return;
     const selectors = postcss.list.comma(rule.selector).filter(selector => {
       const classes = [...selector.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map(match => match[1]);
-      return classes.every(name => shellClass.test(name) || additionalClass(name) || /^(?:site-footer|footer(?:-.+)?)$/.test(name) || ['ui-icon', 'theme-toggle', 'cart-link', 'cart-count'].includes(name));
+      return classes.every(name => shellClass.test(name) || additionalClass(name) || /^(?:site-footer|footer(?:-.+)?|wibrawl(?:-.+)?)$/.test(name) || ['ui-icon', 'theme-toggle', 'cart-link', 'cart-count'].includes(name));
     });
     if (selectors.length) rule.selector = selectors.join(',');
     else rule.remove();

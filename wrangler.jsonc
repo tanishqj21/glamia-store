@@ -5,9 +5,11 @@
 	"compatibility_date": "2026-08-26",
 	"workers_dev": false,
 	"preview_urls": false,
-				"routes": [
-					{"pattern": "wibrawl.glamia.com", "custom_domain": true}
-				],
+	"routes": [
+		{"pattern": "glamiastore.com", "custom_domain": true},
+		{"pattern": "www.glamiastore.com", "custom_domain": true},
+		{"pattern": "wibrawl.glamiastore.com", "custom_domain": true}
+	],
 	"assets": {
 		"directory": "./public",
 		"binding": "ASSETS",

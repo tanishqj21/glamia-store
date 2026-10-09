@@ -1,26 +1,35 @@
+@font-face {
+  font-family: "Noto Sans";
+  src: url("/fonts/NotoSans-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #252a27;
-  background: #eef0eb;
+  font-family: "Noto Sans", "Segoe UI", sans-serif;
+  color: #151515;
+  background: #f1f1f1;
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  background: #eef0eb;
-  color: #252a27;
-  font: 14px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f1f1f1;
+  color: #151515;
+  font: 13px/1.6 "Noto Sans", "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 
 .sheet {
-  width: min(100% - 32px, 980px);
+  width: min(100% - 32px, 1020px);
   margin: 32px auto;
   padding: 48px 54px;
-  background: #fffefa;
-  border: 1px solid #dce1d9;
-  box-shadow: 0 18px 55px rgb(28 39 32 / 10%);
+  background: #fff;
+  border: 1px solid #e2e6e2;
+  box-shadow: 0 8px 30px rgb(28 39 32 / 5%);
 }
 
 .top,
@@ -33,19 +42,32 @@ body {
 
 .top {
   align-items: flex-start;
-  padding-bottom: 26px;
-  border-bottom: 2px solid #252a27;
+  padding: 22px 24px;
+  background: #1b1b1b;
+  color: #f4f4f4;
+  border-bottom: 3px solid #d0b0f4;
+  margin-bottom: 26px;
 }
 
 .brand {
   margin: 0 0 3px;
-  color: #15261e;
+  color: #f4f4f4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 28px;
+  font-size: 32px;
   letter-spacing: .26em;
 }
 
-.muted { color: #66736b; }
+.brand img { width: 48px; height: 48px; object-fit: contain; }
+.top .muted { color: #d0b0f4; }
+.top .invoice-document-label { color: #d0b0f4; }
+.top .invoice-number { color: #f4f4f4; overflow-wrap: anywhere; }
+.top button { color: #151515; background: #d0b0f4; }
+.top button:hover { background: #e4d1fa; }
+
+.muted { color: #5f5f5f; }
 
 .invoice-top-actions {
   min-width: 190px;
@@ -64,7 +86,7 @@ body {
 
 .invoice-number {
   display: block;
-  color: #15261e;
+  color: #222925;
   font-size: 15px;
   font-weight: 700;
 }
@@ -73,14 +95,17 @@ button {
   margin-top: 14px;
   padding: 10px 15px;
   border: 0;
-  background: #15261e;
-  color: #fffefa;
+  background: #222925;
+  color: #fff;
   cursor: pointer;
   font: inherit;
   font-weight: 700;
+  border-radius: 4px;
+  transition: background .18s ease;
 }
 
-button:hover { background: #315341; }
+button:hover { background: #7658a5; }
+button:focus-visible { outline: 2px solid #b691de; outline-offset: 4px; }
 
 .notice {
   margin: 24px 0;
@@ -96,8 +121,8 @@ button:hover { background: #315341; }
 .meta {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 26px 0 30px;
-  padding: 22px 0;
+  margin: 24px 0 30px;
+  padding: 0 0 24px;
   border-bottom: 1px solid #dce1d9;
   gap: 24px;
 }
@@ -107,12 +132,13 @@ button:hover { background: #315341; }
 .meta span { display: block; }
 .meta strong {
   margin-bottom: 6px;
-  color: #68746c;
+  color: #684b90;
   font-size: 10px;
   letter-spacing: .13em;
   text-transform: uppercase;
 }
 .meta span { overflow-wrap: anywhere; }
+.meta strong:not(:first-child) { margin-top: 18px; }
 .meta strong + strong { margin-top: 15px; }
 
 .order-table {
@@ -123,14 +149,15 @@ button:hover { background: #315341; }
 
 .order-table th,
 .order-table td {
-  padding: 12px 9px;
+  padding: 14px 8px;
   border-bottom: 1px solid #e2e6e0;
   text-align: right;
   vertical-align: top;
 }
 
 .order-table th {
-  color: #68746c;
+  background: #f5effc;
+  color: #684b90;
   font-size: 10px;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -139,42 +166,65 @@ button:hover { background: #315341; }
 
 .order-table th:first-child,
 .order-table td:first-child { text-align: left; }
-.order-table td:first-child { min-width: 180px; }
-.order-table small { display: block; color: #66736b; }
+.order-table td:first-child { min-width: 180px; max-width: 280px; overflow-wrap: anywhere; }
+.order-table td:not(:first-child) { font-size: 12px; white-space: nowrap; }
+.order-table small { display: block; margin-top: 5px; color: #66716a; font-size: 11px; }
 
 .totals { justify-content: flex-end; }
 .totals table { width: min(100%, 340px); border-collapse: collapse; }
-.totals td { padding: 6px 0; }
+.totals td { padding: 7px 12px; }
 .totals td:last-child { text-align: right; white-space: nowrap; }
 .grand td {
   padding-top: 14px;
-  border-top: 2px solid #252a27;
-  color: #15261e;
+  border-top: 1px solid #222925;
+  background: #f5effc;
+  color: #151515;
   font-size: 19px;
 }
 
 .footer {
   margin: 34px 0 0;
   padding-top: 18px;
-  border-top: 1px solid #dce1d9;
-  color: #66736b;
+  border-top: 1px solid #d0b0f4;
+  color: #5f5f5f;
   font-size: 12px;
 }
 
-@media (max-width: 700px) {
+@media screen and (max-width: 700px) {
   .sheet { width: 100%; margin: 0; padding: 26px 16px; border: 0; box-shadow: none; }
   .top { display: block; }
   .invoice-top-actions { margin-top: 22px; text-align: left; }
   .meta { grid-template-columns: 1fr; gap: 18px; }
-  .order-table { display: block; overflow-x: auto; white-space: nowrap; }
-  .order-table td:first-child { min-width: 170px; white-space: normal; }
+  .order-table, .order-table tbody { display: block; }
+  .order-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .order-table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 20px; padding: 18px 0; border-bottom: 1px solid #e2e6e0; }
+  .order-table td { display: block; min-width: 0; border: 0; padding: 0; text-align: left; }
+  .order-table td:first-child { grid-column: 1 / -1; min-width: 0; max-width: none; white-space: normal; margin-bottom: 3px; }
+  .order-table td:not(:first-child)::before { display: block; margin-bottom: 3px; color: #68746c; font-size: 10px; }
+  .order-table td:nth-child(2)::before { content: "Quantity"; }
+  .order-table td:nth-child(3)::before { content: "HSN / SAC"; }
+  .order-table td:nth-child(4)::before { content: "GST rate"; }
+  .order-table td:nth-child(5)::before { content: "Taxable value"; }
+  .order-table td:nth-child(6)::before { content: "Tax amount"; }
+  .order-table td:nth-child(7)::before { content: "Item amount"; }
+  .order-table td:last-child { font-weight: 700; }
   .totals { display: block; }
   .totals table { margin-left: auto; }
 }
 
 @media print {
+  @page { size: A4; margin: 16mm 12mm; }
   body { background: #fff; }
   .sheet { width: 100%; margin: 0; padding: 0; border: 0; box-shadow: none; }
   button { display: none; }
   .notice { background: #fff; }
+  .top { background: #f5effc; color: #151515; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .brand, .top .invoice-number { color: #151515; }
+  .top .muted, .top .invoice-document-label { color: #684b90; }
+  .top, .meta, .totals, .footer, .order-table tr { break-inside: avoid; }
+  .order-table { display: table; overflow: visible; white-space: normal; }
+  .order-table thead { display: table-header-group; }
+  .order-table td:first-child { min-width: 0; }
+  .order-table th { font-size: 8px; letter-spacing: .02em; }
+  .order-table td:not(:first-child) { font-size: 9px; }
 }

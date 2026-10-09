@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { money } from "../lib/commerce";
 
@@ -20,5 +20,5 @@ export function CreditsBalance({ user, onNavigate, showWhenSignedOut = false }) 
   }, [user?.email]);
   if (!user && !showWhenSignedOut) return null;
   const label = !user ? "Sign in to view store credits" : `Store credits${balance === null ? "" : `, ${money(balance)}`}`;
-  return <button className="header-credits" type="button" onClick={() => onNavigate("/credits")} aria-label={label}><span aria-hidden="true">₹</span><strong>{!user ? "—" : balance === null ? "…" : balance.toLocaleString("en-IN")}</strong><small>Credits</small></button>;
+  return <button className="header-credits" type="button" onClick={() => onNavigate("/credits")} aria-label={label}><span aria-hidden="true">₹</span><strong>{!user ? "Log in" : balance === null ? "…" : balance.toLocaleString("en-IN")}</strong><small>Credits</small></button>;
 }

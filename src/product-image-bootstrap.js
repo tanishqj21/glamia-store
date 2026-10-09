@@ -1,5 +1,5 @@
-import { productMediaManifest } from '../react-app/src/lib/productMediaManifest';
-import { readBoundedBody } from './security';
+import { productMediaManifest } from '../react-app/src/lib/productMediaManifest.js';
+import { readBoundedBody } from './security.js';
 
 // Embed the existing, unchanged mobile display copy. Bigger screens still
 // select their full-resolution srcset candidate; new uploads retain normal URLs.

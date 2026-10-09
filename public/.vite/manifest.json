@@ -6,12 +6,12 @@
       "_jsx-runtime-D3jfb0Ew.js"
     ]
   },
-  "_CancellationRefundCard-CJ7_KOSu.js": {
-    "file": "assets/CancellationRefundCard-CJ7_KOSu.js",
+  "_CancellationRefundCard-C3S8TZgx.js": {
+    "file": "assets/CancellationRefundCard-C3S8TZgx.js",
     "name": "CancellationRefundCard",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_refundTracking-CjuUIkd_.js"
     ],
@@ -23,21 +23,21 @@
     "file": "assets/CancellationRefundCard-PkglqEPN.css",
     "src": "_CancellationRefundCard-PkglqEPN.css"
   },
-  "_CouponBox-DyFiTLbk.js": {
-    "file": "assets/CouponBox-DyFiTLbk.js",
+  "_CouponBox-B734UUwi.js": {
+    "file": "assets/CouponBox-B734UUwi.js",
     "name": "CouponBox",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js"
     ]
   },
-  "_CreditsBalance-DpWt3_Fi.js": {
-    "file": "assets/CreditsBalance-DpWt3_Fi.js",
+  "_CreditsBalance-Ce_qQhWM.js": {
+    "file": "assets/CreditsBalance-Ce_qQhWM.js",
     "name": "CreditsBalance",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js"
     ]
   },
@@ -48,12 +48,12 @@
       "_jsx-runtime-D3jfb0Ew.js"
     ]
   },
-  "_OrderDetails-B7bh-cgs.js": {
-    "file": "assets/OrderDetails-B7bh-cgs.js",
+  "_OrderDetails-CySZ0Zk3.js": {
+    "file": "assets/OrderDetails-CySZ0Zk3.js",
     "name": "OrderDetails",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_CancellationRefundCard-CJ7_KOSu.js"
+      "_CancellationRefundCard-C3S8TZgx.js"
     ]
   },
   "_PhoneField-CBFKZnY2.js": {
@@ -70,36 +70,36 @@
       "_jsx-runtime-D3jfb0Ew.js"
     ]
   },
-  "_ReturnStatusCard-D3ZAxzw9.js": {
-    "file": "assets/ReturnStatusCard-D3ZAxzw9.js",
+  "_ReturnStatusCard-D_aAS8Kb.js": {
+    "file": "assets/ReturnStatusCard-D_aAS8Kb.js",
     "name": "ReturnStatusCard",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_CancellationRefundCard-CJ7_KOSu.js",
+      "_CancellationRefundCard-C3S8TZgx.js",
       "src/main.jsx"
     ]
   },
-  "_Reviews-D5YSHO62.js": {
-    "file": "assets/Reviews-D5YSHO62.js",
+  "_Reviews-CIzrLeNA.js": {
+    "file": "assets/Reviews-CIzrLeNA.js",
     "name": "Reviews",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js"
     ]
   },
-  "_SupportOrderContext-3Yj-Rst_.js": {
-    "file": "assets/SupportOrderContext-3Yj-Rst_.js",
+  "_SupportOrderContext-3OOpGH4f.js": {
+    "file": "assets/SupportOrderContext-3OOpGH4f.js",
     "name": "SupportOrderContext",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_refundTracking-CjuUIkd_.js"
     ]
   },
-  "_api-DM3z7IB9.js": {
-    "file": "assets/api-DM3z7IB9.js",
+  "_api-B3Y_V1MI.js": {
+    "file": "assets/api-B3Y_V1MI.js",
     "name": "api"
   },
   "_colours-CegqpAhr.js": {
@@ -127,7 +127,7 @@
     "name": "workspaceAccess"
   },
   "index.html": {
-    "file": "assets/index-DbRXiGD_.js",
+    "file": "assets/index-B_MCHCpt.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -135,154 +135,154 @@
       "src/main.jsx"
     ],
     "css": [
-      "assets/index-WLfI3mrn.css"
+      "assets/index-BrV8E_dU.css"
     ]
   },
   "src/components/AboutPage.jsx": {
-    "file": "assets/AboutPage-DOIQ-Vi2.js",
+    "file": "assets/AboutPage-Cdy0T1U6.js",
     "name": "AboutPage",
     "src": "src/components/AboutPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js"
+      "_api-B3Y_V1MI.js"
     ]
   },
   "src/components/AccountPages.jsx": {
-    "file": "assets/AccountPages-Ci8nQDWW.js",
+    "file": "assets/AccountPages-C0KH39gz.js",
     "name": "AccountPages",
     "src": "src/components/AccountPages.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_refundTracking-CjuUIkd_.js",
       "src/components/CustomerCare.jsx",
       "_PhoneField-CBFKZnY2.js",
-      "_Reviews-D5YSHO62.js",
+      "_Reviews-CIzrLeNA.js",
       "_Icon-QcDBXQVF.js",
-      "_CancellationRefundCard-CJ7_KOSu.js",
-      "_ReturnStatusCard-D3ZAxzw9.js",
-      "_OrderDetails-B7bh-cgs.js",
+      "_CancellationRefundCard-C3S8TZgx.js",
+      "_ReturnStatusCard-D_aAS8Kb.js",
+      "_OrderDetails-CySZ0Zk3.js",
       "_AccountLayout-C1boTaS1.js"
     ]
   },
   "src/components/AdminAbout.jsx": {
-    "file": "assets/AdminAbout-DUGmEGHu.js",
+    "file": "assets/AdminAbout-CjX8CyyG.js",
     "name": "AdminAbout",
     "src": "src/components/AdminAbout.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "src/components/AboutPage.jsx"
     ]
   },
   "src/components/AdminCare.jsx": {
-    "file": "assets/AdminCare-Cilxvqd6.js",
+    "file": "assets/AdminCare-DzKuwsHj.js",
     "name": "AdminCare",
     "src": "src/components/AdminCare.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_refundTracking-CjuUIkd_.js",
-      "_SupportOrderContext-3Yj-Rst_.js",
+      "_SupportOrderContext-3OOpGH4f.js",
       "_Icon-QcDBXQVF.js",
-      "_CancellationRefundCard-CJ7_KOSu.js",
-      "_ReturnStatusCard-D3ZAxzw9.js",
+      "_CancellationRefundCard-C3S8TZgx.js",
+      "_ReturnStatusCard-D_aAS8Kb.js",
       "src/components/AdminWorkspace.jsx",
       "src/main.jsx"
     ]
   },
   "src/components/AdminCredits.jsx": {
-    "file": "assets/AdminCredits-CMVjzZRn.js",
+    "file": "assets/AdminCredits-XO1mItjP.js",
     "name": "AdminCredits",
     "src": "src/components/AdminCredits.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js"
     ]
   },
   "src/components/AdminEmployees.jsx": {
-    "file": "assets/AdminEmployees-uLSzKbMQ.js",
+    "file": "assets/AdminEmployees-BxbCR0n3.js",
     "name": "AdminEmployees",
     "src": "src/components/AdminEmployees.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js"
     ]
   },
   "src/components/AdminEvents.jsx": {
-    "file": "assets/AdminEvents-BMLM-K_-.js",
+    "file": "assets/AdminEvents-DFIK-1cv.js",
     "name": "AdminEvents",
     "src": "src/components/AdminEvents.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js"
     ]
   },
   "src/components/AdminMerchandising.jsx": {
-    "file": "assets/AdminMerchandising-C6A1pmVK.js",
+    "file": "assets/AdminMerchandising-Bn5_2MRG.js",
     "name": "AdminMerchandising",
     "src": "src/components/AdminMerchandising.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_PhoneField-CBFKZnY2.js",
       "_Icon-QcDBXQVF.js",
       "src/main.jsx"
     ]
   },
   "src/components/AdminOperations.jsx": {
-    "file": "assets/AdminOperations-bbTjDX7Y.js",
+    "file": "assets/AdminOperations-DAqVzARm.js",
     "name": "AdminOperations",
     "src": "src/components/AdminOperations.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
-      "_CancellationRefundCard-CJ7_KOSu.js",
-      "_OrderDetails-B7bh-cgs.js",
+      "_CancellationRefundCard-C3S8TZgx.js",
+      "_OrderDetails-CySZ0Zk3.js",
       "_workspaceAccess-csU2FhxA.js",
       "src/components/AdminWorkspace.jsx"
     ]
   },
   "src/components/AdminSystemViews.jsx": {
-    "file": "assets/AdminSystemViews-Cw0uKw5d.js",
+    "file": "assets/AdminSystemViews-D1_e0cs8.js",
     "name": "AdminSystemViews",
     "src": "src/components/AdminSystemViews.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_workspaceAccess-csU2FhxA.js"
     ]
   },
   "src/components/AdminWorkspace.jsx": {
-    "file": "assets/AdminWorkspace-0IB9YD7_.js",
+    "file": "assets/AdminWorkspace-8DjoFNlb.js",
     "name": "AdminWorkspace",
     "src": "src/components/AdminWorkspace.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
       "index.html",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_Icon-QcDBXQVF.js",
-      "_CancellationRefundCard-CJ7_KOSu.js",
-      "_OrderDetails-B7bh-cgs.js",
+      "_CancellationRefundCard-C3S8TZgx.js",
+      "_OrderDetails-CySZ0Zk3.js",
       "_workspaceAccess-csU2FhxA.js",
       "_colours-CegqpAhr.js"
     ],
@@ -305,26 +305,26 @@
     ]
   },
   "src/components/BulkListingView.jsx": {
-    "file": "assets/BulkListingView-CSSLdtLb.js",
+    "file": "assets/BulkListingView-C_2YpXzt.js",
     "name": "BulkListingView",
     "src": "src/components/BulkListingView.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "src/components/AdminWorkspace.jsx"
     ]
   },
   "src/components/CartPage.jsx": {
-    "file": "assets/CartPage-BsBRClhz.js",
+    "file": "assets/CartPage-CEeBlpwe.js",
     "name": "CartPage",
     "src": "src/components/CartPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
-      "_CouponBox-DyFiTLbk.js",
+      "_CouponBox-B734UUwi.js",
       "src/main.jsx"
     ],
     "css": [
@@ -332,76 +332,76 @@
     ]
   },
   "src/components/CheckoutPage.jsx": {
-    "file": "assets/CheckoutPage-C3PnZMOn.js",
+    "file": "assets/CheckoutPage-Wrvx-wpP.js",
     "name": "CheckoutPage",
     "src": "src/components/CheckoutPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_PhoneField-CBFKZnY2.js",
-      "_CouponBox-DyFiTLbk.js",
+      "_CouponBox-B734UUwi.js",
       "_customer-promises-XpOAerbQ.js",
       "src/components/StoreCredits.jsx"
     ]
   },
   "src/components/CompletedOrders.jsx": {
-    "file": "assets/CompletedOrders-B_lSLi3W.js",
+    "file": "assets/CompletedOrders-DYqHqIsa.js",
     "name": "CompletedOrders",
     "src": "src/components/CompletedOrders.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
-      "_OrderDetails-B7bh-cgs.js"
+      "_OrderDetails-CySZ0Zk3.js"
     ]
   },
   "src/components/CustomerCare.jsx": {
-    "file": "assets/CustomerCare-CEM1yepl.js",
+    "file": "assets/CustomerCare-BHBc-auf.js",
     "name": "CustomerCare",
     "src": "src/components/CustomerCare.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_refundTracking-CjuUIkd_.js",
-      "_SupportOrderContext-3Yj-Rst_.js"
+      "_SupportOrderContext-3OOpGH4f.js"
     ]
   },
   "src/components/GoogleAnalyticsView.jsx": {
-    "file": "assets/GoogleAnalyticsView-WgrKUyxK.js",
+    "file": "assets/GoogleAnalyticsView-542xh8Ij.js",
     "name": "GoogleAnalyticsView",
     "src": "src/components/GoogleAnalyticsView.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js"
+      "_api-B3Y_V1MI.js"
     ]
   },
   "src/components/OrderTrackingPage.jsx": {
-    "file": "assets/OrderTrackingPage-0ZgHnDX_.js",
+    "file": "assets/OrderTrackingPage-TzboxFWn.js",
     "name": "OrderTrackingPage",
     "src": "src/components/OrderTrackingPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
-      "_CancellationRefundCard-CJ7_KOSu.js"
+      "_api-B3Y_V1MI.js",
+      "_CancellationRefundCard-C3S8TZgx.js"
     ]
   },
   "src/components/ProductDetailPage.jsx": {
-    "file": "assets/ProductDetailPage-CyXDZMrD.js",
+    "file": "assets/ProductDetailPage-BUbKBrCu.js",
     "name": "ProductDetailPage",
     "src": "src/components/ProductDetailPage.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
-      "_Reviews-D5YSHO62.js",
+      "_Reviews-CIzrLeNA.js",
       "_Icon-QcDBXQVF.js",
       "_colours-CegqpAhr.js",
       "_customer-promises-XpOAerbQ.js",
@@ -420,13 +420,13 @@
     ]
   },
   "src/components/QuickView.jsx": {
-    "file": "assets/QuickView-D98YPQju.js",
+    "file": "assets/QuickView-DGNRyWY3.js",
     "name": "QuickView",
     "src": "src/components/QuickView.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_Icon-QcDBXQVF.js",
       "_colours-CegqpAhr.js",
@@ -444,42 +444,42 @@
     ]
   },
   "src/components/StoreCredits.jsx": {
-    "file": "assets/StoreCredits-Dxo9ZI__.js",
+    "file": "assets/StoreCredits-6SvqIACt.js",
     "name": "StoreCredits",
     "src": "src/components/StoreCredits.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_AccountLayout-C1boTaS1.js",
-      "_CreditsBalance-DpWt3_Fi.js"
+      "_CreditsBalance-Ce_qQhWM.js"
     ]
   },
   "src/components/TaxComplianceView.jsx": {
-    "file": "assets/TaxComplianceView-QYf423qa.js",
+    "file": "assets/TaxComplianceView-BZJQHVeC.js",
     "name": "TaxComplianceView",
     "src": "src/components/TaxComplianceView.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js"
     ]
   },
   "src/main.jsx": {
-    "file": "assets/main-DmOCclky.js",
+    "file": "assets/main-4xBWUs4f.js",
     "name": "main",
     "src": "src/main.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
       "index.html",
-      "_api-DM3z7IB9.js",
+      "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_Icon-QcDBXQVF.js",
       "_workspaceAccess-csU2FhxA.js",
-      "_CreditsBalance-DpWt3_Fi.js"
+      "_CreditsBalance-Ce_qQhWM.js"
     ],
     "dynamicImports": [
       "src/components/AccountPages.jsx",
@@ -497,19 +497,19 @@
     ]
   },
   "glamia-product-styles.css": {
-    "file": "assets/product-styles-c315925e.css",
+    "file": "assets/product-styles-009615a8.css",
     "src": "glamia-product-styles.css"
   },
   "glamia-catalogue-styles.css": {
-    "file": "assets/catalogue-styles-31e06537.css",
+    "file": "assets/catalogue-styles-d96f1cf3.css",
     "src": "glamia-catalogue-styles.css"
   },
   "glamia-cart-styles.css": {
-    "file": "assets/cart-styles-776acd4a.css",
+    "file": "assets/cart-styles-bfa94b97.css",
     "src": "glamia-cart-styles.css"
   },
   "glamia-homepage-styles.css": {
-    "file": "assets/homepage-styles-31e06537.css",
+    "file": "assets/homepage-styles-d96f1cf3.css",
     "src": "glamia-homepage-styles.css"
   }
 }

@@ -4,25 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Glamia — curated apparel and accessories for every wardrobe." />
-    <script>try { const wibrawl = location.hostname.toLowerCase() === "wibrawl.glamia.com" || location.search.includes("wibrawl-preview"); document.documentElement.dataset.brand = wibrawl ? "wibrawl" : "glamia"; const saved = localStorage.getItem(wibrawl ? "wibrawl-theme" : "glamia-theme"); document.documentElement.dataset.theme = wibrawl ? (saved === "gaming" ? "dark" : saved === "sports" ? "light" : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : saved === "dark" ? "dark" : "light"; } catch { document.documentElement.dataset.brand = "glamia"; document.documentElement.dataset.theme = "light"; }</script>
+    <script>(() => { const wibrawl = location.hostname.toLowerCase() === "wibrawl.glamiastore.com" || (["localhost", "127.0.0.1"].includes(location.hostname) && new URLSearchParams(location.search).has("wibrawl-preview")); const root = document.documentElement; root.dataset.brand = wibrawl ? "wibrawl" : "glamia"; let saved; try { saved = localStorage.getItem(wibrawl ? "wibrawl-theme" : "glamia-theme"); } catch {} root.dataset.theme = wibrawl ? (saved === "gaming" ? "dark" : saved === "sports" ? "light" : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : saved === "dark" ? "dark" : "light"; })();</script>
     <link rel="icon" type="image/png" sizes="512x512" href="/glamia-g-favicon.png" />
     <link rel="apple-touch-icon" href="/glamia-g-favicon.png" />
     <link rel="preload" href="/fonts/jost-8d4387d2d7e4.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/cormorant-garamond-3ed3913013.woff2" as="font" type="font/woff2" crossorigin />
     <title>Glamia — Classy Apparel Marketplace</title>
-    <script type="module" crossorigin src="/assets/index-DbRXiGD_.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-WLfI3mrn.css">
+    <script>if (document.documentElement.dataset.brand === "wibrawl") { document.querySelector("link[rel=icon]").href = "/wibrawl/favicon.png"; document.querySelector("link[rel=apple-touch-icon]").href = "/wibrawl/icon-192.png"; document.title = "Wibrawl | Pick your side. Wear your world."; }</script>
+    <script type="module" crossorigin src="/assets/index-B_MCHCpt.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BrV8E_dU.css">
   </head>
   <body>
     <div id="initial-loader" class="initial-loader" role="status" aria-live="polite">
       <div class="initial-loader-glow" aria-hidden="true"></div>
       <div class="initial-loader-content">
-        <div class="initial-loader-brand" role="img" aria-label="Wibrawl"><img src="/glamia-g-mark-96.webp" alt="" width="48" height="48" /><span aria-hidden="true">LAMIA</span></div>
+        <div class="initial-loader-brand" role="img" aria-label="Glamia"><img src="/glamia-g-mark-96.webp" alt="" width="48" height="48" /><span aria-hidden="true">LAMIA</span></div>
         <div class="initial-loader-caption">PREPARING YOUR EDIT</div>
         <div class="initial-loader-line" aria-hidden="true"><span></span></div>
       </div>
     </div>
-    <script>try { sessionStorage.getItem("glamia-splash") === "1" && document.getElementById("initial-loader").remove(); } catch (e) { }</script>
+    <script>if (document.documentElement.dataset.brand === "wibrawl") { document.querySelector(".initial-loader-brand").setAttribute("aria-label", "Wibrawl"); document.querySelector(".initial-loader-caption").textContent = "GETTING YOUR WORLD READY"; } try { sessionStorage.getItem("glamia-splash") === "1" && document.getElementById("initial-loader").remove(); } catch (e) { }</script>
     <div id="root"></div>
   </body>
 </html>

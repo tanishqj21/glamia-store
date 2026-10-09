@@ -12,8 +12,9 @@ import { selectedVariantCopy, linkedSpecificationCopy } from './product-trust.js
 import { customerPromises,deliveryPromise,shippingPolicyPromise } from './customer-promises.js';
 import { attachCancellationRefunds, cancellationRefundView } from "./cancellation-refunds.js";
 import { purchasedReturnLines, supportLineReferences } from './support-return-access.js';
-import { storefrontCss, storefrontStyleHash, storefrontStyleFiles, storefrontDeferredStyleFile, storefrontRoutePreloads, storefrontRouteCriticalStyles } from './storefront-styles.js';
-import { inlineProductImage } from './product-image-bootstrap';
+import { storefrontCss, storefrontStyleHash, storefrontScriptHashes, storefrontStyleFiles, storefrontDeferredStyleFile, storefrontRoutePreloads, storefrontRouteCriticalStyles } from './storefront-styles.js';
+import { inlineProductImage } from './product-image-bootstrap.js';
+import { WIBRAWL_HOSTNAME, WIBRAWL_ORIGIN, storefrontForUrl } from './storefront-identity.js';
 
 const SESSION_COOKIE = "mm_session";
 const HOST_SESSION_COOKIE = "__Host-mm_session";
@@ -97,10 +98,8 @@ const R2_CLEANUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const R2_CLEANUP_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
 const CANONICAL_ORIGIN = "https://glamiastore.com";
-const WIBRAWL_HOSTNAME = "wibrawl.glamia.com";
-const WIBRAWL_ORIGIN = "https://" + WIBRAWL_HOSTNAME;
 const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com", WIBRAWL_HOSTNAME]);
-const storefrontForRequest = (url) => url.hostname.toLowerCase() === WIBRAWL_HOSTNAME ? "wibrawl" : "glamia";
+const storefrontForRequest = storefrontForUrl;
 const PUBLIC_CACHE_VERSION = `2026-10-08-announcement-sparkle-v45-${storefrontStyleHash.slice(0, 12)}`;
 const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
 const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
@@ -270,7 +269,7 @@ export default {
             const settingsRequest = new Request(new URL('/api/storefront-settings?cache=1', url));
             const settings = await (await cachedPublicResponse(settingsRequest, ctx, 60, () => getStorefrontSettings(env))).json();
             const { renderCartShell } = await import('./cart-shell.jsx');
-            const shell = renderCartShell(settings);
+            const shell = renderCartShell(settings, storefrontForRequest(url));
             const style = storefrontRouteCriticalStyles.cart;
             const payload = JSON.stringify({ path: '/cart', settings }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
             body = body.replace('<div id="root"></div>', `<div id="root">${shell}</div>`)
@@ -644,10 +643,10 @@ async function renderPublicPage(request, env, ctx) {
       .catch(() => null)
     : null;
 
-  let title = storefront === "wibrawl" ? "Wibrawl — Pick your side. Wear your world." : "Glamia — Curated Apparel & Accessories";
+  let title = storefront === "wibrawl" ? "Wibrawl | Pick your side. Wear your world." : "Glamia — Curated Apparel & Accessories";
   let description = storefront === "wibrawl" ? "Tees for the things you play, watch, follow, and love. Pick your side. Wear your world." : DEFAULT_PAGE_DESCRIPTION;
   let ogType = "website";
-  let ogImage = `${origin}/glamia-social-banner.png`;
+  let ogImage = storefront === "wibrawl" ? `${origin}/wibrawl/gaming-campaign-960.webp` : `${origin}/glamia-social-banner.png`;
   let canonical = `${origin}${path}`;
   let headExtras = "";
   let botContent = "";
@@ -673,7 +672,7 @@ async function renderPublicPage(request, env, ctx) {
     if (!row) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
     const [[stockProduct], siblingColours] = await Promise.all([
       withSizeStock(env, [row]),
-      row.color_group_id ? env.DB.prepare("SELECT color FROM products WHERE color_group_id=? AND status='live'").bind(row.color_group_id).all() : Promise.resolve({ results: [] })
+      row.color_group_id ? env.DB.prepare(`SELECT color FROM products WHERE color_group_id=? AND status='live' AND COALESCE(storefront_visibility, 'glamia') IN ${visibility}`).bind(row.color_group_id).all() : Promise.resolve({ results: [] })
     ]);
     const product = selectedVariantCopy(stockProduct,siblingColours.results.map(item=>item.color));
     const price = currentSellingPrice(product);
@@ -703,7 +702,7 @@ async function renderPublicPage(request, env, ctx) {
       headExtras += `<script type="application/json" id="glamia-product-bootstrap">${payload}</script>`;
       try {
         const { renderProductShell } = await import('./product-shell.jsx');
-        const shell = await timed('render', async () => renderProductShell(publicProduct, productSettings, pathContext));
+        const shell = await timed('render', async () => renderProductShell(publicProduct, productSettings, pathContext, storefront));
         html = html.replace('<div id="root"></div>', `<div id="root">${shell}</div>`)
           .replace(/<div id="initial-loader"[\s\S]*?<div id="root"/, '<div id="root"');
         firstScreenStyles('product');
@@ -717,7 +716,7 @@ async function renderPublicPage(request, env, ctx) {
     if (catalog.available && !catalog.rows.length) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
     const canonicalCategory = catalog.rows[0]?.category || category;
     title = `${canonicalCategory} collection | ${storefront === "wibrawl" ? "Wibrawl" : "Glamia"}`;
-    description = `Shop the ${canonicalCategory} edit — curated pieces from independent ateliers, delivered fast across India.`;
+    description = storefront === "wibrawl" ? `Shop ${canonicalCategory} tees from Wibrawl. Pick your side. Wear your world.` : `Shop the ${canonicalCategory} edit — curated pieces from independent ateliers, delivered fast across India.`;
     canonical = `${origin}/category/${encodeURIComponent(canonicalCategory)}`;
     botContent = catalogBotContent(`${canonicalCategory} collection`, description, catalog.rows.slice(0, 24), origin, storefront);
     headExtras = `<script type="application/ld+json">${JSON.stringify(catalogJsonLd(catalog.rows.slice(0, 24), origin)).replace(/</g, "\\u003c")}</script>`;
@@ -733,12 +732,12 @@ async function renderPublicPage(request, env, ctx) {
       // issue a second settings query solely for homepage sharing metadata.
       const settings = await homepageSettingsPromise;
       const seo = settings?.seo || {};
-      title = storefront === "wibrawl" ? "Wibrawl — Pick your side. Wear your world." : heroText(seo.title, "Glamia — Curated apparel for every wardrobe", 120);
+      title = storefront === "wibrawl" ? "Wibrawl | Pick your side. Wear your world." : heroText(seo.title, "Glamia — Curated apparel for every wardrobe", 120);
       description = storefront === "wibrawl" ? "Tees for the things you play, watch, follow, and love. Pick your side. Wear your world." : heroText(seo.description, "Discover refined everyday pieces, occasionwear, and accessories from independent ateliers.", 220);
-      ogImage = absoluteImageUrl(normalizeSeoImage(seo.image, `${origin}/glamia-social-banner.png`), origin);
+      if (storefront !== "wibrawl") ogImage = absoluteImageUrl(normalizeSeoImage(seo.image, `${origin}/glamia-social-banner.png`), origin);
       botContent = catalogBotContent(storefront === "wibrawl" ? "Tees for every side" : "Curated apparel and accessories", description, rows.slice(0, 24), origin, storefront);
     } else {
-      const titles = { "/offers": "Offers", "/just-arrived": "Just arrived", "/best-sellers": "Best sellers" };
+      const titles = storefront === "wibrawl" ? { "/offers": "Loot Deals", "/just-arrived": "Just Spawned", "/best-sellers": "Current Meta" } : { "/offers": "Offers", "/just-arrived": "Just arrived", "/best-sellers": "Best sellers" };
       const brand = storefront === "wibrawl" ? "Wibrawl" : "Glamia";
       title = `${titles[path]} | ${brand}`;
       description = storefront === "wibrawl" ? `${titles[path]} from Wibrawl. Pick your side. Wear your world.` : `${titles[path]} from Glamia — curated apparel and accessories from independent ateliers, delivered fast across India.`;
@@ -775,12 +774,18 @@ async function renderPublicPage(request, env, ctx) {
       "/return-policy": ["Glamia Return Policy", "Review Glamia’s return, exchange, eligibility, and inspection rules."],
       "/shipping-policy": ["Glamia Shipping Policy", "Review Glamia’s shipping methods, delivery timing, delays, and charges."]
     }[path];
-    title = `${info[0]} | Glamia`;
+    const brand = storefront === "wibrawl" ? "Wibrawl" : "Glamia";
+    const heading = storefront === "wibrawl" ? info[0].replace("Glamia", "Wibrawl") : info[0];
+    title = `${heading} | ${brand}`;
     description = info[1];
     botContent = path === "/policies" || Object.values(standalonePolicyPaths).includes(path)
       ? policiesBotContent(Object.entries(standalonePolicyPaths).find(([, value]) => value === path)?.[0] || "",(await storefrontSettingsObject(env)).customer_experience)
-      : `<main class="info-page"><p class="eyebrow">Glamia</p><h1>${escapeHtml(info[0])}</h1><p>${escapeHtml(info[1])}</p><p><a href="/best-sellers">Browse the collection</a> · <a href="/orders">Track your order</a></p></main>`;
-    if (path === "/about") {
+      : `<main class="info-page"><p class="eyebrow">${brand}</p><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(info[1])}</p><p><a href="/best-sellers">Browse the collection</a> · <a href="/orders">Track your order</a></p></main>`;
+    if (path === "/about" && storefront === "wibrawl") {
+      title = "About Wibrawl | Wibrawl";
+      description = "Wibrawl brings gaming, anime, sports, movies, music, and internet culture into everyday graphic tees.";
+      botContent = `<main class="info-page"><p class="eyebrow">Meet Wibrawl</p><h1>Your interests. Your identity.</h1><p>${description}</p><p>A brand from <a href="https://glamiastore.com">Glamia</a>.</p></main>`;
+    } else if (path === "/about") {
       const about = await readAboutPage(env);
       title = `${about.headline} | Glamia`;
       description = about.introduction.slice(0, 220);
@@ -789,7 +794,7 @@ async function renderPublicPage(request, env, ctx) {
   }
 
   const metaTags = [
-    `<meta property="og:site_name" content="Glamia" />`,
+    `<meta property="og:site_name" content="${storefront === "wibrawl" ? "Wibrawl" : "Glamia"}" />`,
     `<meta property="og:type" content="${ogType}" />`,
     `<meta property="og:title" content="${escapeHtml(title)}" />`,
     `<meta property="og:description" content="${escapeHtml(description)}" />`,
@@ -872,14 +877,16 @@ async function renderPublicPage(request, env, ctx) {
 }
 
 async function getSitemap(request, env) {
-  const origin = canonicalOriginForRequest(new URL(request.url));
+  const url = new URL(request.url);
+  const origin = canonicalOriginForRequest(url);
+  const visibility = storefrontForRequest(url) === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
   const staticPaths = ["/", "/offers", "/just-arrived", "/best-sellers", "/about", "/contact", "/support", "/policies", ...Object.values(standalonePolicyPaths)];
   let productRows = [];
   try {
     const result = await env.DB.prepare(`
       SELECT id, product_code, name, category, subcategory, images_json, image_url, thumbnail_url, updated_at, created_at
       FROM products
-      WHERE status = 'live'
+      WHERE status = 'live' AND COALESCE(storefront_visibility, 'glamia') IN ${visibility}
       ORDER BY updated_at DESC, created_at DESC
     `).all();
     productRows = result.results || [];
@@ -10603,7 +10610,7 @@ async function validateCoupon(request, env, user) {
   const coupon = couponForCustomer(storedCoupon, env, user);
   const availabilityError = await couponAvailability(coupon, env, user);
   if (availabilityError) return json({ error: availabilityError }, 400);
-  const catalog = await loadLiveProductsById(env, requested);
+  const catalog = await loadLiveProductsById(env, requested, storefrontForRequest(new URL(request.url)));
   const cartSubtotal = requested.reduce((sum, entry) => {
     const row = catalog.get(entry.id);
     return sum + (row ? effectivePrice(row) * Math.max(1, Math.floor(Number(entry.quantity) || 1)) : 0);
@@ -10644,7 +10651,7 @@ async function listAvailableCoupons(request, env, user) {
   const { results } = await env.DB.prepare(
     "SELECT * FROM coupons WHERE active = 1 OR ? = 1 ORDER BY created_at DESC LIMIT 25"
   ).bind(isWhitelistedCouponAdmin(env,user) ? 1 : 0).all();
-  const catalog = await loadLiveProductsById(env, requested);
+  const catalog = await loadLiveProductsById(env, requested, storefrontForRequest(new URL(request.url)));
   const cartSubtotal = requested.reduce((sum, entry) => {
     const row = catalog.get(entry.id);
     return sum + (row ? effectivePrice(row) * Math.max(1, Math.floor(Number(entry.quantity) || 1)) : 0);
@@ -11475,6 +11482,7 @@ function withSecurityHeaders(response) {
   headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
   headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'sha256-QDL1JU0g6O+naM0GHg1SrXz5jfV62Pk3CmUPnu1n1kY=' 'sha256-On1TqejLHzYPtlgCG4EQtHKn2f1u8Plk+C210XpYbec=' https://accounts.google.com https://www.googletagmanager.com https://checkout.razorpay.com https://static.cloudflareinsights.com; style-src 'self' 'sha256-RU4sU0AaS8IBGZx8XrGt/pa9A5SLA3dQszGeqT5L3Kw=' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://api.razorpay.com https://cloudflareinsights.com; frame-src https://accounts.google.com https://api.razorpay.com https://*.razorpay.com; form-action 'self'");
   headers.set("Content-Security-Policy", headers.get("Content-Security-Policy").replace("style-src 'self'", `style-src 'self' 'sha256-${storefrontStyleHash}'`));
+  for (const hash of storefrontScriptHashes) headers.set('Content-Security-Policy', headers.get('Content-Security-Policy').replace("script-src 'self'", `script-src 'self' 'sha256-${hash}'`));
   headers.set("Content-Security-Policy", headers.get("Content-Security-Policy").replace("font-src 'self'", "font-src 'self' data:"));
   for (const style of Object.values(storefrontRouteCriticalStyles)) headers.set('Content-Security-Policy', headers.get('Content-Security-Policy').replace("style-src 'self'", `style-src 'self' 'sha256-${style.hash}'`));
   headers.set("Strict-Transport-Security", "max-age=31536000");
