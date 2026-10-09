@@ -1,0 +1,138 @@
+/* Admin-only layout contract. Storefront, native screens and live previews retain
+   their own design. Keep all selectors scoped to the authenticated console. */
+.admin-react-page { --console-gap: clamp(16px, 2vw, 28px); max-width: 1480px; padding: 32px clamp(16px, 3vw, 48px) 72px; font-family: Jost, system-ui, sans-serif; font-size: 14px; line-height: 1.55; }
+.admin-react-page :where(button, input, select, textarea) { font: inherit; }
+.admin-react-page :where(input, select, textarea) { min-width: 0; max-width: 100%; }
+.admin-react-page :where(input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="hidden"]), select, textarea) { background: var(--surface); border: 1px solid var(--line); border-radius: 7px; color: var(--ink); min-height: 44px; padding: 10px 12px; width: 100%; transition: border-color .18s ease, box-shadow .18s ease; }
+.admin-react-page textarea { line-height: 1.6; min-height: 96px; resize: vertical; }
+.admin-react-page input::placeholder, .admin-react-page textarea::placeholder { color: var(--muted); opacity: .85; }
+.admin-react-page :where(input[type="checkbox"], input[type="radio"]) { accent-color: var(--accent-strong); flex-shrink: 0; height: 17px; width: 17px; }
+.admin-react-page input[type="file"] { white-space: normal; overflow: hidden; }
+.admin-react-page input[type="file"]::file-selector-button { background: var(--surface-strong); border: 0; border-radius: 4px; color: var(--ink); cursor: pointer; font: inherit; margin: 0 10px 0 0; padding: 6px 10px; }
+.admin-react-page :where(input, select, textarea):focus-visible { border-color: var(--accent-strong); outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+.admin-react-page :where(button, a, summary):focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+.admin-react-page :where(button, a, summary) { -webkit-tap-highlight-color: transparent; }
+.admin-react-page button { touch-action: manipulation; }
+.admin-react-page button:disabled { cursor: not-allowed; opacity: .55; transform: none; }
+.admin-react-page :where(.primary-action, .secondary-action, .operation-actions button, .manage-product-actions button, .event-row-actions button) { align-items: center; border-radius: 7px; display: inline-flex; font-size: 13px; font-weight: 600; gap: 8px; justify-content: center; letter-spacing: 0; line-height: 1.35; min-height: 42px; padding: 10px 15px; text-align: center; text-decoration: none; white-space: normal; transition: background .18s ease, border-color .18s ease, color .18s ease; }
+.admin-react-page .secondary-action { background: var(--surface); border: 1px solid var(--line); color: var(--ink); }
+.admin-react-page .secondary-action:hover:not(:disabled) { background: var(--surface-strong); border-color: var(--accent-strong); }
+.admin-react-page .primary-action:hover:not(:disabled) { filter: brightness(.93); }
+.admin-react-page :where(.admin-panel, .admin-chart, .admin-metric) { border-radius: 12px; min-width: 0; }
+.admin-react-page .admin-panel { padding: var(--console-gap); }
+.admin-react-page :where(.admin-panel-heading, .admin-section-heading) { align-items: flex-start; gap: 16px; margin-bottom: 22px; }
+.admin-react-page :where(.admin-panel-heading, .admin-section-heading) h2 { font-size: clamp(28px, 3vw, 38px); line-height: 1.15; margin: 3px 0 8px; }
+.admin-react-page .admin-panel-heading > span { flex-shrink: 0; padding-top: 8px; }
+.admin-react-page :where(.admin-panel-heading, .admin-section-heading) p:last-child { line-height: 1.65; margin: 8px 0 0; max-width: 72ch; }
+.admin-react-page :where(.admin-heading, .admin-panel-heading, .admin-section-heading) .eyebrow { font-size: 10px; }
+.admin-react-page .admin-heading .page-title { font-size: clamp(32px, 4vw, 48px); }
+.admin-react-page .admin-workspace-nav { gap: 6px; margin: 22px 0 26px; }
+.admin-react-page .admin-nav-menu { border-radius: 10px; }
+.admin-react-page .admin-section-search { display: grid; font-size: 12px; gap: 7px; grid-column: 1 / -1; }
+.admin-react-page .admin-menu-empty { grid-column: 1 / -1; margin: 0; color: var(--muted); }
+.admin-react-page .admin-nav-group button { border-radius: 5px; min-height: 42px; }
+.admin-react-page :where(.form-hint, .form-note, .muted) { line-height: 1.6; }
+.admin-react-page :where(.inline-error, .form-error) { background: color-mix(in srgb, var(--order-red) 7%, var(--surface)); border: 1px solid color-mix(in srgb, var(--order-red) 28%, var(--line)); border-radius: 7px; color: var(--order-red); padding: 12px 15px; overflow-wrap: anywhere; }
+.admin-react-page :where(.inline-note, .form-success) { background: color-mix(in srgb, var(--accent-strong) 7%, var(--surface)); border: 1px solid var(--line); border-radius: 7px; padding: 12px 15px; overflow-wrap: anywhere; }
+.admin-react-page :where(.empty-state, .loading-card) { border-radius: 8px; font-size: 14px; line-height: 1.6; padding: 28px 20px; }
+.admin-react-page .loading-card { background: var(--surface-strong); }
+.admin-react-page .admin-action-error { align-items: center; display: flex; gap: 16px; justify-content: space-between; margin-bottom: 20px; }
+.admin-react-page .admin-action-error > span { min-width: 0; }
+.admin-react-page :where(.operation-main, .system-row-main, .admin-form-grid > *, .admin-listing-form > *, .care-conversation, .merch-workspace > *) { min-width: 0; }
+.admin-react-page :where(.operation-main > span, .operation-main > small, .system-row-main > span, .system-row-main > small, .care-conversation-head .muted) { overflow-wrap: anywhere; }
+.admin-react-page :where(.admin-form-grid, .form-row, .employee-access-fields, .merch-form-grid) { gap: 18px; }
+.admin-react-page fieldset { border-radius: 8px; min-width: 0; }
+.admin-react-page legend { padding-inline: 8px; }
+.admin-react-page :where(.admin-filters, .system-toolbar) { align-items: end; flex-wrap: wrap; gap: 12px; }
+.admin-react-page .admin-filters > input { flex: 1 1 240px; min-width: 0; width: auto; }
+.admin-react-page .admin-filters > select { flex: 0 1 200px; width: auto; }
+.admin-react-page .admin-filters > label:not(.sr-only) { display: grid; gap: 6px; min-width: 150px; }
+.admin-react-page :where(.operation-actions, .manage-product-actions, .event-row-actions, .system-actions) { gap: 8px; }
+.admin-react-page :where(.admin-table-row, .operation-row, .system-row) { padding-block: 18px; }
+.admin-react-page :where(.admin-metric strong, .operation-stat strong, .system-health-tile strong) { font-variant-numeric: tabular-nums; }
+.admin-react-page .status-pill { border-radius: 4px; font-size: 10px; line-height: 1.4; padding: 5px 9px; }
+.admin-react-page .orders-workspace .admin-order-card-summary { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, .65fr); }
+.admin-react-page .admin-order-edit { align-content: start; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.admin-react-page .admin-order-edit > .primary-action { grid-column: 1 / -1; justify-self: start; }
+.admin-react-page .admin-order-card-details { gap: 24px; padding: 20px; border-radius: 8px; }
+.admin-react-page .care-controls { gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.admin-react-page .care-controls > label:nth-child(3) { grid-column: 1 / -1; }
+.admin-react-page .care-controls > button { justify-self: start; }
+.admin-react-page .care-controls label { font-size: 12px; letter-spacing: 0; text-transform: none; }
+.admin-react-page .care-controls.gateway-refund-controls { background: color-mix(in srgb, var(--accent-strong) 4%, var(--surface)); border: 1px solid var(--line); border-radius: 8px; grid-template-columns: minmax(0, 1fr); padding: 16px; }
+.admin-react-page .gateway-refund-controls small { font-size: 12px; line-height: 1.6; }
+.admin-react-page .return-operation-row { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; margin-top: 16px; padding: 18px; }
+.admin-react-page .return-operation-row .operation-actions { flex: 0 0 124px; margin-left: 0; }
+.admin-react-page .return-operation-row .operation-main { gap: 8px; }
+.admin-react-page .return-type-mark { border-radius: 7px; }
+.admin-react-page .return-logistics { border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; }
+.admin-react-page .return-logistics > summary { padding: 14px 16px; }
+.admin-react-page .care-controls.return-logistics-grid { border-top: 1px solid var(--line); margin: 0; padding: 16px; }
+.admin-react-page .return-logistics-grid > .logistics-wide { grid-column: 1 / -1; }
+.admin-react-page .return-logistics-grid > label:nth-child(3) { grid-column: auto; }
+.admin-react-page .return-logistics-grid > p { margin: 0; }
+.admin-react-page .return-logistics-grid [role="status"] { overflow-wrap: anywhere; }
+.admin-react-page .care-ticket { border-radius: 7px; }
+.admin-react-page .care-message { border-radius: 8px; max-width: 92%; overflow-wrap: anywhere; }
+.admin-react-page .care-message > div { flex-wrap: wrap; }
+.admin-react-page .care-conversation { border-radius: 10px; }
+.admin-react-page .employee-permission-grid label { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; color: var(--ink); min-height: 44px; padding: 9px 10px; }
+.admin-react-page .employee-permission-grid label:has(input:checked) { border-color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.admin-react-page .employee-permission-grid label:has(input:disabled) { opacity: .65; }
+.admin-react-page .employee-password-control { flex-wrap: wrap; }
+.admin-react-page .employee-password-control input { flex-basis: 180px; }
+.admin-react-page .employee-password-control button { border-radius: 7px; }
+.admin-react-page .merch-insights { position: static; }
+.admin-react-page .merch-workspace > .merch-studio-grid { max-height: none; min-height: 0; overflow: visible; padding-right: 0; }
+.admin-react-page .events-page-header { padding: 24px; }
+.admin-react-page .events-page-header h2 { font-size: clamp(32px, 4vw, 48px); line-height: 1.1; }
+.admin-react-page .events-page-header h2 br { display: none; }
+.admin-react-page .events-page-header h2 em { margin-left: .2em; }
+.admin-react-page .events-spotlight-copy h3 { font-size: clamp(28px, 3vw, 38px); }
+.admin-react-page .events-list-heading h3 { font-size: 32px; }
+.admin-react-page .events-studio-grid > *, .admin-react-page .coupon-studio-grid > * { min-width: 0; }
+.admin-react-page .event-row-actions { max-width: 310px; }
+.admin-react-page .event-row-actions button { background: var(--surface); border: 1px solid var(--line); }
+.admin-react-page .event-row-actions .danger-link { color: var(--order-red); }
+.admin-react-page .admin-about-timeline-heading { flex-wrap: wrap; }
+@media (max-width: 1100px) {
+  .admin-react-page .dashboard-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .admin-react-page .merch-workspace { grid-template-columns: minmax(0, 1fr); grid-template-areas: "heading" "editor" "preview" "published"; }
+  .admin-react-page .merch-workspace > .merch-studio-grid { max-height: none; min-height: 0; overflow: visible; padding-right: 0; }
+}
+@media (max-width: 800px) {
+  .admin-react-page .admin-about-grid, .admin-react-page .events-studio-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-react-page .admin-about-preview, .admin-react-page .events-preview-column { position: static; }
+  .admin-react-page .orders-workspace .admin-order-card-summary { grid-template-columns: minmax(0, 1fr) auto; gap: 14px; }
+  .admin-react-page .order-card-progress { grid-column: 1 / -1; grid-row: 2; }
+  .admin-react-page .dashboard-performance-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .admin-react-page { padding-top: 24px; }
+  .admin-react-page .admin-workspace-nav { flex-wrap: wrap; overflow: visible; }
+  .admin-react-page .admin-nav-more { position: static; }
+  .admin-react-page .admin-nav-menu { left: 0; right: 0; top: calc(100% + 6px); width: 100%; max-height: 65dvh; }
+  .admin-react-page .admin-nav-more > summary { white-space: normal; }
+  .admin-react-page :where(.admin-panel-heading, .admin-section-heading) { flex-wrap: wrap; }
+  .admin-react-page .admin-filters { align-items: stretch; }
+  .admin-react-page .admin-filters > input, .admin-react-page .admin-filters > select { flex-basis: auto; width: 100%; }
+  .admin-react-page :where(.care-controls, .admin-form-grid, .admin-order-edit, .dashboard-filter-grid) { grid-template-columns: minmax(0, 1fr); }
+  .admin-react-page .care-controls > label:nth-child(3) { grid-column: auto; }
+  .admin-react-page .return-logistics-grid > .logistics-wide { grid-column: auto; }
+  .admin-react-page .return-operation-row { gap: 12px; padding: 14px; }
+  .admin-react-page .return-operation-row .operation-main { flex-basis: 100%; }
+  .admin-react-page .care-controls.return-logistics-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+  .admin-react-page .return-operation-row .operation-actions { align-items: center; flex-basis: 100%; flex-direction: row; justify-content: space-between; }
+  .admin-react-page .return-operation-row .operation-actions select { width: auto; }
+  .admin-react-page .admin-order-card-details { padding: 14px; }
+  .admin-react-page .admin-about-grid { gap: 20px; }
+  .admin-react-page .employee-permission-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-react-page .category-operation-head, .admin-react-page .care-conversation-head { flex-wrap: wrap; }
+  .admin-react-page .subcategory-add { flex-wrap: wrap; max-width: 100%; }
+  .admin-react-page .events-page-header { padding: 20px; }
+  .admin-react-page .event-row-actions { max-width: none; }
+  .admin-react-page .admin-action-error { align-items: flex-start; flex-direction: column; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-react-page *, .admin-react-page *::before, .admin-react-page *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

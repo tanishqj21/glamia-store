@@ -5,6 +5,9 @@
 	"compatibility_date": "2026-08-26",
 	"workers_dev": false,
 	"preview_urls": false,
+				"routes": [
+					{"pattern": "wibrawl.glamia.com", "custom_domain": true}
+				],
 	"assets": {
 		"directory": "./public",
 		"binding": "ASSETS",
@@ -23,6 +26,10 @@
 		{
 			"binding": "PRODUCT_IMAGES",
 			"bucket_name": "maison-mode-product-images"
+		},
+		{
+			"binding": "RETURN_DOCUMENTS",
+			"bucket_name": "glamia-return-documents"
 		}
 	],
 	"ai": {
@@ -52,6 +59,13 @@
 		"RAZORPAY_KEY_ID": "rzp_live_Td7I9Ih5JumPl1",
 		"PHONEPE_ENV": "production",
 		"PHONEPE_CLIENT_VERSION": "1",
-		"PUBLIC_SITE_URL": "https://glamiastore.com"
+		"GATEWAY_REFUNDS_ENABLED": "true",
+		"AUTOMATIC_GATEWAY_REFUNDS_ENABLED": "true",
+		"PUBLIC_SITE_URL": "https://glamiastore.com",
+		"MERCHANT_ACCOUNT_ID": "5859812746",
+		"MERCHANT_DATA_SOURCE_ID": "10750523846",
+		"MERCHANT_DEVELOPER_EMAIL": "tanishqj29@gmail.com",
+		"MERCHANT_USE_GA4_SERVICE_ACCOUNT": "true",
+		"MERCHANT_SYNC_ENABLED": "true"
 	}
 }

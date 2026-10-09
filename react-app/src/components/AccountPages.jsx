@@ -1,9 +1,17 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { money, formatIST, productUrl } from "../lib/commerce";
 import { AfterSalesDialog } from "./CustomerCare";
 import { PhoneField, composePhone, splitPhone } from "./PhoneField";
 import { MyReviewsPanel } from "./Reviews";
+import { CustomerRefundTracker } from "./CustomerRefundTracker";
+import { CustomerExchangeTracker } from './CustomerReturnDetails';
+import { OrderDetails } from './OrderDetails';
+import { useCustomerReturns } from "../lib/useCustomerReturns";
+import { refundDate } from "../lib/refundTracking";
+import { CancellationRefundCard } from './CancellationRefundCard';
+import { useCancellationRefunds } from '../lib/useCancellationRefunds';
+import { AccountLayout } from './AccountLayout';
 
 
 function addressLine(address) {
@@ -45,40 +53,7 @@ function profileForm(data = {}, requirePhone = false) {
     ? data.phones.map((item) => ({ id: item.id, label: item.label || "", country_code: item.country_code || "+91", phone_number: item.phone_number || item.phone || "", is_primary: Boolean(item.is_primary) }))
     : data.phone ? (() => { const parsed = splitPhone(data.phone); return [{ id: "primary", label: "", country_code: parsed.countryCode, phone_number: parsed.number, is_primary: true }]; })() : [];
   if (requirePhone && !phones.length) phones.push({ id: "primary", label: "", country_code: "+91", phone_number: "", is_primary: true });
-  return { first_name: data.first_name || "", middle_name: data.middle_name || "", last_name: data.last_name || "", dob: data.dob || "", gender: data.gender || "", phones };
-}
-
-function AccountNav({ route, onNavigate }) {
-  const links = [
-    ["/profile", "Profile"],
-    ["/address", "Address book"],
-    ["/orders", "Your orders"],
-    ["/wishlist", "Wishlist"],
-    ["/reviews", "Reviews"],
-  ];
-
-  return (
-    <nav className="account-nav" aria-label="Account sections">
-      {links.map(([href, label]) => (
-        <button key={href} type="button" className={route === href ? "active" : ""} onClick={() => onNavigate(href)}>
-          {label}
-        </button>
-      ))}
-    </nav>
-  );
-}
-
-function AccountLayout({ route, onNavigate, title, eyebrow = "Account", children }) {
-  return (
-    <main className="page-main">
-      <section className="account-page">
-        <p className="eyebrow">{eyebrow}</p>
-        <h1 className="page-title">{title}</h1>
-        <AccountNav route={route} onNavigate={onNavigate} />
-        {children}
-      </section>
-    </main>
-  );
+  return { first_name: data.first_name || "", middle_name: data.middle_name || "", last_name: data.last_name || "", dob: data.dob || "", gender: data.gender || "", referral_code: "", phones };
 }
 
 function ProfilePanel({ user }) {
@@ -174,14 +149,14 @@ function ProfilePanel({ user }) {
         <div><span>Gender / sex</span><strong>{profileGenderLabel(profile?.gender)}</strong></div>
       </div>
       {status && <p className="inline-note" role="status">{status}</p>}
-      <button className="primary-action profile-edit-trigger" type="button" aria-expanded={editing} onClick={() => { setEditing((value) => !value); setStatus(""); }}>{editing ? "Close editor" : "Edit profile"} <span aria-hidden="true">{editing ? "×" : "↗"}</span></button>
+      <button className="primary-action profile-edit-trigger" type="button" aria-expanded={editing} onClick={() => { setEditing((value) => !value); setStatus(""); }}>{editing ? "Close editor" : "Edit profile"} <span aria-hidden="true">{editing ? "×" : ""}</span></button>
       {editing && <form className="account-form profile-edit-panel" onSubmit={save}>
         <div className="profile-edit-heading"><div><p className="eyebrow">Edit profile</p><h3>Keep your details current.</h3></div><p className="muted">Your name is shown with an uppercase first letter.</p></div>
         <div className="form-row"><label>First name<input name="first_name" value={form.first_name} onChange={changeField} required autoComplete="given-name" /></label><label>Middle name <span className="form-hint">optional</span><input name="middle_name" value={form.middle_name} onChange={changeField} autoComplete="additional-name" /></label></div>
         <div className="form-row"><label>Last name<input name="last_name" value={form.last_name} onChange={changeField} required autoComplete="family-name" /></label><div className="profile-phone-list"><div className="profile-phone-heading"><span>Mobile numbers</span><span className="form-hint">up to 5 numbers</span></div>{form.phones.map((phone, index) => <div className="profile-phone-row" key={phone.id || index}><PhoneField id={`profile-phone-${index}`} label={index === 0 ? "" : `Mobile number ${index + 1}`} countryCode={phone.country_code} number={phone.phone_number} onCountryCodeChange={(value) => updatePhone(index, "country_code", value)} onNumberChange={(value) => updatePhone(index, "phone_number", value)} /><label className="phone-label-input">Label <span className="form-hint">optional</span><input value={phone.label} onChange={(event) => updatePhone(index, "label", event.target.value)} placeholder="Personal, work…" /></label><label className="phone-primary-choice"><input type="radio" name="primary-phone" checked={phone.is_primary} onChange={() => makePrimary(index)} /> Primary</label>{form.phones.length > 1 && <button type="button" className="text-link" onClick={() => removePhone(index)}>Remove</button>}</div>)}<button type="button" className="secondary-action" onClick={addPhone} disabled={form.phones.length >= 5}>+ Add another number</button></div></div>
         <div className="form-row"><label>Gender / sex<select name="gender" value={form.gender} onChange={changeField}><option value="">Prefer not to specify</option><option value="female">Female</option><option value="male">Male</option><option value="non_binary">Non-binary</option><option value="prefer_not_to_say">Prefer not to say</option></select></label><label>Birthday <span className="form-hint">changeable once per year</span><input name="dob" type="date" value={form.dob} onChange={changeField} disabled={birthdayLocked} autoComplete="bday" />{age !== null && <span className="profile-age-note">Calculated age: {age}</span>}</label></div>
         {birthdayLocked && <p className="inline-note">Birthday changes are locked until {formatIST(profile.dob_change_available_at, { dateStyle: "medium" })}.</p>}
-        <button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving…" : "Save profile"} <span aria-hidden="true">↗</span></button>
+        <button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving…" : "Save profile"} </button>
       </form>}
     </section>
   );
@@ -256,9 +231,10 @@ export function ProfileCompletionPage({ user, onComplete }) {
             <div className="form-row"><label>First name<input name="first_name" value={form.first_name} onChange={changeField} required autoComplete="given-name" /></label><label>Middle name <span className="form-hint">optional</span><input name="middle_name" value={form.middle_name} onChange={changeField} autoComplete="additional-name" /></label></div>
             <div className="form-row"><label>Last name<input name="last_name" value={form.last_name} onChange={changeField} required autoComplete="family-name" /></label><div className="profile-phone-list"><div className="profile-phone-heading"><span>Mobile number</span><span className="form-hint">required</span></div>{form.phones.slice(0, 1).map((phone) => <div className="profile-phone-row profile-phone-row-required" key={phone.id}><PhoneField id="onboarding-phone" label="" countryCode={phone.country_code} number={phone.phone_number} onCountryCodeChange={(value) => updatePhone("country_code", value)} onNumberChange={(value) => updatePhone("phone_number", value)} required /></div>)}</div></div>
             <div className="form-row"><label>Gender / sex<select name="gender" value={form.gender} onChange={changeField} required><option value="">Choose an option</option><option value="female">Female</option><option value="male">Male</option><option value="non_binary">Non-binary</option><option value="prefer_not_to_say">Prefer not to say</option></select></label><label>Birthday<input name="dob" type="date" value={form.dob} onChange={changeField} disabled={birthdayLocked} required autoComplete="bday" />{age !== null && <span className="profile-age-note">Calculated age: {age}</span>}</label></div>
+            {profile?.referral_onboarding_open && <label>Referral code <span className="form-hint">optional · one code during signup</span><input name="referral_code" inputMode="numeric" pattern="[0-9]{7}" maxLength={7} value={form.referral_code} onChange={changeField} placeholder="7-digit code" autoComplete="off" /><small className="form-hint">You can use only one referral code, now while completing your new account.</small></label>}
             {birthdayLocked && <p className="inline-note">Birthday changes are locked until {formatIST(profile.dob_change_available_at, { dateStyle: "medium" })}.</p>}
             {status && <p className="inline-error" role="alert">{status}</p>}
-            <button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving details…" : "Save and continue"} <span aria-hidden="true">↗</span></button>
+            <button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving details…" : "Save and continue"} </button>
           </form>
         </section>
       </section>
@@ -333,59 +309,73 @@ function AddressPanel({ initialAddresses }) {
       </section>
       <section className="account-panel" aria-labelledby="new-address-title">
         <p className="eyebrow">Address book</p><h2 id="new-address-title">Add an address</h2>
-        <form className="account-form" onSubmit={save}>
+        <form className="account-form address-form" onSubmit={save}>
           <div className="form-row"><label>Full name<input name="name" value={form.name} onChange={changeField} required /></label><PhoneField label="Phone" countryCode={splitPhone(form.phone).countryCode} number={splitPhone(form.phone).number} onCountryCodeChange={(value) => setForm((current) => ({ ...current, phone: composePhone(value, splitPhone(current.phone).number) }))} onNumberChange={(value) => setForm((current) => ({ ...current, phone: composePhone(splitPhone(current.phone).countryCode, value) }))} required /></div>
           <label>Address line<input name="line1" value={form.line1} onChange={changeField} required /></label><label>Apartment, landmark <span className="form-hint">optional</span><input name="line2" value={form.line2} onChange={changeField} /></label>
           <div className="form-row"><label>City / town<input name="city" value={form.city} onChange={changeField} required /></label><label>State / region<input name="state" value={form.state} onChange={changeField} /></label></div>
           <div className="form-row"><label>Postal code<input name="pin" value={form.pin} onChange={changeField} /></label><label>Country<input name="country" value={form.country} onChange={changeField} required /></label></div>
-          <button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving…" : "Save address"} <span aria-hidden="true">↗</span></button>
+          <button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving…" : "Save address"} </button>
         </form>
       </section>
     </div>
   );
 }
 
-function OrdersPanel({ initialOrders, products }) {
+function OrdersPanel({ initialOrders, products, onNavigate }) {
   const [orders, setOrders] = useState(initialOrders || []);
-  const [returns, setReturns] = useState([]);
+  const cancellations=useCancellationRefunds(orders,setOrders);
+  const updates = useCustomerReturns();
+  const returns = updates.requests;
   const [status, setStatus] = useState("");
   const [afterSalesOrder, setAfterSalesOrder] = useState(null);
   useEffect(() => { setOrders(initialOrders || []); }, [initialOrders]);
-  useEffect(() => {
-    let active = true;
-    apiFetch("/api/returns").then(async (response) => {
-      const data = await response.json();
-      if (active && response.ok) setReturns(data.requests || []);
-    }).catch(() => null);
-    return () => { active = false; };
-  }, []);
-
-  async function refreshReturns() {
-    const response = await apiFetch("/api/returns").catch(() => null);
-    if (response?.ok) {
-      const data = await response.json();
-      setReturns(data.requests || []);
-    }
-  }
+  const missingReplacements=returns.filter(request=>request.replacement_order_id&&!orders.some(order=>order.id===request.replacement_order_id)).map(request=>request.replacement_order_id).sort().join(',');
+  useEffect(()=>{
+    if(!missingReplacements)return undefined;
+    const controller=new AbortController();
+    apiFetch('/api/orders',{signal:controller.signal,cache:'no-store'}).then(async response=>{
+      const data=await response.json();if(!response.ok)throw Error('Could not load the new replacement order');
+      if(!controller.signal.aborted)setOrders(data.orders||[]);
+    }).catch(()=>{if(!controller.signal.aborted)setStatus('A replacement order was created. Refresh your orders to load its full details.');});
+    return ()=>controller.abort();
+  },[missingReplacements,updates.updatedAt]);
 
   async function cancel(order) {
-    if (!window.confirm(`Cancel order ${order.order_number}?`)) return;
-    const response = await apiFetch(`/api/orders/${encodeURIComponent(order.id)}/cancel`, { method: "POST", body: "{}" });
-    const data = await response.json();
-    if (!response.ok) { setStatus(data.error || "Order could not be cancelled"); return; }
-    setOrders((current) => current.map((item) => item.id === order.id ? { ...item, status: "cancelled" } : item));
-    setStatus("Order cancelled.");
+    if (!window.confirm(`Cancel order ${order.order_number}?${order.payment_status==='paid'?' Used credits will be restored and the original-payment refund tracked separately.':''}`)) return;
+    try {
+      const response = await apiFetch(`/api/orders/${encodeURIComponent(order.id)}/cancel`, { method: "POST", body: "{}" });
+      const data = await response.json();
+      if (!response.ok) throw Error(data.error || "Order could not be cancelled");
+      setOrders((current) => current.map((item) => item.id === order.id ? data.order : item));
+      setStatus(data.order?.cancellation_refund?'Order cancelled. Follow its refund progress below; cancellation is not confirmation of a bank refund.':'Order cancelled.');
+    }catch(cause){setStatus(cause.message);}
   }
+
+  if (updates.expired) return <section className="account-panel"><p className="inline-error" role="alert">{updates.error}</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Sign in again</button></section>;
 
   return (
     <section className="account-panel" aria-labelledby="orders-title">
       <div className="account-panel-heading"><div><p className="eyebrow">Order history</p><h2 id="orders-title">Your purchases</h2></div><span className="account-badge">{orders.length} total</span></div>
       {status && <p className="inline-note" role="status">{status}</p>}
+      {cancellations.error&&<p className="inline-error" role="alert">{cancellations.error}</p>}
+      {orders.some(order=>order.cancellation_refund)&&<button type="button" className="secondary-action" onClick={cancellations.refresh} disabled={!navigator.onLine}>Refresh cancellation refunds</button>}
+      <div className="refund-updates-toolbar"><div><strong>Return &amp; refund updates</strong><small>{updates.offline ? "You're offline. Updates resume when you reconnect." : updates.loading ? "Checking your return requests…" : updates.updatedAt ? `Last refreshed ${refundDate(updates.updatedAt)} · Label readiness checks every 15 seconds; other active updates every minute while visible.` : "Updates are unavailable. Please try again."}</small></div><button className="secondary-action" type="button" onClick={updates.refresh} disabled={updates.loading || updates.refreshing || updates.offline}>{updates.refreshing ? "Refreshing…" : "Refresh updates"}</button></div>
+      {updates.loading && <div className="refund-loading" role="status">Loading return and refund progress…</div>}
+      {updates.error && <p className="inline-error" role="alert">{updates.error}</p>}
       {orders.length ? <div className="order-list">{orders.map((order) => {
-        const afterSales = returns.find((request) => request.order_id === order.id);
-        return <article className="account-order-card" key={order.id}><div className="order-card-top"><div><strong>{order.order_number}</strong><p>{order.created_at ? formatIST(order.created_at) : "Recent order"} · {order.order_type === "preorder" ? "Pre-order" : String(order.payment_method || "pending").toUpperCase()} · Payment {String(order.payment_status || "pending").replace(/_/g, " ")}</p></div><span className={`status-pill status-${order.status}`}>{String(order.status || "pending").replace(/_/g, " ")}</span></div><div className="order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.title || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}{item.preorder && <small className="preorder-line-label">Pre-order</small>}</span>)}</div>{afterSales && <p className="inline-note" role="status">After-sales request: {String(afterSales.status || "requested").replace(/_/g, " ")}{afterSales.refund_destination === "store_credit" ? " · Store credit" : ""}</p>}<div className="order-card-bottom"><strong>{money(order.total)}</strong><div className="order-card-actions"><a className="text-link" href={`/api/orders/${encodeURIComponent(order.id)}/invoice`} target="_blank" rel="noreferrer">Invoice preview ↗</a>{order.status === "delivered" && !afterSales && <button type="button" onClick={() => setAfterSalesOrder(order)}>Return / Refund</button>}{["pending", "confirmed"].includes(order.status) && cancellationWindowOpen(order) && <button type="button" onClick={() => cancel(order)}>Cancel order</button>}{["pending", "confirmed"].includes(order.status) && !cancellationWindowOpen(order) && <small className="form-hint">Cancellation window closed after 2 days.</small>}</div></div></article>;
+        const orderCases=returns.filter(request=>request.order_id===order.id);
+        const afterSales = orderCases.find(request=>!['rejected','cancelled','refunded','completed'].includes(request.status)) || orderCases[0];
+        const paymentStatus = afterSales?.order?.payment_status || order.payment_status;
+        return <article className="account-order-card" key={order.id} id={`order-${order.id}`}>
+          <OrderDetails order={order} onNavigate={onNavigate}/>
+          <div className="order-card-top"><div><strong>{order.order_number}</strong><p>{order.created_at ? formatIST(order.created_at) : "Recent order"} · {order.order_type === "preorder" ? "Pre-order" : String(order.payment_method || "pending").toUpperCase()} · Payment {String(paymentStatus || "pending").replace(/_/g, " ")}</p></div><span className={`status-pill status-${order.status}`}>{String(order.status || "pending").replace(/_/g, " ")}</span></div>
+          <div className="order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.title || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}{item.preorder && <small className="preorder-line-label">Pre-order</small>}</span>)}</div>
+          {order.delivery_estimate&&!['cancelled','delivered'].includes(order.status)&&<p className="form-hint">{order.delivery_estimate}</p>}<CancellationRefundCard order={order} onNavigate={onNavigate}/>
+          {orderCases.map(request=>request.type==='exchange'?<CustomerExchangeTracker key={request.id} request={request} onNavigate={onNavigate}/>:<CustomerRefundTracker key={request.id} request={request} order={order} onNavigate={onNavigate}/>)}
+          <div className="order-card-bottom"><strong>{money(order.total)}</strong><div className="order-card-actions">{order.bill_available ? <a className="secondary-action" href={`/api/orders/${encodeURIComponent(order.id)}/bill`} download>Download bill (PDF)</a> : <a className="text-link" href={`/api/orders/${encodeURIComponent(order.id)}/invoice`} target="_blank" rel="noreferrer">Invoice preview</a>}{order.status === "delivered" && (!afterSales || ['rejected','cancelled','refunded','completed'].includes(afterSales.status)) && <button type="button" disabled={!updates.updatedAt || updates.loading || Boolean(updates.error) || updates.offline} onClick={() => setAfterSalesOrder(order)}>{afterSales ? 'Submit a new request' : 'Return / Refund'}</button>}{["pending", "confirmed"].includes(order.status) && cancellationWindowOpen(order) && <button type="button" onClick={() => cancel(order)}>Cancel order</button>}{["pending", "confirmed"].includes(order.status) && !cancellationWindowOpen(order) && <small className="form-hint">Cancellation window closed after 2 days.</small>}</div></div>
+        </article>;
       })}</div> : <div className="empty-state">You have not placed an order yet.</div>}
-      {afterSalesOrder && <AfterSalesDialog order={afterSalesOrder} products={products} onClose={() => setAfterSalesOrder(null)} onComplete={(data) => { setAfterSalesOrder(null); refreshReturns(); setStatus(data.replacement_order ? "Exchange submitted and a replacement order was created." : "Return / refund request submitted."); }} />}
+      {afterSalesOrder && <AfterSalesDialog order={afterSalesOrder} products={products} onClose={() => setAfterSalesOrder(null)} onComplete={(data) => { setAfterSalesOrder(null); updates.refresh(); setStatus(data.request?.type==='exchange' ? "Exchange placed. Your ₹0 replacement follows normal packing and delivery. Care will arrange return pickup separately." : "Return / refund request submitted. Follow its progress here; submitting a request does not issue a refund immediately."); }} />}
     </section>
   );
 }
@@ -395,16 +385,16 @@ function WishlistPanel({ products, wishlist, toggleWishlist, onNavigate }) {
   return (
     <section className="account-panel" aria-labelledby="wishlist-title">
       <div className="account-panel-heading"><div><p className="eyebrow">Saved edits</p><h2 id="wishlist-title">Your wishlist</h2></div><span className="account-badge">{saved.length} saved</span></div>
-      {saved.length ? <div className="product-grid account-product-grid">{saved.map((product) => <article className="product-card" key={product.id}><button className="product-image" type="button" onClick={() => onNavigate(productUrl(product))}>{product.image_url && <img src={product.image_url} alt={product.name} loading="lazy" />}<span className="quick-view">View item ↗</span></button><button className="wishlist-button is-saved" type="button" onClick={() => toggleWishlist(product.id)} aria-label={`Remove ${product.name} from wishlist`}>♥</button><div className="product-info"><p>{product.brand || product.category}</p><h3>{product.name}</h3><strong>{money(product.price)}</strong></div></article>)}</div> : <div className="empty-state">Nothing saved yet. Tap the heart on an item to keep it here.</div>}
+      {saved.length ? <div className="product-grid account-product-grid">{saved.map((product) => <article className="product-card" key={product.id}><button className="product-image" type="button" onClick={() => onNavigate(productUrl(product))}>{product.image_url && <img src={product.image_url} alt={product.name} loading="lazy" />}<span className="quick-view">View item </span></button><button className="wishlist-button is-saved" type="button" onClick={() => toggleWishlist(product.id)} aria-label={`Remove ${product.name} from wishlist`}>♥</button><div className="product-info"><p>{product.brand || product.category}</p><h3>{product.name}</h3><strong>{money(product.price)}</strong></div></article>)}</div> : <div className="empty-state">Nothing saved yet. Tap the heart on an item to keep it here.</div>}
     </section>
   );
 }
 
 export function AccountPage({ route, user, addresses, orders, products, wishlist, toggleWishlist, onNavigate }) {
   if (!user) {
-    return <AccountLayout route={route} onNavigate={onNavigate} title="Sign in to continue"><section className="account-panel"><p className="muted">Sign in to access your profile, saved addresses, orders, and wishlist.</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Continue to sign in <span aria-hidden="true">↗</span></button></section></AccountLayout>;
+    return <AccountLayout route={route} onNavigate={onNavigate} title="Sign in to continue"><section className="account-panel"><p className="muted">Sign in to access your profile, saved addresses, orders, and wishlist.</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Continue to sign in </button></section></AccountLayout>;
   }
 
   const title = route === "/address" ? "Address book" : route === "/orders" ? "Your orders" : route === "/wishlist" ? "Wishlist" : route === "/reviews" ? "Your reviews" : "Your account";
-  return <AccountLayout route={route} onNavigate={onNavigate} title={title}>{route === "/profile" && <ProfilePanel user={user} />}{route === "/address" && <AddressPanel initialAddresses={addresses} />}{route === "/orders" && <OrdersPanel initialOrders={orders} products={products} />}{route === "/wishlist" && <WishlistPanel products={products} wishlist={wishlist} toggleWishlist={toggleWishlist} onNavigate={onNavigate} />}{route === "/reviews" && <MyReviewsPanel onNavigate={onNavigate} />}</AccountLayout>;
+  return <AccountLayout route={route} onNavigate={onNavigate} title={title}>{route === "/profile" && <ProfilePanel user={user} />}{route === "/address" && <AddressPanel initialAddresses={addresses} />}{route === "/orders" && <OrdersPanel key={user.id || user.email} initialOrders={orders} products={products} onNavigate={onNavigate} />}{route === "/wishlist" && <WishlistPanel products={products} wishlist={wishlist} toggleWishlist={toggleWishlist} onNavigate={onNavigate} />}{route === "/reviews" && <MyReviewsPanel onNavigate={onNavigate} />}</AccountLayout>;
 }

@@ -21,7 +21,7 @@ export class ErrorBoundary extends React.Component {
           <h1 id="error-title" className="page-title">This edit needs<br /><em>another moment.</em></h1>
           <p className="muted">The page could not finish loading. Your account, cart, and saved preferences are still safe.</p>
           <button className="primary-action" type="button" onClick={() => window.location.reload()}>
-            Reload the page <span aria-hidden="true">↗</span>
+            Reload the page
           </button>
         </section>
       </main>

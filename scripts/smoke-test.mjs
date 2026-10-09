@@ -10,8 +10,8 @@ import { readFileSync } from "node:fs";
 
 const BASE = process.env.SMOKE_BASE_URL || "http://127.0.0.1:8787";
 if (!["127.0.0.1", "localhost"].includes(new URL(BASE).hostname)) throw new Error("Smoke tests reset fixtures and must run against a local server.");
-const SECRET = readDevVar("SESSION_SECRET");
-const ADMIN_EMAIL = readFirstAdminEmail() || "admin@example.com";
+const SECRET = process.env.SMOKE_SESSION_SECRET || readDevVar("SESSION_SECRET");
+const ADMIN_EMAIL = process.env.SMOKE_ADMIN_EMAIL || readFirstAdminEmail() || "admin@example.com";
 const SELLER_EMAIL = "seller@example.com";
 
 let googleConfigured = false;
@@ -64,6 +64,8 @@ function mintSession(email, role) {
 }
 
 async function call(method, path, { cookie, body, form, raw } = {}) {
+  // Product fixtures include the packaging field required by the current listing schema.
+  if (method === "POST" && path === "/api/products" && body) body = { what_in_box: "1 garment", ...body };
   const headers = {};
   if (cookie) headers.cookie = cookie;
   if (body !== undefined) headers["content-type"] = "application/json";
@@ -566,7 +568,7 @@ let baselineCredits = 0;
     edit.data.product?.price === 1199 &&
     edit.data.product?.variant_group === variantGroupId);
 
-  const revertEdit = await call("PATCH", `/api/admin/products/${variantProductId}`, {
+  await call("PATCH", `/api/admin/products/${variantProductId}`, {
     cookie: mintSession(ADMIN_EMAIL, "admin"),
     body: { name: base.name, price: base.price }
   });

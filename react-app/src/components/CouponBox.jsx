@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { formatIST, money } from "../lib/commerce";
 
@@ -39,9 +39,9 @@ export function CouponBox({ items, appliedCoupon, onCouponApplied, onCouponRemov
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "That coupon could not be applied");
-      onCouponApplied({ code: data.code || nextCode, discount: Number(data.discount || 0) });
+      onCouponApplied({ code: data.code || nextCode, discount: Number(data.discount || 0), allow_store_credits: Boolean(data.allow_store_credits), admin_exempt: Boolean(data.admin_exempt) });
       setCode("");
-      setMessage(`${data.code || nextCode} applied — you save ${money(data.discount || 0)}.`);
+      setMessage(`${data.code || nextCode} applied — you save ${money(data.discount || 0)}.${data.admin_exempt ? ' Whitelisted admin: coupon restrictions waived.' : ''}`);
     } catch (error) {
       setMessage(error.message);
     } finally {

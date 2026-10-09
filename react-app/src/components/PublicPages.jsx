@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { shippingPolicyPromise } from "../lib/deliveryPromise";
 
 const policySections = [
   {
@@ -51,7 +52,8 @@ const policySections = [
         heading: "Information we collect",
         paragraphs: [
           "Depending on how you use Glamia, we may collect your name, date of birth, address, telephone or mobile number, email address, proof of identity or address, account details, and order or transaction information.",
-          "Where relevant, we may collect sensitive information such as bank, card, payment, or biometric information. We may also receive information about your preferences, behaviour, transactions, or interactions with third-party business partners. Those third parties may process data under their own privacy policies."
+          "Where relevant, we may collect sensitive information such as bank, card, payment, or biometric information. We may also receive information about your preferences, behaviour, transactions, or interactions with third-party business partners. Those third parties may process data under their own privacy policies.",
+          "If you use the Glamia Employees app, we process the employee ID, name, staff email when supplied, permissions, sign-in session, and work activity needed to provide the workspace assigned to you. Employee accounts are created and managed by Glamia administrators; the employee app does not collect location, contacts, camera, microphone, or advertising identifiers."
         ]
       },
       {
@@ -72,7 +74,7 @@ const policySections = [
         heading: "Security, deletion, and retention",
         paragraphs: [
           "Glamia uses reasonable security practices, but no internet transmission or storage system is completely secure. You are responsible for protecting your login and password and should report suspected phishing or account misuse promptly. Glamia will not ask for your debit or credit card PIN, net-banking password, or mobile-banking password.",
-          "You can request account deletion from your profile or settings. We may retain information while grievances, claims, shipments, or other services are pending, or where retention is required for fraud prevention, abuse detection, legal compliance, or anonymised analytics."
+          "You can request account deletion from your profile or settings. Employees can request access changes, deactivation, or deletion of their staff account by contacting their Glamia administrator or the support team through the Contact page. We may retain information while grievances, claims, shipments, staff audit records, or other services are pending, or where retention is required for fraud prevention, abuse detection, legal compliance, or anonymised analytics."
         ]
       },
       {
@@ -85,7 +87,7 @@ const policySections = [
       {
         heading: "Grievance Officer",
         paragraphs: [
-          "The Grievance Officer name, designation, office address, phone number, and service hours were not completed in the supplied policy document. Until those details are published, please use Glamia’s support page for privacy questions or requests."
+          "Developer and privacy contact: SHREE SHAYAM HOSIERY (Glamia). For privacy questions, employee account requests, or data-rights requests, email support@glamiastore.com or use Glamia’s Contact page. Glamia may verify the identity of the requester before acting on a request."
         ]
       }
     ]
@@ -114,7 +116,7 @@ const policySections = [
       {
         heading: "Refund timing",
         paragraphs: [
-          "Approved refunds are processed within 14 days. The time for funds to appear may also depend on the payment provider or bank."
+          "Eligible paid, undispatched cancellations queue an original-payment refund. Used store credits are restored separately. Return refunds begin after approval and confirmed collection or warehouse receipt; store-credit returns need owner approval. Track queued, processing, confirmed or needs-review progress in Your orders. Bank posting time depends on the payment provider and bank."
         ]
       }
     ]
@@ -134,15 +136,16 @@ const policySections = [
         heading: "Eligibility",
         bullets: [
           "The item must be unused, in the same condition, and in its original packaging.",
-          "Sale items may not be eligible for return or exchange.",
-          "Only defective or damaged items may be exchanged where the product category permits it.",
+          "The return eligibility recorded for the item at purchase applies, including sale items.",
+          "Eligible size exchanges are available for purchased items marked returnable, subject to stock. Damaged or incorrect non-returnable items require care-team review and an authorised exception.",
           "Some categories may be exempt; any applicable exemption will be identified at the time of purchase."
         ]
       },
       {
         heading: "How returns are processed",
         paragraphs: [
-          "A return or exchange is accepted only after the item is received and inspected. Glamia will email you about the inspection outcome and process the request in line with this policy."
+          "Eligible size exchanges immediately create a linked ₹0 replacement for normal packing and shipping; admin approval and receipt of the original are not required before dispatch. You must still return the original item. Care arranges its collection separately. Refund returns require approval and confirmed courier pickup or warehouse receipt before authorised payout processing.",
+          "Care manually books return collection. After courier tracking is saved, the label becomes available in Your orders for downloading and printing. Do not ship before receiving instructions. If you cannot print or a pickup is missed, contact care using the request number. There is no restocking fee. Refund progress is shown in Your orders; provider confirmation and bank posting are separate steps."
         ]
       }
     ]
@@ -156,6 +159,7 @@ const policySections = [
         heading: "Dispatch and delivery",
         bullets: [
           "Orders are shipped through registered domestic courier and/or speed post services.",
+          "Typical dispatch takes 1–2 business days. Delivery after dispatch typically takes 2–3 business days in Delhi and 7–8 business days elsewhere in India. Shipping is free for every order.",
           "Orders are shipped within 14 days from the date of order or payment, or by the delivery date agreed with you.",
           "All shipments remain subject to the norms and service conditions of the relevant courier or postal provider.",
           "Delivery is attempted at the buyer’s address provided at the time of purchase."
@@ -189,7 +193,7 @@ function policyIdFromLocation() {
   return legacyPolicyIds[legacy] || "terms";
 }
 
-export function PoliciesPage({ onNavigate, policyId = "" }) {
+export function PoliciesPage({ onNavigate, policyId = "", storefront }) {
   const selectedSection = policyId ? policyById.get(policyId) : null;
   const visibleSections = selectedSection ? [selectedSection] : policySections;
   const [activeId, setActiveId] = useState(policyId || policyIdFromLocation);
@@ -226,7 +230,7 @@ export function PoliciesPage({ onNavigate, policyId = "" }) {
       <p className="eyebrow">Glamia care</p>
       <h1 id="policies-title" className="page-title">{selectedSection?.label || "Policies, plainly put."}</h1>
       <p className="policy-react-copy">{selectedSection?.intro || "Everything you need to know about using Glamia, your data, orders, returns, refunds, and delivery — in one place."}</p>
-      <p className="policy-effective-note">Last reviewed from the supplied policy document · Please review these policies before production launch.</p>
+      <p className="policy-effective-note">Last reviewed from the supplied policy document · Review the applicable policy and purchased-item eligibility before ordering.</p>
     </header>
     <div className="policy-page-layout">
       <nav className="policy-react-links policy-page-nav" aria-label="Policy sections">
@@ -240,17 +244,17 @@ export function PoliciesPage({ onNavigate, policyId = "" }) {
           {section.blocks.map((block) => <div className="policy-block" key={block.heading}>
             <h3>{block.heading}</h3>
             {(block.paragraphs || []).map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
-            {block.bullets && <ul>{block.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}</ul>}
+            {block.bullets && <ul>{block.bullets.map((bullet) => <li key={bullet}>{section.id==="shipping"&&bullet.startsWith("Typical dispatch")?`${shippingPolicyPromise(storefront?.customer_experience)} Shipping is free.`:bullet}</li>)}</ul>}
           </div>)}
         </section>)}
       </div>
     </div>
-    <aside className="policy-page-note"><strong>Need help with an order?</strong><span>Keep your Glamia order number ready and contact the care team.</span><a href="/support" onClick={(event) => { event.preventDefault(); onNavigate?.("/support"); }}>Open support centre ↗</a></aside>
+    <aside className="policy-page-note"><strong>Need help with an order?</strong><span>Keep your Glamia order number ready and contact the care team.</span><a href="/support" onClick={(event) => { event.preventDefault(); onNavigate?.("/support"); }}>Open support centre </a></aside>
   </section></main>;
 }
 
 export function ContactPage({ storefront, onNavigate }) {
   const contact = storefront?.support_contact;
   const phone = contact?.visible && contact.phone_number ? `${contact.country_code || "+91"} ${contact.phone_number}` : "";
-  return <main className="page-main"><section className="contact-page"><div className="contact-hero"><p className="eyebrow">Glamia care</p><h1 className="page-title">Contact us</h1><p className="contact-intro">We’re here to help with orders, fit, delivery, returns, and anything else about your Glamia edit.</p></div><div className="contact-method-grid"><a className="contact-method" href="mailto:support@glamiastore.com"><span className="eyebrow">Email support</span><strong>support@glamiastore.com</strong><small>For order and account help</small></a>{phone ? <a className="contact-method" href={`tel:${contact.country_code}${contact.phone_number}`}><span className="eyebrow">Call or WhatsApp</span><strong>{phone}</strong><small>Support mobile</small></a> : <div className="contact-method contact-method-muted"><span className="eyebrow">Phone support</span><strong>Coming soon</strong><small>Email us anytime and we’ll get back to you.</small></div>}</div><div className="contact-actions"><button type="button" className="primary-action" onClick={() => onNavigate("/support")}>Open support centre <span aria-hidden="true">↗</span></button><button type="button" className="secondary-action" onClick={() => onNavigate("/track-order")}>Track an order</button></div></section></main>;
+  return <main className="page-main"><section className="contact-page"><div className="contact-hero"><p className="eyebrow">Glamia care</p><h1 className="page-title">Contact us</h1><p className="contact-intro">We’re here to help with orders, fit, delivery, returns, and anything else about your Glamia edit.</p></div><div className="contact-method-grid"><a className="contact-method" href="mailto:support@glamiastore.com"><span className="eyebrow">Email support</span><strong>support@glamiastore.com</strong><small>For order and account help</small></a>{phone ? <a className="contact-method" href={`tel:${contact.country_code}${contact.phone_number}`}><span className="eyebrow">Call or WhatsApp</span><strong>{phone}</strong><small>Support mobile</small></a> : <div className="contact-method contact-method-muted"><span className="eyebrow">Phone support</span><strong>Coming soon</strong><small>Email us anytime and we’ll get back to you.</small></div>}</div><div className="contact-actions"><button type="button" className="primary-action" onClick={() => onNavigate("/support")}>Open support centre </button><button type="button" className="secondary-action" onClick={() => onNavigate("/track-order")}>Track an order</button></div></section></main>;
 }

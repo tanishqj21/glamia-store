@@ -1,24 +1,107 @@
+import { canManageEmployee, publicProductView, readBoundedBody, validSessionClaims } from "./security.js";
+import { merchantAdmin, processMerchantSync, scheduleMerchantSync } from "./google-merchant.js";
+import { creditAuthority, creditWallet, creditAdminData, grantStoreCredits, saveCreditSettings, decideCreditRefund, ensureReferralCode, claimSignupReferral, validateReferral, qualifyCreditReferral } from "./store-credits.js";
+import { billFontBytes, billLogoBytes, canReadOrderBill, createOrderBillPdf } from "./order-bills.js";
+import { readAboutPage, saveAboutPage } from "./about.js";
+import { applyGatewayState } from "./payment-state.js";
+import { claimPaymentCreation } from "./payment-creation.js";
+import { approveGatewayRefund, executeGatewayRefund, reconcileGatewayRefund, recoverRazorpayRefund, publicGatewayRefund, refundPaise } from "./gateway-refunds.js";
+import { customerReturnView, selectReturnLines, returnAllocation, remainingReturnLines } from "./customer-after-sales.js";
+import { returnDocument, saveReturnLogistics } from "./return-logistics.js";
+import { selectedVariantCopy, linkedSpecificationCopy } from './product-trust.js';
+import { customerPromises,deliveryPromise,shippingPolicyPromise } from './customer-promises.js';
+import { attachCancellationRefunds, cancellationRefundView } from "./cancellation-refunds.js";
+import { purchasedReturnLines, supportLineReferences } from './support-return-access.js';
+import { storefrontCss, storefrontStyleHash, storefrontStyleFiles, storefrontDeferredStyleFile, storefrontRoutePreloads, storefrontRouteCriticalStyles } from './storefront-styles.js';
+import { inlineProductImage } from './product-image-bootstrap';
+
 const SESSION_COOKIE = "mm_session";
 const HOST_SESSION_COOKIE = "__Host-mm_session";
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60;
 const DAILY_UPLOAD_LIMIT = 50 * 1024 * 1024;
 const GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const APPLE_CERTS_URL = "https://appleid.apple.com/auth/keys";
+const APPLE_MOBILE_CALLBACK_PATH = "/api/auth/apple/mobile/callback";
+const APPLE_WEB_CALLBACK_PATH = "/api/auth/apple/web/callback";
+const APPLE_WEB_FLOW_COOKIE = "__Host-glamia_apple_flow";
+const APPLE_MOBILE_FLOW_SECONDS = 10 * 60;
 const DEMO_ADMIN_EMAIL = "demo-admin@glamia.local";
 const LOW_STOCK_THRESHOLD = 15;
 const CANCELLATION_WINDOW_DAYS = 2;
+const PAYMENT_ORDER_RETENTION_DAYS = 1;
 const RETURN_WINDOW_DAYS = 7;
 const EMPLOYEE_SESSION_MAX_AGE = 30 * 24 * 60 * 60;
+const EMPLOYEE_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 // Cloudflare Workers currently caps PBKDF2 iteration counts at 100,000.
 // Existing employee records keep and use their stored iteration count.
 const EMPLOYEE_PASSWORD_ITERATIONS = 100000;
 const EMPLOYEE_LOGIN_MAX_FAILURES = 5;
 const EMPLOYEE_LOGIN_LOCK_MS = 15 * 60 * 1000;
+const EMPLOYEE_POSITION_OPTIONS = [
+  { id: "admin", label: "Admin" },
+  { id: "manager", label: "Manager" },
+  { id: "customer_relationship", label: "Customer relationship" },
+  { id: "inventory_manager", label: "Store manager" },
+  { id: "packing_staff", label: "Packing staff" }
+];
+const EMPLOYEE_PERMISSION_OPTIONS = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "storefront", label: "Storefront" },
+  { id: "hero", label: "Hero Studio" },
+  { id: "events", label: "Events" },
+  { id: "cinematic_reel", label: "Cinematic reel" },
+  { id: "tax", label: "GST & HSN" },
+  { id: "coupons", label: "Coupons" },
+  { id: "credits", label: "Store credits & referrals" },
+  { id: "labels", label: "Labels" },
+  { id: "employees", label: "Employees" },
+  { id: "manage_store", label: "Manage store" },
+  { id: "notifications", label: "Notifications" },
+  { id: "packing", label: "Packing" },
+  { id: "orders", label: "Orders" },
+  { id: "products", label: "All products" },
+  { id: "add_product", label: "Add listing" },
+  { id: "bulk_listing", label: "Bulk listing" },
+  { id: "inventory", label: "Inventory" },
+  { id: "customers", label: "Customers" },
+  { id: "reviews", label: "Reviews" },
+  { id: "questions", label: "Product questions" },
+  { id: "deals", label: "Deals" },
+  { id: "categories", label: "Categories" },
+  { id: "returns", label: "Returns" },
+  { id: "support", label: "Customer support" },
+  { id: "system", label: "System" },
+  { id: "google_analytics", label: "Google Analytics" }
+];
+const EMPLOYEE_POSITION_IDS = new Set(EMPLOYEE_POSITION_OPTIONS.map((item) => item.id));
+const EMPLOYEE_POSITION_DEFAULTS = {
+  admin: EMPLOYEE_PERMISSION_OPTIONS.map((item) => item.id),
+  manager: EMPLOYEE_PERMISSION_OPTIONS.map((item) => item.id),
+  customer_relationship: ["dashboard", "orders", "customers", "reviews", "questions", "returns", "support", "notifications"],
+  inventory_manager: ["dashboard", "hero", "products", "add_product", "bulk_listing", "inventory", "categories", "tax", "labels", "deals", "notifications"],
+  packing_staff: ["packing"]
+};
+const ADMIN_NOTIFICATION_PERMISSIONS = Object.freeze({
+  new_order: "orders",
+  cancelled_order: "orders",
+  order_packed: "orders",
+  low_stock: "inventory",
+  out_of_stock: "inventory",
+  new_review: "reviews",
+  product_question: "questions",
+  return_request: "returns",
+  exchange_request: "returns",
+  support_ticket: "support"
+});
 const R2_CLEANUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const R2_CLEANUP_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
 const CANONICAL_ORIGIN = "https://glamiastore.com";
-const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com"]);
+const WIBRAWL_HOSTNAME = "wibrawl.glamia.com";
+const WIBRAWL_ORIGIN = "https://" + WIBRAWL_HOSTNAME;
+const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com", WIBRAWL_HOSTNAME]);
+const storefrontForRequest = (url) => url.hostname.toLowerCase() === WIBRAWL_HOSTNAME ? "wibrawl" : "glamia";
+const PUBLIC_CACHE_VERSION = `2026-10-08-announcement-sparkle-v45-${storefrontStyleHash.slice(0, 12)}`;
 const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
 const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 const PHONEPE_SANDBOX_BASE = "https://api-preprod.phonepe.com/apis/pg-sandbox";
@@ -32,7 +115,15 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMITS = new Map([
   ["/api/auth/google", 20],
   ["/api/auth/apple", 20],
+  ["/api/auth/apple/mobile/start", 15],
+  ["/api/auth/apple/mobile/callback", 30],
+  ["/api/auth/apple/mobile/exchange", 20],
+  ["/api/auth/apple/web/start", 15],
+  [APPLE_WEB_CALLBACK_PATH, 30],
   ["/api/employee/auth/login", 10],
+  ["/api/employee/push-tokens", 30],
+  ["/api/search", 60],
+  ["/api/analytics/track", 120],
   ["/api/orders", 30],
   ["/api/payments/create", 20],
   ["/api/payments/razorpay/verify", 30],
@@ -53,10 +144,12 @@ const RATE_LIMITS = new Map([
 // Fallback only for local startup/migration failures. Production traffic uses
 // the shared D1 bucket below so limits apply across Worker isolates.
 const requestRateBuckets = new Map();
+let rateLimitCleanupAt = 0;
 let productEnrichmentCache = { expiresAt: 0, entries: new Map() };
 const PRODUCT_REFERENCE_CACHE_MAX_ENTRIES = 1000;
 const PRODUCT_REFERENCE_CACHE_TTL_MS = 60_000;
 const productReferenceCache = new Map();
+let employeeNotificationMaintenance = { completedAt: 0, inFlight: null };
 const DASHBOARD_CACHE_TTL_MS = 45_000;
 const PAGINATION_COUNT_CACHE_TTL_MS = 30_000;
 const paginationCountCache = new Map();
@@ -79,6 +172,8 @@ async function cachedCount(env, key, sql, bindings = []) {
   if (cached && cached.expiresAt > now) return cached.value;
   const row = await env.DB.prepare(sql).bind(...bindings).first();
   const value = Number(row?.count || 0);
+  // Bound filter-specific counts so arbitrary search terms cannot grow isolate memory.
+  if (paginationCountCache.size >= 500) paginationCountCache.delete(paginationCountCache.keys().next().value);
   paginationCountCache.set(key, { value, expiresAt: now + PAGINATION_COUNT_CACHE_TTL_MS });
   return value;
 }
@@ -97,7 +192,7 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === "OPTIONS") return withSecurityHeaders(new Response(null, { status: 204 }));
-      if (["GET", "HEAD"].includes(request.method) && !url.pathname.startsWith("/api/") && PRODUCTION_HOSTNAMES.has(url.hostname) && url.origin !== CANONICAL_ORIGIN) {
+      if (["GET", "HEAD"].includes(request.method) && !url.pathname.startsWith("/api/") && url.hostname === "www.glamiastore.com" && url.origin !== CANONICAL_ORIGIN) {
         return withSecurityHeaders(new Response(null, {
           status: 301,
           headers: {
@@ -106,9 +201,29 @@ export default {
           }
         }));
       }
+      if (["GET", "HEAD"].includes(request.method) && isAdminPagePath(url.pathname)) {
+        const adminUser = await currentUser(request, env);
+        if (adminUser?.role !== "admin") {
+          const home = PRODUCTION_HOSTNAMES.has(url.hostname) ? `${CANONICAL_ORIGIN}/` : `${url.origin}/`;
+          return withSecurityHeaders(new Response(null, {
+            status: 302,
+            headers: {
+              Location: home,
+              "Cache-Control": "no-store"
+            }
+          }));
+        }
+      }
       if (request.method === "GET" && url.pathname === "/demo-admin") return withSecurityHeaders(await loginAsDemoAdmin(request, env, true));
       if (request.method === "GET" && url.pathname === "/sitemap.xml") return withSecurityHeaders(await getSitemap(request, env));
       if (request.method === "GET" && url.pathname === "/robots.txt") return withSecurityHeaders(await getRobots(request));
+      if (["GET", "HEAD"].includes(request.method) && url.pathname.startsWith("/.well-known/")) {
+        const association = appLinkAssociation(url.pathname, env);
+        if (association) return withSecurityHeaders(request.method === "HEAD" ? new Response(null, { status: association.status, headers: association.headers }) : association);
+      }
+      if (url.pathname === "/downloads/glamia-shopper.apk") {
+        return withSecurityHeaders(await serveShopperApk(request, env));
+      }
       // Tax reference data is generated into the public asset bundle from the
       // supplied HSN/SAC and GST state workbooks. Let these JSON files reach
       // the asset handler before the public-page/SEO router evaluates them as
@@ -117,6 +232,9 @@ export default {
         return withSecurityHeaders(await env.ASSETS.fetch(request));
       }
       if (url.pathname.startsWith("/api/")) {
+        if (["GET", "HEAD"].includes(request.method) && url.pathname.startsWith("/api/assets/products/")) {
+          return withSecurityHeaders(await cachedProductImage(request, env, url, ctx));
+        }
         const cacheTtl = publicApiCacheTtl(request, url);
         const db = cacheTtl && typeof env.DB?.withSession === "function"
           ? env.DB.withSession("first-unconstrained")
@@ -125,27 +243,103 @@ export default {
         const response = cacheTtl
           ? await cachedPublicResponse(request, ctx, cacheTtl, () => routeApi(request, requestEnv, url, ctx))
           : await routeApi(request, requestEnv, url, ctx);
+        if (response.ok && !["GET", "HEAD", "OPTIONS"].includes(request.method) && /\/(products|orders|returns|payments)(\/|$)/.test(url.pathname)) {
+          scheduleMerchantSync(env, ctx, { path: canonicalProductPath, price: currentSellingPrice });
+        }
         return withSecurityHeaders(response);
       }
       const pageCacheTtl = publicPageCacheTtl(request, url);
+      const pageDb = pageCacheTtl && typeof env.DB?.withSession === "function"
+        ? env.DB.withSession("first-unconstrained")
+        : env.DB;
+      const pageEnv = pageDb === env.DB ? env : { ...env, DB: pageDb };
       const page = pageCacheTtl
-        ? await cachedPublicResponse(request, ctx, pageCacheTtl, () => renderPublicPage(request, env))
-        : await renderPublicPage(request, env);
+        ? await cachedPublicResponse(request, ctx, pageCacheTtl, () => renderPublicPage(request, pageEnv, ctx))
+        : await renderPublicPage(request, env, ctx);
       if (page) return withSecurityHeaders(page);
-      return withSecurityHeaders(await env.ASSETS.fetch(request));
+      const assetResponse = await env.ASSETS.fetch(request);
+      if (isAdminPagePath(url.pathname) || ["/cart", "/checkout", "/profile", "/address", "/orders", "/wishlist", "/reviews", "/credits", "/login", "/notifications", "/saved-for-later"].includes(url.pathname)) {
+        const headers = new Headers(assetResponse.headers);
+        headers.set("Cache-Control", "no-store");
+        headers.set("X-Robots-Tag", "noindex, nofollow");
+        let body = (headers.get('Content-Type') || '').includes('text/html')
+          ? (await assetResponse.text()).replace('</head>', `${storefrontResourceHints(url.pathname)}</head>`)
+          : assetResponse.body;
+        if (url.pathname === '/cart' && typeof body === 'string') {
+          try {
+            const settingsRequest = new Request(new URL('/api/storefront-settings?cache=1', url));
+            const settings = await (await cachedPublicResponse(settingsRequest, ctx, 60, () => getStorefrontSettings(env))).json();
+            const { renderCartShell } = await import('./cart-shell.jsx');
+            const shell = renderCartShell(settings);
+            const style = storefrontRouteCriticalStyles.cart;
+            const payload = JSON.stringify({ path: '/cart', settings }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+            body = body.replace('<div id="root"></div>', `<div id="root">${shell}</div>`)
+              .replace(/<div id="initial-loader"[\s\S]*?<div id="root"/, '<div id="root"')
+              .replace('</head>', `<style id="glamia-cart-styles">${style.css}</style><script type="application/json" id="glamia-cart-bootstrap">${payload}</script></head>`);
+            for (const file of storefrontStyleFiles) body = body.replace(new RegExp(`<link[^>]+href="/${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`, 'g'), `<link rel="preload" as="style" href="/${escapeHtml(style.file)}" data-glamia-storefront-css />`);
+            body = body.replace(/<link\b[^>]*\bas="font"[^>]*>/g, '');
+          } catch (error) { console.error('cart_shell_render_failed', { error_type: error.name }); }
+        }
+        return withSecurityHeaders(new Response(body, { status: assetResponse.status, headers }));
+      }
+      // Worker Assets' SPA fallback returns index.html with 200 even for missing
+      // pages/files. Keep the navigable shell but report a real, non-indexable 404.
+      if (assetResponse.ok && (assetResponse.headers.get("Content-Type") || "").includes("text/html") && !await isKnownSpaFallback(url.pathname, env)) {
+        const headers = new Headers(assetResponse.headers);
+        headers.set("Cache-Control", "no-store");
+        headers.set("X-Robots-Tag", "noindex, nofollow");
+        return withSecurityHeaders(new Response(assetResponse.body, { status: 404, headers }));
+      }
+      return withSecurityHeaders(assetResponse);
     } catch (error) {
       const status = error.status || 500;
+      if (status >= 500) console.error("request_failed", { path: url.pathname.slice(0, 120), request_id: request.headers.get("CF-Ray") || null, error_type: error.name || "Error", status });
+      // Detailed diagnostics are restricted to explicitly enabled loopback development.
+      if (status >= 500 && isLocalDemoRequest(request, env)) console.error("Local API error", error);
       return withSecurityHeaders(json({ error: status >= 500 ? "Server error" : (error.message || "Request failed") }, status));
     }
   },
 
   async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(processMerchantSync(env, { path: canonicalProductPath, price: currentSellingPrice }));
     ctx.waitUntil(processDueEmailEvents(env));
     ctx.waitUntil(runWeeklyR2Cleanup(env));
     ctx.waitUntil(expirePendingGatewayOrders(env));
+    ctx.waitUntil(processGatewayRefunds(env));
+    ctx.waitUntil(purgeExpiredPaymentOrders(env));
     ctx.waitUntil(runPageViewRollup(env));
+    ctx.waitUntil(sendDueEventAlerts(env));
+    ctx.waitUntil(env.DB.prepare("DELETE FROM apple_mobile_login_flows WHERE expires_at < unixepoch()").run());
   }
 };
+
+// Serve verified-link associations only after the real signing identities are configured.
+function appLinkAssociation(path, env) {
+  if (path === "/.well-known/assetlinks.json") {
+    const fingerprints = String(env.ANDROID_APP_LINK_SHA256 || "").split(/[;,\s]+/).filter(value => /^(?:[A-Fa-f0-9]{2}:){31}[A-Fa-f0-9]{2}$/.test(value));
+    if (!fingerprints.length) return new Response(null, { status: 404 });
+    return json([{ relation: ["delegate_permission/common.handle_all_urls"], target: { namespace: "android_app", package_name: "com.glamia.store", sha256_cert_fingerprints: fingerprints } }], 200, { "Cache-Control": "public, max-age=3600" });
+  }
+  if (path === "/.well-known/apple-app-site-association") {
+    const teamId = String(env.APPLE_TEAM_ID || "").trim().toUpperCase();
+    if (!/^[A-Z0-9]{10}$/.test(teamId)) return new Response(null, { status: 404 });
+    return json({ applinks: { apps: [], details: [{ appID: `${teamId}.com.glamia.store`, paths: ["*"] }] } }, 200, { "Cache-Control": "public, max-age=3600" });
+  }
+  return null;
+}
+
+function paymentIncompleteOrderPredicate(alias = "o", expiredOnly = false) {
+  const cancelledAt = `${alias}.updated_at`;
+  const expiry = expiredOnly
+    ? `AND datetime(${cancelledAt}) <= datetime('now', '-${PAYMENT_ORDER_RETENTION_DAYS} day')`
+    : "";
+  return `(
+    ${alias}.status = 'cancelled'
+    AND ${alias}.payment_status = 'failed'
+    AND ${alias}.payment_gateway IN ('razorpay', 'phonepe')
+    ${expiry}
+  )`;
+}
 
 function slugifyName(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -156,12 +350,67 @@ function productUrlSlug(value, fallback = "collection") {
 }
 
 function canonicalProductPath(product) {
-  const id = String(product?.id || "").trim();
-  const nameSlug = productUrlSlug(product?.name, id || "item");
-  const suffix = id ? `-${id.toLowerCase()}` : "";
-  // The complete stable id is always present. It prevents a future rename or
-  // same-name re-edit from taking over an existing product URL.
+  const publicCode = String(product?.product_code || "").trim();
+  const internalId = String(product?.id || "").trim();
+  const stableId = publicCode || internalId;
+  const nameSlug = productUrlSlug(product?.name, stableId || "item");
+  // New URLs carry both the readable product code and the immutable UUID.
+  // Existing UUID-backed products keep their current URL shape, so their
+  // indexed links do not change until they receive a public product code.
+  const suffix = publicCode && internalId && publicCode.toLowerCase() !== internalId.toLowerCase()
+    ? `-${publicCode.toLowerCase()}-${internalId.toLowerCase()}`
+    : stableId ? `-${stableId.toLowerCase()}` : "";
+  // The stable suffix prevents a future rename or same-name re-edit from
+  // taking over an existing product URL.
   return `/${productUrlSlug(product?.category)}/${productUrlSlug(product?.subcategory)}/${nameSlug}${suffix}`;
+}
+
+function compactProductCodePart(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[^A-Za-z0-9]+/g, "")
+    .toUpperCase();
+}
+
+function productSegmentCode(value, fallback) {
+  const raw = String(value || "").trim();
+  const words = raw.replace(/([a-z])([A-Z])/g, "$1 $2").split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (words.length > 1) {
+    const initials = words.map(word => word[0]).join("").toUpperCase().slice(0, 4);
+    if (initials) return initials;
+  }
+  return compactProductCodePart(raw).slice(0, 3) || fallback;
+}
+
+async function productBrandCode(env, brand) {
+  const compact = compactProductCodePart(brand);
+  const firstThree = compact.slice(0, 3) || "BRD";
+  const { results } = await env.DB.prepare("SELECT DISTINCT brand FROM products WHERE TRIM(COALESCE(brand, '')) != ''").all();
+  const collides = results.some(row => {
+    const existing = compactProductCodePart(row.brand);
+    return existing && existing !== compact && existing.slice(0, 3) === firstThree;
+  });
+  if (!collides) return { token: firstThree, prefixBeforeGlamia: false };
+  if (compact.length > 3) return { token: compact.slice(0, 4), prefixBeforeGlamia: false };
+  // A later three-letter brand cannot gain a fourth character. Keep the full
+  // brand token before GM so the exceptional code remains visibly distinct.
+  return { token: compact || "BRD", prefixBeforeGlamia: true };
+}
+
+async function nextProductSequence(env) {
+  const bumped = await env.DB.prepare("UPDATE counters SET value = value + 1 WHERE name = 'product_number' RETURNING value").first().catch(() => null);
+  if (bumped) return Number(bumped.value);
+  await env.DB.prepare("INSERT OR IGNORE INTO counters (name, value) VALUES ('product_number', 0)").run().catch(() => {});
+  const retried = await env.DB.prepare("UPDATE counters SET value = value + 1 WHERE name = 'product_number' RETURNING value").first().catch(() => null);
+  return retried ? Number(retried.value) : null;
+}
+
+function buildProductCode(brandCode, category, subcategory, sequence, prefixBeforeGlamia = false, suffix = "") {
+  const categoryCode = productSegmentCode(category, "CAT");
+  const subcategoryCode = productSegmentCode(subcategory, "GEN");
+  const sequenceCode = String(sequence).padStart(4, "0");
+  const prefix = prefixBeforeGlamia ? `${brandCode}-GM` : `GM-${brandCode}`;
+  return `${prefix}-${categoryCode}-${subcategoryCode}-${sequenceCode}${suffix}`;
 }
 
 /* Order numbers: GM-<DDMMYYYY IST>-<product initials>-<5-digit sequence>,
@@ -188,11 +437,11 @@ async function nextOrderSequence(env) {
   return retried ? Number(retried.value) : null;
 }
 
-function buildOrderNumber(initials, sequence) {
+function buildOrderNumber(initials, sequence, storefront = "glamia") {
   const tail = sequence == null
     ? crypto.randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()
     : String(sequence).padStart(5, "0");
-  return `GM-${istDateString()}-${initials}-${tail}`;
+  return (storefront === "wibrawl" ? "VB" : "GM") + "-" + istDateString() + "-" + initials + "-" + tail;
 }
 
 const DEFAULT_PAGE_DESCRIPTION = "Shop curated apparel and accessories from independent ateliers — free and fast shipping across India, with secure payments available.";
@@ -214,18 +463,19 @@ function currentSellingPrice(product) {
   return deal > 0 && starts <= now && ends > now ? deal : Number(product.price || 0);
 }
 
-async function getPublicCatalogRows(env, category = "") {
+async function getPublicCatalogRows(env, category = "", storefront = "glamia") {
   try {
     const categoryFilter = category ? "AND LOWER(TRIM(p.category)) = LOWER(TRIM(?))" : "";
+    const visibility = storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
     const statement = env.DB.prepare(`
-      SELECT p.id, p.name, p.category, p.subcategory, p.brand, p.price, p.mrp, p.color,
+      SELECT p.id, p.product_code, p.name, p.category, p.subcategory, p.brand, p.price, p.mrp, p.color,
         p.description, p.image_url, p.thumbnail_url, p.deal_starts_at,
         p.deal_ends_at, p.deal_price, p.created_at, p.updated_at,
         (SELECT COALESCE(SUM(oi.quantity), 0)
           FROM order_items oi JOIN orders o ON o.id = oi.order_id
           WHERE oi.product_id = p.id AND o.status != 'cancelled') AS sold_total
       FROM products p
-      WHERE p.status = 'live' ${categoryFilter}
+      WHERE p.status = 'live' AND COALESCE(p.storefront_visibility, 'glamia') IN ${visibility} ${categoryFilter}
       ORDER BY p.created_at DESC
       LIMIT 100
     `);
@@ -236,13 +486,15 @@ async function getPublicCatalogRows(env, category = "") {
   }
 }
 
-function catalogBotContent(title, description, rows, origin) {
+function catalogBotContent(title, description, rows, origin, storefront = "glamia") {
   const links = rows.map(row => {
     const image = absoluteImageUrl(row.thumbnail_url || row.image_url, origin);
     const price = currentSellingPrice(row);
     return `<li>${image ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(row.name)}" width="120" height="150" />` : ""}<a href="${canonicalProductPath(row)}">${escapeHtml(row.name)}</a><span>${escapeHtml(row.brand || "Glamia")} · ${escapeHtml(row.category || "Apparel")} · ${escapeHtml(row.subcategory || "Collection")} · ₹${Number(price).toLocaleString("en-IN")}</span></li>`;
   }).join("");
-  return `<main class="catalog-page"><p class="eyebrow">Glamia collection</p><h1>${escapeHtml(title)}</h1><p class="catalog-description">${escapeHtml(description)}</p>${rows.length ? `<ul class="catalog-bot-list">${links}</ul>` : "<p>Explore the Glamia collection and discover curated pieces from independent ateliers.</p>"}</main>`;
+  const brand = storefront === "wibrawl" ? "Wibrawl" : "Glamia";
+  const emptyCopy = storefront === "wibrawl" ? "The first Wibrawl drop is on its way. Check back soon." : "Explore the Glamia collection and discover curated pieces from independent ateliers.";
+  return `<main class="catalog-page"><p class="eyebrow">${brand} collection</p><h1>${escapeHtml(title)}</h1><p class="catalog-description">${escapeHtml(description)}</p>${rows.length ? `<ul class="catalog-bot-list">${links}</ul>` : `<p>${emptyCopy}</p>`}</main>`;
 }
 
 function productBotContent(product, price, images, inStock, relatedRows) {
@@ -253,13 +505,15 @@ function productBotContent(product, price, images, inStock, relatedRows) {
   const sizes = (product.sizes || []).map(value => String(value || "").trim()).filter(Boolean);
   const availability = product.preorder_enabled ? "Available for pre-order" : inStock ? "In stock" : "Currently out of stock";
   const description = String(product.description || `${product.name} is a considered ${subcategory.toLowerCase()} piece from ${product.brand || "Glamia"}, selected for everyday comfort and lasting style.`).trim();
-  const specifications = String(product.specifications || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const specifications = String(product.specifications || "").split(/\r?\n/).map(line => line.trim()).filter(line => line && !/^colou?r(?:way)?\s*:/i.test(line));
+  if (product.color) specifications.unshift(`Colourway: ${product.color}`);
   const imageMarkup = images.slice(0, 4).map((image, index) => `<img src="${escapeHtml(image)}" alt="${escapeHtml(`${product.name}${index ? ` — view ${index + 1}` : ""}`)}" width="640" height="800"${index ? ' loading="lazy"' : ""} />`).join("");
   const details = [
     ["Category", category],
     ["Subcategory", subcategory],
     ["Colour", product.color],
     ["Material", product.material],
+    ["What's in the box", product.what_in_box],
     ["Available sizes", sizes.join(", ")],
     ["Availability", availability]
   ].filter(([, value]) => String(value || "").trim()).map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("");
@@ -278,13 +532,13 @@ const standalonePolicyPaths = {
   shipping: "/shipping-policy"
 };
 
-function policiesBotContent(selectedId = "") {
+function policiesBotContent(selectedId = "",experience={}) {
   const sections = [
     ["terms", "Terms & Conditions", "Glamia is a brand name owned and operated by SHREE SHAYAM HOSIERY. Glamia’s Platform includes https://glamiastore.com/, its mobile site, and app. By using it, you agree to provide accurate information, follow applicable law, and respect Glamia’s intellectual property. Orders become legally binding once accepted. These terms are governed by the laws of India; the jurisdiction field in the supplied policy document still needs confirmation before production."],
-    ["privacy", "Privacy Policy", "Glamia may collect account, contact, identity, address, order, transaction, preference, and relevant payment information to provide services, support orders, personalise the experience, communicate updates, prevent fraud, and meet legal obligations. Information may be shared with affiliates, sellers, logistics providers, service providers, payment providers, and authorities where lawful. Users can access, update, or request deletion of their information, subject to legal and operational retention needs."],
-    ["refund-cancellation", "Refund & Cancellation Policy", "Cancellation requests should be made within 2 days of the order and may not be accepted after shipping has started or the order is out for delivery. Damaged, defective, or not-as-described items should be reported to customer service within 7 days of receipt. Approved refunds are processed within 14 days."],
-    ["returns", "Return Policy", "Refunds or exchanges may be requested within 7 days of delivery or receipt. Items should be unused, in the same condition, and in original packaging. Sale items, exempt categories, and exchanges are subject to the eligibility rules shown at purchase and inspection on return."],
-    ["shipping", "Shipping Policy", "Orders are shipped through registered domestic courier and/or speed post services within 14 days from order or payment, or by an agreed delivery date. Delivery is attempted at the address supplied at purchase. Courier delays are outside Glamia’s liability, and seller or Platform shipping charges are not refundable."]
+    ["privacy", "Privacy Policy", "Glamia may collect account, contact, identity, address, order, transaction, preference, and relevant payment information to provide services, support orders, personalise the experience, communicate updates, prevent fraud, and meet legal obligations. The Glamia Employees app also processes employee IDs, names, staff emails when supplied, permissions, sessions, and work activity needed for assigned staff workspaces; employee accounts are created and managed by Glamia administrators. Developer and privacy contact: SHREE SHAYAM HOSIERY (Glamia), support@glamiastore.com. Information may be shared with affiliates, sellers, logistics providers, service providers, payment providers, and authorities where lawful. Users can access, update, or request deletion of their information, subject to legal and operational retention needs."],
+    ["refund-cancellation", "Refund & Cancellation Policy", "Eligible undispatched orders can be cancelled. For settled payments, Glamia records a verified original-payment refund case and restores purchased store credits separately. Customer orders show queued, processing, confirmed or needs-review progress. Damaged, defective, or not-as-described items should be reported to customer service within 7 days of receipt. Refunds following physical returns require approval and courier collection or warehouse receipt. Provider confirmation does not mean the bank has posted the funds; bank posting time varies."],
+    ["returns", "Return Policy", "Eligible returns or size exchanges may be requested within 7 days of the recorded delivery. Purchased-item eligibility applies. An eligible size exchange immediately places a linked zero-value replacement for normal packing and delivery; original-item collection is arranged separately. For returns, refunds require approval and confirmed courier collection or warehouse receipt plus payment verification. Care arranges manual pickup; a printable label becomes available after courier tracking is saved. Contact care for no-printer or missed-pickup help. Provider confirmation does not guarantee immediate bank posting."],
+    ["shipping", "Shipping Policy", `Shipping is free. ${shippingPolicyPromise(experience)} Delivery is attempted at the address supplied at purchase. Courier booking and tracking are arranged manually.`]
   ];
   const selected = sections.find(([id]) => id === selectedId);
   const visibleSections = selected ? [selected] : sections;
@@ -307,95 +561,211 @@ function catalogJsonLd(rows, origin) {
 }
 
 function canonicalOriginForRequest(url) {
+  if (url.hostname.toLowerCase() === WIBRAWL_HOSTNAME) return WIBRAWL_ORIGIN;
   return PRODUCTION_HOSTNAMES.has(url.hostname) ? CANONICAL_ORIGIN : url.origin;
+}
+
+function isAdminPagePath(path) {
+  return path === "/admin" || path.startsWith("/admin/");
+}
+
+async function isKnownSpaFallback(path, env) {
+  if (isAdminPagePath(path) || ["/", "/index.html", "/offers", "/just-arrived", "/best-sellers", "/search", "/about", "/contact", "/support", "/policies", ...Object.values(standalonePolicyPaths), "/track-order", "/cart", "/checkout", "/profile", "/address", "/orders", "/wishlist", "/reviews", "/credits", "/login"].includes(path)) return true;
+  const alias = path.match(/^\/([a-z0-9-]+)$/)?.[1];
+  if (!alias) return false;
+  // Slug aliases such as /women are legitimate routes. This bounded category
+  // read runs only on otherwise-unrecognized HTML paths, never on JS/CSS assets.
+  const { results } = await env.DB.prepare("SELECT name FROM categories").all();
+  return (results || []).some(row => slugifyName(row.name) === alias);
 }
 
 /* Server-side meta + content for public pages. Every visitor gets real
    Open Graph/Twitter tags, canonical URL and Product JSON-LD in the HTML;
    known crawlers receive a self-contained static rendering inside #root so
    indexing never depends on browser-side API requests. */
-async function renderPublicPage(request, env) {
+function storefrontResourceHints(path) {
+  if (path === '/') return '';
+  const type = path === '/cart' ? 'CartPage' : path === '/checkout' ? 'CheckoutPage'
+    : ['/profile', '/address', '/orders', '/wishlist', '/reviews'].includes(path) ? 'AccountPages'
+    : /^\/(?!admin\/|category\/)[^/]+\/[^/]+\/[^/]+$/.test(path) ? 'ProductDetailPage'
+    : ['/login', '/contact', '/support', '/policies'].includes(path) ? 'PublicPages' : 'catalogue';
+  const assets = storefrontRoutePreloads[type];
+  return (assets?.scripts || []).map(file => `<link rel="modulepreload" crossorigin href="/${escapeHtml(file)}" />`).join('')
+    + (type === 'ProductDetailPage' ? '' : (assets?.styles || []).filter(file => !storefrontStyleFiles.includes(file)).map(file => `<link rel="preload" as="style" href="/${escapeHtml(file)}" />`).join(''));
+}
+
+async function renderPublicPage(request, env, ctx) {
   const url = new URL(request.url);
+  const storefront = storefrontForRequest(url);
+  const started = Date.now();
+  const serverTimings = [];
+  async function timed(name, task) {
+    const start = Date.now();
+    try { return await task(); }
+    finally { serverTimings.push(`${name};dur=${Date.now() - start}`); }
+  }
   const path = url.pathname;
   const legacyProductMatch = path.match(/^\/product\/([^/]+)$/);
   const seoProductMatch = path.match(/^\/(?!category(?:\/|$)|product(?:\/|$))([^/]+)\/([^/]+)\/([^/]+)$/i);
   const categoryMatch = path.match(/^\/category\/([^/]+)$/);
   const catalogPath = new Set(["/", "/offers", "/just-arrived", "/best-sellers"]);
-  const infoPath = new Set(["/contact", "/support", "/policies", ...Object.values(standalonePolicyPaths)]);
+  const infoPath = new Set(["/about", "/contact", "/support", "/policies", ...Object.values(standalonePolicyPaths)]);
   if (!catalogPath.has(path) && !infoPath.has(path) && !legacyProductMatch && !seoProductMatch && !categoryMatch) return null;
 
-  const shellResponse = await env.ASSETS.fetch(new URL("/index.html", url));
+  // Public presentation reads are independent. Start them alongside the static
+  // shell rather than paying a sequential asset -> database waterfall.
+  const catalogueParameters = new URLSearchParams({ view: 'cards', include_stock: '1', limit: '24', sort: path === '/just-arrived' ? 'newest' : 'featured', facets: '1' });
+  if (path === '/offers') catalogueParameters.set('offers', '1');
+  if (path === '/best-sellers') catalogueParameters.set('featured', '1');
+  const catalogueDataPromise = catalogPath.has(path) && path !== '/' && !url.search
+    ? timed('catalog', () => listProducts(env, null, 'public', catalogueParameters, storefront).then(response => response.json())).catch(() => null) : null;
+  const catalogPromise = catalogPath.has(path)
+    ? catalogueDataPromise ? catalogueDataPromise.then(data => data ? { rows: data.products, available: true } : getPublicCatalogRows(env, "", storefront))
+      : timed('catalog', () => getPublicCatalogRows(env, "", storefront)) : null;
+  const homepageSettingsPromise = path === "/"
+    ? timed('settings', () => getStorefrontSettings(env).then(response => response.json())).catch(() => null)
+    : null;
+  const productSettingsPromise = (legacyProductMatch || seoProductMatch || (catalogPath.has(path) && path !== '/')) && !CRAWLER_UA.test(request.headers.get('User-Agent') || '')
+    ? timed('settings', () => getStorefrontSettings(env).then(response => response.json())).catch(() => null)
+    : null;
+  const heroPromise = path === "/" && storefront !== "wibrawl" && !CRAWLER_UA.test(request.headers.get("User-Agent") || "")
+    ? timed('hero', () => listHeroSlides(env).then(response => response.json())).catch(() => null)
+    : null;
+  const shellResponse = await timed('shell', () => env.ASSETS.fetch(new URL("/index.html", url)));
   if (!shellResponse.ok) return null;
   let html = await shellResponse.text();
   const origin = canonicalOriginForRequest(url);
   const isBot = CRAWLER_UA.test(request.headers.get("User-Agent") || "");
+  // Only public presentation data is embedded. Session/account data always
+  // remains in private, uncached API responses.
+  const bootstrapPromise = path === "/" && storefront !== "wibrawl" && !isBot
+    ? Promise.all([heroPromise, homepageSettingsPromise])
+      .then(([hero, settings]) => hero && settings ? { hero, settings } : null)
+      .catch(() => null)
+    : null;
 
-  let title = "Glamia — Curated Apparel & Accessories";
-  let description = DEFAULT_PAGE_DESCRIPTION;
+  let title = storefront === "wibrawl" ? "Wibrawl — Pick your side. Wear your world." : "Glamia — Curated Apparel & Accessories";
+  let description = storefront === "wibrawl" ? "Tees for the things you play, watch, follow, and love. Pick your side. Wear your world." : DEFAULT_PAGE_DESCRIPTION;
   let ogType = "website";
-  let ogImage = "";
+  let ogImage = `${origin}/glamia-social-banner.png`;
   let canonical = `${origin}${path}`;
   let headExtras = "";
   let botContent = "";
+  let renderedFirstScreen = false;
+  function firstScreenStyles(type) {
+    const style = storefrontRouteCriticalStyles[type];
+    for (const file of storefrontStyleFiles) html = html.replace(new RegExp(`<link[^>]+href="/${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`, 'g'), `<link rel="preload" as="style" fetchpriority="low" href="/${escapeHtml(style.file)}" data-glamia-storefront-css />`);
+    headExtras += `<style id="glamia-${type}-styles">${style.css}</style>`;
+    renderedFirstScreen = true;
+  }
 
   if (legacyProductMatch || seoProductMatch) {
     const productReference = decodeURIComponent((seoProductMatch || legacyProductMatch)[seoProductMatch ? 3 : 1]);
     const pathContext = seoProductMatch ? { category: seoProductMatch[1], subcategory: seoProductMatch[2] } : null;
-    const resolvedId = await resolveProductReference(env, productReference, pathContext);
+    // UUID-bearing canonical links can use the indexed product lookup directly.
+    // The live/status check below and canonical redirect still validate the URL.
+    const canonicalId = productReference.match(/(?:^|-)([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i)?.[1];
+    const resolvedId = canonicalId?.toLowerCase() || await resolveProductReference(env, productReference, pathContext);
+    const visibility = storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
     const row = resolvedId ? await env.DB.prepare(`${PRODUCT_SELECT}
-      WHERE p.id = ? AND p.status = 'live'
+      WHERE p.id = ? AND p.status = 'live' AND COALESCE(p.storefront_visibility, 'glamia') IN ${visibility}
       GROUP BY p.id`).bind(resolvedId).first() : null;
     if (!row) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
-    const [product] = await withSizeStock(env, [row]);
+    const [[stockProduct], siblingColours] = await Promise.all([
+      withSizeStock(env, [row]),
+      row.color_group_id ? env.DB.prepare("SELECT color FROM products WHERE color_group_id=? AND status='live'").bind(row.color_group_id).all() : Promise.resolve({ results: [] })
+    ]);
+    const product = selectedVariantCopy(stockProduct,siblingColours.results.map(item=>item.color));
     const price = currentSellingPrice(product);
-    const inStock = (product.sizes || []).length ? Object.values(product.size_stock || {}).some((quantity) => Number(quantity) > 0) : Number(product.stock || 0) > 0;
+    const requestedSize = url.searchParams.get("size");
+    const selectedSize = (product.sizes || []).includes(requestedSize) ? requestedSize : "";
+    const inStock = selectedSize ? Number(product.size_stock?.[selectedSize] || 0) > 0 : (product.sizes || []).length ? Object.values(product.size_stock || {}).some((quantity) => Number(quantity) > 0) : Number(product.stock || 0) > 0;
+    const availablePreorder = product.preorder_enabled && (product.preorder_limit == null || Number(product.preorder_limit) > Number(product.preorder_sold || 0));
     const images = (product.images || []).map((image) => absoluteImageUrl(image, origin)).filter(Boolean);
     ogImage = images[0] || absoluteImageUrl(product.image_url, origin);
-    title = `${product.name} | Glamia`;
-    description = String(product.description || `${product.name} — ${product.brand || "Glamia"} curated piece in ${product.color || "a timeless finish"}.`).slice(0, 300);
+    title = `${product.name} | ${storefront === "wibrawl" ? "Wibrawl" : "Glamia"}`;
+    description = String(product.description || `${product.name} — ${product.brand || (storefront === "wibrawl" ? "Wibrawl" : "Glamia")} curated piece in ${product.color || "a timeless finish"}.`).slice(0, 300);
     ogType = "product";
     const canonicalPath = canonicalProductPath(product);
     canonical = `${origin}${canonicalPath}`;
-    if (path !== canonicalPath) return new Response(null, { status: 301, headers: { Location: canonical, "Cache-Control": "public, max-age=3600" } });
-    const relatedCatalog = isBot ? await getPublicCatalogRows(env, product.category) : { rows: [] };
+    if (path !== canonicalPath) return new Response(null, { status: 301, headers: { Location: `${canonical}${selectedSize ? `?size=${encodeURIComponent(selectedSize)}` : ""}`, "Cache-Control": "public, max-age=3600" } });
+    const relatedCatalog = isBot ? await getPublicCatalogRows(env, product.category, storefront) : { rows: [] };
     const relatedRows = (relatedCatalog.rows || []).filter(candidate => candidate.id !== product.id);
     botContent = productBotContent(product, price, images.length ? images : [ogImage].filter(Boolean), inStock, relatedRows);
-    const jsonLd = { "@context": "https://schema.org", "@type": "Product", name: product.name, description: product.description || undefined, image: images.slice(0, 4), sku: product.id, category: [product.category, product.subcategory].filter(Boolean).join(" > ") || undefined, color: product.color || undefined, material: product.material || undefined, brand: { "@type": "Brand", name: product.brand || "Glamia" }, offers: { "@type": "Offer", url: canonical, priceCurrency: "INR", price, availability: product.preorder_enabled ? "https://schema.org/PreOrder" : inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", itemCondition: "https://schema.org/NewCondition" }, ...(Number(product.rating) > 0 && Number(product.review_count) > 0 ? { aggregateRating: { "@type": "AggregateRating", ratingValue: Number(product.rating), reviewCount: Number(product.review_count) } } : {}) };
+    const jsonLd = { "@context": "https://schema.org", "@type": "Product", name: product.name, description: product.description || undefined, image: images.slice(0, 4), sku: product.product_code || product.id, category: [product.category, product.subcategory].filter(Boolean).join(" > ") || undefined, color: product.color || undefined, material: product.material || undefined, size: selectedSize || undefined, brand: { "@type": "Brand", name: product.brand || "Glamia" }, offers: { "@type": "Offer", url: `${canonical}${selectedSize ? `?size=${encodeURIComponent(selectedSize)}` : ""}`, priceCurrency: "INR", price, availability: availablePreorder ? "https://schema.org/PreOrder" : !product.preorder_enabled && inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", itemCondition: "https://schema.org/NewCondition" }, ...(Number(product.rating) > 0 && Number(product.review_count) > 0 ? { aggregateRating: { "@type": "AggregateRating", ratingValue: Number(product.rating), reviewCount: Number(product.review_count) } } : {}) };
     headExtras = `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, "\\u003c")}</script>`;
+    if (!isBot) {
+      const publicProduct = publicProductView(product);
+      publicProduct.first_image_inline = await timed('image', () => inlineProductImage(publicProduct, env, origin));
+      const productSettings = await productSettingsPromise;
+      const bootstrapProduct = publicProduct.first_image_inline ? { ...publicProduct, first_image_inline: { source: publicProduct.first_image_inline.source, from_dom: true } } : publicProduct;
+      const payload = JSON.stringify({ path, product: bootstrapProduct, settings: productSettings }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+      headExtras += `<script type="application/json" id="glamia-product-bootstrap">${payload}</script>`;
+      try {
+        const { renderProductShell } = await import('./product-shell.jsx');
+        const shell = await timed('render', async () => renderProductShell(publicProduct, productSettings, pathContext));
+        html = html.replace('<div id="root"></div>', `<div id="root">${shell}</div>`)
+          .replace(/<div id="initial-loader"[\s\S]*?<div id="root"/, '<div id="root"');
+        firstScreenStyles('product');
+      } catch (error) { console.error('product_shell_render_failed', { error_type: error.name }); }
+    }
   }
 
   if (categoryMatch) {
     const category = decodeURIComponent(categoryMatch[1]);
-    const catalog = await getPublicCatalogRows(env, category);
+    const catalog = await getPublicCatalogRows(env, category, storefront);
     if (catalog.available && !catalog.rows.length) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
     const canonicalCategory = catalog.rows[0]?.category || category;
-    title = `${canonicalCategory} collection | Glamia`;
+    title = `${canonicalCategory} collection | ${storefront === "wibrawl" ? "Wibrawl" : "Glamia"}`;
     description = `Shop the ${canonicalCategory} edit — curated pieces from independent ateliers, delivered fast across India.`;
     canonical = `${origin}/category/${encodeURIComponent(canonicalCategory)}`;
-    botContent = catalogBotContent(`${canonicalCategory} collection`, description, catalog.rows.slice(0, 24), origin);
+    botContent = catalogBotContent(`${canonicalCategory} collection`, description, catalog.rows.slice(0, 24), origin, storefront);
     headExtras = `<script type="application/ld+json">${JSON.stringify(catalogJsonLd(catalog.rows.slice(0, 24), origin)).replace(/</g, "\\u003c")}</script>`;
   }
 
   if (catalogPath.has(path)) {
-    const catalog = await getPublicCatalogRows(env);
+    const catalog = await catalogPromise;
     let rows = catalog.rows;
     if (path === "/offers") rows = rows.filter(row => currentSellingPrice(row) < Number(row.mrp || row.price || 0));
     if (path === "/best-sellers") rows = [...rows].sort((left, right) => Number(right.sold_total || 0) - Number(left.sold_total || 0));
     if (path === "/") {
-      title = "Glamia — Curated Apparel & Accessories";
-      description = DEFAULT_PAGE_DESCRIPTION;
-      botContent = catalogBotContent("Curated apparel and accessories", description, rows.slice(0, 24), origin);
+      // Reuse the public settings already required for the first screen. Do not
+      // issue a second settings query solely for homepage sharing metadata.
+      const settings = await homepageSettingsPromise;
+      const seo = settings?.seo || {};
+      title = storefront === "wibrawl" ? "Wibrawl — Pick your side. Wear your world." : heroText(seo.title, "Glamia — Curated apparel for every wardrobe", 120);
+      description = storefront === "wibrawl" ? "Tees for the things you play, watch, follow, and love. Pick your side. Wear your world." : heroText(seo.description, "Discover refined everyday pieces, occasionwear, and accessories from independent ateliers.", 220);
+      ogImage = absoluteImageUrl(normalizeSeoImage(seo.image, `${origin}/glamia-social-banner.png`), origin);
+      botContent = catalogBotContent(storefront === "wibrawl" ? "Tees for every side" : "Curated apparel and accessories", description, rows.slice(0, 24), origin, storefront);
     } else {
       const titles = { "/offers": "Offers", "/just-arrived": "Just arrived", "/best-sellers": "Best sellers" };
-      title = `${titles[path]} | Glamia`;
-      description = `${titles[path]} from Glamia — curated apparel and accessories from independent ateliers, delivered fast across India.`;
-      botContent = catalogBotContent(titles[path], description, rows.slice(0, 24), origin);
+      const brand = storefront === "wibrawl" ? "Wibrawl" : "Glamia";
+      title = `${titles[path]} | ${brand}`;
+      description = storefront === "wibrawl" ? `${titles[path]} from Wibrawl. Pick your side. Wear your world.` : `${titles[path]} from Glamia — curated apparel and accessories from independent ateliers, delivered fast across India.`;
+      botContent = catalogBotContent(titles[path], description, rows.slice(0, 24), origin, storefront);
     }
     headExtras = `<script type="application/ld+json">${JSON.stringify(catalogJsonLd(rows.slice(0, 24), origin)).replace(/</g, "\\u003c")}</script>`;
+    if (path !== '/' && storefront !== "wibrawl" && !isBot && catalogueDataPromise) {
+      const [data, settings] = await Promise.all([catalogueDataPromise, productSettingsPromise]);
+      if (data) {
+        const catalogue = { ...data, identity: catalogueParameters.toString() };
+        const categories = ['All', ...new Set(data.products.map(product => product.category).filter(Boolean))];
+        const payload = JSON.stringify({ path, settings, catalogue }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+        headExtras += `<script type="application/json" id="glamia-catalogue-bootstrap">${payload}</script>`;
+        try {
+          const { renderCatalogueShell } = await import('./catalogue-shell.jsx');
+          const shell = await timed('render', async () => renderCatalogueShell({ path, title: title.replace(/ \| Glamia$/, ''), settings, catalogue, categories }));
+          html = html.replace('<div id="root"></div>', `<div id="root">${shell}</div>`)
+            .replace(/<div id="initial-loader"[\s\S]*?<div id="root"/, '<div id="root"');
+          firstScreenStyles('catalogue');
+        } catch (error) { console.error('catalogue_shell_render_failed', { error_type: error.name }); }
+      }
+    }
   }
 
   if (infoPath.has(path)) {
     const info = {
+      "/about": ["About Glamia", "Follow the story and point of view behind Glamia."],
       "/contact": ["Contact Glamia", "Questions about an order, product, or delivery? Our team is here to help."],
       "/support": ["Glamia customer support", "Find help with orders, returns, exchanges, delivery, and your account."],
       "/policies": ["Glamia policies", "Review delivery, returns, exchanges, privacy, and checkout information before you shop."],
@@ -408,8 +778,14 @@ async function renderPublicPage(request, env) {
     title = `${info[0]} | Glamia`;
     description = info[1];
     botContent = path === "/policies" || Object.values(standalonePolicyPaths).includes(path)
-      ? policiesBotContent(Object.entries(standalonePolicyPaths).find(([, value]) => value === path)?.[0] || "")
+      ? policiesBotContent(Object.entries(standalonePolicyPaths).find(([, value]) => value === path)?.[0] || "",(await storefrontSettingsObject(env)).customer_experience)
       : `<main class="info-page"><p class="eyebrow">Glamia</p><h1>${escapeHtml(info[0])}</h1><p>${escapeHtml(info[1])}</p><p><a href="/best-sellers">Browse the collection</a> · <a href="/orders">Track your order</a></p></main>`;
+    if (path === "/about") {
+      const about = await readAboutPage(env);
+      title = `${about.headline} | Glamia`;
+      description = about.introduction.slice(0, 220);
+      botContent = `<main class="info-page"><p class="eyebrow">${escapeHtml(about.eyebrow)}</p><h1>${escapeHtml(about.headline)}</h1><p>${escapeHtml(about.introduction)}</p><ol>${about.timeline.map(item => `<li><p>${escapeHtml(item.period)}</p><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.body)}</p></li>`).join("")}</ol></main>`;
+    }
   }
 
   const metaTags = [
@@ -426,10 +802,63 @@ async function renderPublicPage(request, env) {
     `<link rel="canonical" href="${escapeHtml(canonical)}" />`
   ].join("");
 
+  const bootstrap = bootstrapPromise ? await bootstrapPromise : null;
+  if (bootstrap) {
+    // A tiny first-screen thumbnail can travel with the document, saving a
+    // second network round trip. Larger/external media keeps its normal URL.
+    const firstFrame = bootstrap.hero?.slides?.[0]?.frames?.[0];
+    const originalHeroImage = firstFrame?.image;
+    if (firstFrame?.image?.startsWith('/api/assets/products/')) {
+      try {
+        // Reuse the immutable public-image edge cache instead of doing an R2
+        // round trip each time the short-lived homepage cache expires.
+        const imageUrl = new URL(firstFrame.image, url);
+        const image = await timed('hero_media', () => cachedProductImage(new Request(imageUrl), env, imageUrl, ctx));
+        const type = image.headers.get('Content-Type');
+        const size = Number(image.headers.get('Content-Length'));
+        if (image.ok && Number.isFinite(size) && size > 0 && size <= 32768 && /^image\/(webp|png|jpeg)$/.test(type || '')) {
+          const bytes = new Uint8Array(await image.arrayBuffer());
+          firstFrame.image = `data:${type};base64,${btoa(String.fromCharCode(...bytes))}`;
+        } else await image.body?.cancel();
+      } catch { /* The original public URL remains a safe fallback. */ }
+    }
+    // Inline first-screen rules from the same built CSS. Preload the complete
+    // stylesheet without blocking this shell; React waits for it before mount.
+    // Other routes retain their normal external stylesheet.
+    for (const file of storefrontStyleFiles) {
+      html = html.replace(new RegExp(`<link[^>]+href="/${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`, 'g'), `<link rel="preload" as="style" href="/${escapeHtml(storefrontDeferredStyleFile)}" data-glamia-storefront-css />`);
+    }
+    headExtras += `<style id="glamia-storefront-styles">${storefrontCss}</style>`;
+    try {
+      const renderedShell = await timed('render', async () => {
+        const { renderHomepageShell } = await import('./homepage-shell.jsx');
+        return renderHomepageShell(bootstrap);
+      });
+      html = html.replace('<div id="root"></div>', `<div id="root">${renderedShell}</div>`)
+        .replace(/<div id="initial-loader"[\s\S]*?<div id="root"/, '<div id="root"');
+    } catch (error) {
+      console.error('public_shell_render_failed', { error_type: error.name });
+    }
+    const serializedBootstrap = firstFrame?.image?.startsWith('data:image/') ? {
+      ...bootstrap,
+      hero: { ...bootstrap.hero, first_image_from_dom: true, slides: bootstrap.hero.slides.map((slide, index) => index === 0 ? { ...slide, frames: slide.frames.map((frame, frameIndex) => frameIndex === 0 ? { ...frame, image: originalHeroImage } : frame) } : slide) }
+    } : bootstrap;
+    const data = JSON.stringify(serializedBootstrap).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    const firstImage = bootstrap.hero?.slides?.[0]?.frames?.[0]?.image;
+    // A relative uploaded asset is safe to preload; external/user-supplied
+    // URLs are left to the image element and the existing CSP.
+    if (firstImage?.startsWith("/api/assets/") && !firstImage.startsWith("//")) {
+      headExtras += `<link rel="preload" as="image" href="${escapeHtml(firstImage)}" fetchpriority="high" />`;
+    }
+    headExtras += `<script type="application/json" id="glamia-storefront-bootstrap">${data}</script>`;
+  }
   html = html
     .replace(/<title>.*?<\/title>/, `<title>${escapeHtml(title)}</title>`)
     .replace(/<meta name="description" content="[^"]*"\s*\/>/, `<meta name="description" content="${escapeHtml(description)}" />`)
-    .replace("</head>", `${metaTags}${headExtras}</head>`);
+    .replace("</head>", `${metaTags}${headExtras}${isBot || renderedFirstScreen ? '' : storefrontResourceHints(path)}</head>`);
+  // The common font characters are already in the verified first-screen CSS.
+  // Keep the ordinary font files for all other characters and private routes.
+  if (renderedFirstScreen || (path === '/' && !isBot)) html = html.replace(/<link\b[^>]*\bas="font"[^>]*>/g, '');
   if (isBot && botContent) {
     html = html
       .replace('<div id="root"></div>', `<div id="root">${botContent}</div>`)
@@ -438,16 +867,17 @@ async function renderPublicPage(request, env) {
       .replace(/<script\s+type="module"[^>]*><\/script>/i, "");
   }
 
-  return new Response(html, { headers: { "Content-Type": "text/html; charset=UTF-8", "Cache-Control": "public, max-age=120, s-maxage=300, stale-while-revalidate=1800" } });
+  serverTimings.push(`total;dur=${Date.now() - started}`);
+  return new Response(html, { headers: { "Content-Type": "text/html; charset=UTF-8", "Vary": "User-Agent", "Cache-Control": "public, max-age=120, s-maxage=300, stale-while-revalidate=1800", "Server-Timing": serverTimings.join(', ') } });
 }
 
 async function getSitemap(request, env) {
   const origin = canonicalOriginForRequest(new URL(request.url));
-  const staticPaths = ["/", "/offers", "/just-arrived", "/best-sellers", "/contact", "/support", "/policies", ...Object.values(standalonePolicyPaths)];
+  const staticPaths = ["/", "/offers", "/just-arrived", "/best-sellers", "/about", "/contact", "/support", "/policies", ...Object.values(standalonePolicyPaths)];
   let productRows = [];
   try {
     const result = await env.DB.prepare(`
-      SELECT id, name, category, subcategory, images_json, image_url, thumbnail_url, updated_at, created_at
+      SELECT id, product_code, name, category, subcategory, images_json, image_url, thumbnail_url, updated_at, created_at
       FROM products
       WHERE status = 'live'
       ORDER BY updated_at DESC, created_at DESC
@@ -587,28 +1017,77 @@ function publicPageCacheTtl(request, url) {
 
 async function cachedPublicResponse(request, ctx, ttl, producer) {
   const cache = globalThis.caches?.default;
-  const cacheKey = new Request(request.url, { method: "GET" });
+  const cacheUrl = new URL(request.url);
+  cacheUrl.searchParams.set("__glamia_cache", PUBLIC_CACHE_VERSION);
+  // Crawler HTML deliberately has no React script. Never serve it to shoppers.
+  if (!cacheUrl.pathname.startsWith("/api/")) cacheUrl.searchParams.set("__glamia_render", CRAWLER_UA.test(request.headers.get("User-Agent") || "") ? "crawler" : "interactive");
+  const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
   if (cache) {
     const hit = await cache.match(cacheKey);
-    if (hit) return hit;
+    if (hit) {
+      const headers = new Headers(hit.headers);
+      headers.set('Server-Timing', 'edge_cache;desc="HIT"');
+      // Cloudflare can add its default browser TTL to Cache API hits. Keep
+      // browsers revalidating, while retaining the existing short edge TTL.
+      headers.set('Cache-Control', `public, max-age=0, must-revalidate, s-maxage=${ttl}, stale-while-revalidate=${Math.max(ttl * 5, 300)}`);
+      return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers });
+    }
   }
   const response = await producer();
   if (!response || response.status !== 200) return response;
   const headers = new Headers(response.headers);
-  headers.set("Cache-Control", `public, s-maxage=${ttl}, stale-while-revalidate=${Math.max(ttl * 5, 300)}`);
+  headers.set("Cache-Control", `public, max-age=0, must-revalidate, s-maxage=${ttl}, stale-while-revalidate=${Math.max(ttl * 5, 300)}`);
   const cacheable = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   if (cache && ctx?.waitUntil) ctx.waitUntil(cache.put(cacheKey, cacheable.clone()));
   return cacheable;
+}
+
+async function invalidateStorefrontCache(request) {
+  const cache = globalThis.caches?.default;
+  if (!cache) return;
+  // Settings also affect the homepage's server-rendered sharing metadata.
+  try { await Promise.all(["/api/storefront-settings?cache=1", "/"].map(path => {
+    return Promise.all((path === "/" ? ["crawler", "interactive"] : [null]).map(mode => {
+      const cacheUrl = new URL(path, request.url);
+      cacheUrl.searchParams.set("__glamia_cache", PUBLIC_CACHE_VERSION);
+      if (mode) cacheUrl.searchParams.set("__glamia_render", mode);
+      return cache.delete(new Request(cacheUrl.toString(), { method: "GET" }));
+    }));
+  })); }
+  catch (error) { console.error("Storefront cache invalidation failed", error); }
 }
 
 async function routeApi(request, env, url, ctx) {
   const path = url.pathname;
   // Native Expo clients do not have a browser Origin/Referer. Their explicit
   // mobile marker plus bearer session is the CSRF boundary for app requests.
-  const isPaymentWebhook = ["/api/payments/webhooks/razorpay", "/api/payments/webhooks/phonepe"].includes(path);
-  if (!path.startsWith("/api/employee/") && !isPaymentWebhook) assertSameOrigin(request, url);
+  const isExternalCallback = ["/api/payments/webhooks/razorpay", "/api/payments/webhooks/phonepe", APPLE_MOBILE_CALLBACK_PATH, APPLE_WEB_CALLBACK_PATH].includes(path);
+  if (!path.startsWith("/api/employee/") && !isExternalCallback) assertSameOrigin(request, url);
   await enforceRateLimit(request, url, env, ctx);
   const user = await currentUser(request, env);
+  if (user?.employee_id && !user.is_owner) await authorizeEmployeeWebsiteRequest(request, url, user);
+
+  if (path === "/api/admin/credits" || path.startsWith("/api/admin/credits/")) {
+    requireAdmin(user);
+    return handleCreditAdmin(request, env, user, path, url);
+  }
+
+  if (request.method === "GET" && path === "/api/about") return json(await readAboutPage(env));
+  if (path === "/api/admin/about") {
+    requireAdmin(user);
+    if (request.method === "GET") return json(await readAboutPage(env));
+    if (request.method === "PUT") {
+      const updated = await saveAboutPage(env, await readJson(request), user.email);
+      await writeAuditLog(env, user.email, "update", "about_page", "1", { moment_count: updated.timeline.length });
+      return json(updated);
+    }
+  }
+
+  if (path === "/api/admin/google-merchant" || path.startsWith("/api/admin/google-merchant/")) {
+    requireAdmin(user);
+    if (user.employee_id && !user.is_owner && /\/(register|verify)$/.test(path)) throw httpError("This action is reserved for an owner", 403);
+    return merchantAdmin(request, env, url, ctx, { path: canonicalProductPath, price: currentSellingPrice });
+  }
 
   if (request.method === "POST" && path === "/api/employee/auth/login") {
     return employeeLogin(request, env);
@@ -619,25 +1098,394 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "GET" && path === "/api/employee/session") {
     return getEmployeeSession(request, env);
   }
+  if (request.method === "POST" && path === "/api/employee/push-tokens") {
+    const employeeSession = await requireEmployee(request, env);
+    return registerEmployeePushToken(request, env, employeeSession.employee);
+  }
+  if (request.method === "DELETE" && path === "/api/employee/push-tokens") {
+    const employeeSession = await requireEmployee(request, env);
+    return removeEmployeePushToken(request, env, employeeSession.employee);
+  }
+
+  // Employee admin workspaces deliberately use a separate route namespace.
+  // Every route checks the employee's current permission before touching the
+  // same data/actions exposed by the browser admin console. This keeps the
+  // mobile UI convenient without making the UI itself the security boundary.
+  const employeeAdmin = path.startsWith("/api/employee/admin/");
+  if (employeeAdmin) {
+    const employeeSession = await requireEmployee(request, env);
+    const employee = employeeSession.employee;
+    const actor = employeeAdminActor(employee, env);
+    const permission = (id) => requireEmployeePermission(employeeSession, id);
+    const anyPermission = (ids) => requireEmployeeAnyPermission(employeeSession, ids);
+
+    if (path === "/api/employee/admin/credits" || path.startsWith("/api/employee/admin/credits/")) {
+      if (!employeeIsOwner(employee, env)) permission("credits");
+      return handleCreditAdmin(request, env, actor, path.replace("/api/employee/admin/", "/api/admin/"), url);
+    }
+
+    if (request.method === "GET" && path === "/api/employee/admin/dashboard") {
+      permission("dashboard");
+      return dashboardStats(env);
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/products") {
+      anyPermission(["products", "add_product", "bulk_listing", "inventory", "deals", "tax", "coupons"]);
+      return listProducts(env, actor, "admin", url.searchParams);
+    }
+    if (request.method === "POST" && path === "/api/employee/admin/products") {
+      permission("add_product");
+      return createProduct(request, env, employeeCatalogActor(employee), ctx);
+    }
+    if (request.method === "POST" && path === "/api/employee/admin/bulk-products") {
+      permission("bulk_listing");
+      const body = await readJson(request);
+      const products = Array.isArray(body.products) ? body.products.slice(0, 100) : [];
+      if (!products.length) return json({ error: "Add at least one listing to import" }, 400);
+      const created = [];
+      const errors = [];
+      for (const [index, product] of products.entries()) {
+        try {
+          const response = await createProduct(new Request(request.url, {
+            method: "POST",
+            headers: request.headers,
+            body: JSON.stringify(product)
+          }), env, employeeCatalogActor(employee), ctx);
+          const data = await response.json();
+          if (!response.ok) errors.push({ row: index + 1, error: data.error || "Listing could not be created" });
+          else created.push(data.product || data);
+        } catch (error) {
+          errors.push({ row: index + 1, error: String(error?.message || "Listing could not be created") });
+        }
+      }
+      return json({ ok: errors.length === 0, created, errors }, errors.length && !created.length ? 400 : 200);
+    }
+    const employeeAdminProduct = path.match(/^\/api\/employee\/admin\/products\/([^/]+)$/);
+    if (employeeAdminProduct && request.method === "PATCH") {
+      anyPermission(["products", "inventory", "deals", "tax"]);
+      const body = await readJson(request);
+      const allowed = allowedEmployeeProductFields(employee);
+      const unexpected = Object.keys(body).filter((key) => !allowed.has(key));
+      if (unexpected.length) return json({ error: "This account cannot change those listing fields" }, 403);
+      const response = await updateProduct(new Request(request.url, {
+        method: "PATCH",
+        headers: request.headers,
+        body: JSON.stringify(body)
+      }), env, decodeURIComponent(employeeAdminProduct[1]), actor, ctx);
+      return response;
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/categories") {
+      anyPermission(["categories", "products", "add_product", "coupons", "hero"]);
+      return listCategories(env, "glamia", true);
+    }
+    if (request.method === "POST" && path === "/api/employee/admin/categories") {
+      permission("categories");
+      return createCategory(request, env);
+    }
+    const employeeAdminCategory = path.match(/^\/api\/employee\/admin\/categories\/([^/]+)$/);
+    if (employeeAdminCategory && request.method === "DELETE") {
+      permission("categories");
+      return deleteCategory(env, decodeURIComponent(employeeAdminCategory[1]));
+    }
+    if (request.method === "POST" && path === "/api/employee/admin/subcategories") {
+      permission("categories");
+      return createSubcategory(request, env);
+    }
+    const employeeAdminSubcategory = path.match(/^\/api\/employee\/admin\/subcategories\/([^/]+)\/([^/]+)$/);
+    if (employeeAdminSubcategory && request.method === "DELETE") {
+      permission("categories");
+      return deleteSubcategory(env, decodeURIComponent(employeeAdminSubcategory[1]), decodeURIComponent(employeeAdminSubcategory[2]));
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/orders") {
+      anyPermission(["orders", "labels"]);
+      return listOrders(env, actor, "admin", url.searchParams);
+    }
+    const employeeAdminOrder = path.match(/^\/api\/employee\/admin\/orders\/([^/]+)$/);
+    if (employeeAdminOrder && request.method === "PATCH") {
+      anyPermission(["orders", "labels"]);
+      const body = await readJson(request);
+      if (!employeeHasPermission(employee, "orders")) {
+        const unexpected = Object.keys(body).filter((key) => key !== "tracking_number");
+        if (unexpected.length) return json({ error: "Labels access can only update tracking numbers" }, 403);
+      }
+      return updateOrderStatus(new Request(request.url, { method: "PATCH", headers: request.headers, body: JSON.stringify(body) }), env, decodeURIComponent(employeeAdminOrder[1]), actor);
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/returns") {
+      permission("returns");
+      return listReturns(env, actor, "admin");
+    }
+    const employeeAdminReturn = path.match(/^\/api\/employee\/admin\/returns\/([^/]+)$/);
+    if (employeeAdminReturn && request.method === "PATCH") {
+      permission("returns");
+      return updateReturnRequest(request, env, actor, decodeURIComponent(employeeAdminReturn[1]), ctx);
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/support/tickets") {
+      permission("support");
+      return listSupportTickets(env, actor, "admin");
+    }
+    const employeeSupportContext = path.match(/^\/api\/employee\/admin\/support\/tickets\/([^/]+)\/(order-context|return-access)$/);
+    if (employeeSupportContext && (request.method==='GET' || request.method==='PATCH')) {
+      permission('support');
+      const id=decodeURIComponent(employeeSupportContext[1]);
+      if(request.method==='GET' && employeeSupportContext[2]==='order-context') return supportTicketOrderContext(env,actor,id);
+      if(request.method==='PATCH' && employeeSupportContext[2]==='return-access') return updateSupportReturnAccess(request,env,actor,id);
+    }
+    const employeeAdminSupportMessage = path.match(/^\/api\/employee\/admin\/support\/tickets\/([^/]+)\/messages$/);
+    if (employeeAdminSupportMessage && ["GET", "POST"].includes(request.method)) {
+      permission("support");
+      return request.method === "GET"
+        ? listSupportMessages(env, actor, decodeURIComponent(employeeAdminSupportMessage[1]))
+        : createSupportMessage(request, env, actor, decodeURIComponent(employeeAdminSupportMessage[1]));
+    }
+    const employeeAdminSupportTicket = path.match(/^\/api\/employee\/admin\/support\/tickets\/([^/]+)$/);
+    if (employeeAdminSupportTicket && request.method === "PATCH") {
+      permission("support");
+      return updateSupportTicket(request, env, actor, decodeURIComponent(employeeAdminSupportTicket[1]));
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/customers") {
+      permission("customers");
+      return listCustomers(env);
+    }
+    const employeeCustomerOrders = path.match(/^\/api\/employee\/admin\/customers\/([^/]+)\/orders$/);
+    if (employeeCustomerOrders && request.method === "GET") {
+      permission("customers");
+      permission("orders");
+      return listAdminCustomerOrders(env, actor, decodeURIComponent(employeeCustomerOrders[1]), url.searchParams);
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/reviews") {
+      permission("reviews");
+      return listAllReviews(env);
+    }
+    const employeeAdminReview = path.match(/^\/api\/employee\/admin\/reviews\/([^/]+)$/);
+    if (employeeAdminReview && request.method === "PATCH") {
+      permission("reviews");
+      return moderateReview(request, env, decodeURIComponent(employeeAdminReview[1]));
+    }
+    if (employeeAdminReview && request.method === "DELETE") {
+      permission("reviews");
+      return deleteReview(env, decodeURIComponent(employeeAdminReview[1]));
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/questions") {
+      permission("questions");
+      return listAllProductQuestions(env);
+    }
+    const employeeAdminQuestion = path.match(/^\/api\/employee\/admin\/questions\/([^/]+)$/);
+    if (employeeAdminQuestion && request.method === "PATCH") {
+      permission("questions");
+      return moderateProductQuestion(request, env, actor, decodeURIComponent(employeeAdminQuestion[1]));
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/coupons") {
+      permission("coupons");
+      return listCoupons(env);
+    }
+    if (request.method === "POST" && path === "/api/employee/admin/coupons") {
+      permission("coupons");
+      return createCoupon(request, env);
+    }
+    const employeeAdminCoupon = path.match(/^\/api\/employee\/admin\/coupons\/([^/]+)$/);
+    if (employeeAdminCoupon && request.method === "PATCH") {
+      permission("coupons");
+      return updateCoupon(request, env, decodeURIComponent(employeeAdminCoupon[1]));
+    }
+    if (employeeAdminCoupon && request.method === "DELETE") {
+      permission("coupons");
+      return deleteCoupon(env, decodeURIComponent(employeeAdminCoupon[1]));
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/storefront-settings") {
+      permission("storefront");
+      return getStorefrontSettings(env, true);
+    }
+    if (request.method === "PUT" && path === "/api/employee/admin/storefront-settings") {
+      permission("storefront");
+      const body = await readJson(request);
+      // Reel changes use their own permission even when older clients submit the full settings object.
+      const safeBody = { ...body };
+      delete safeBody.cinematic_reel;
+      return updateStorefrontSettings(new Request(request.url, { method: "PUT", headers: request.headers, body: JSON.stringify(safeBody) }), env);
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/cinematic-reel") {
+      permission("cinematic_reel");
+      return getCinematicReelSettings(env);
+    }
+    if (request.method === "PUT" && path === "/api/employee/admin/cinematic-reel") {
+      permission("cinematic_reel");
+      return updateCinematicReelSettings(request, env);
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/events") {
+      permission("events");
+      return listEvents(env);
+    }
+    if (request.method === "POST" && path === "/api/employee/admin/events") {
+      permission("events");
+      return createEvent(request, env, actor);
+    }
+    const employeeAdminEvent = path.match(/^\/api\/employee\/admin\/events\/([^/]+)$/);
+    if (employeeAdminEvent && request.method === "PATCH") {
+      permission("events");
+      return updateEvent(request, env, decodeURIComponent(employeeAdminEvent[1]), actor);
+    }
+    if (employeeAdminEvent && request.method === "DELETE") {
+      permission("events");
+      return deleteEvent(request, env, decodeURIComponent(employeeAdminEvent[1]), actor);
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/tax") {
+      permission("tax");
+      const [settingsResponse, reportResponse] = await Promise.all([getTaxSettings(env), taxComplianceReport(env)]);
+      return json({ settings: await settingsResponse.json(), report: await reportResponse.json() });
+    }
+    if (request.method === "PATCH" && path === "/api/employee/admin/tax-settings") {
+      permission("tax");
+      return updateTaxSettings(request, env, actor);
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/analytics") {
+      permission("google_analytics");
+      return googleAnalyticsReport(env);
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/system") {
+      permission("system");
+      const [healthResponse, eventsResponse] = await Promise.all([healthCheck(env), listEmailEvents(env)]);
+      return json({ health: await healthResponse.json(), events: (await eventsResponse.json()).events || [] });
+    }
+    const employeeAdminEmailEvent = path.match(/^\/api\/employee\/admin\/system\/email-events\/([^/]+)\/retry$/);
+    if (employeeAdminEmailEvent && request.method === "POST") {
+      permission("system");
+      return retryEmailEvent(env, decodeURIComponent(employeeAdminEmailEvent[1]), actor);
+    }
+    if (request.method === "GET" && path === "/api/employee/admin/employees") {
+      permission("employees");
+      return listEmployees(env, actor);
+    }
+    if (request.method === "POST" && path === "/api/employee/admin/employees") {
+      permission("employees");
+      return createEmployee(request, env, actor);
+    }
+    const employeeAdminEmployee = path.match(/^\/api\/employee\/admin\/employees\/([^/]+)$/);
+    if (employeeAdminEmployee && request.method === "PATCH") {
+      permission("employees");
+      return updateEmployee(request, env, decodeURIComponent(employeeAdminEmployee[1]), actor);
+    }
+    if (employeeAdminEmployee && request.method === "DELETE") {
+      permission("employees");
+      return deleteEmployee(env, decodeURIComponent(employeeAdminEmployee[1]), actor);
+    }
+    return json({ error: "Employee admin area not found" }, 404);
+  }
+  if (request.method === "GET" && path === "/api/employee/dashboard") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "dashboard");
+    return employeeDashboard(env);
+  }
+  if (request.method === "GET" && path === "/api/employee/products") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeeAnyPermission(employeeSession, ["products", "add_product", "inventory", "hero", "deals", "tax", "coupons", "bulk_listing"]);
+    return listEmployeeProducts(env);
+  }
+  if (request.method === "POST" && path === "/api/employee/products") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "add_product");
+    return createEmployeeProduct(request, env, employeeSession.employee, ctx);
+  }
+  const employeeProduct = path.match(/^\/api\/employee\/products\/([^/]+)$/);
+  if (employeeProduct && request.method === "PATCH") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeeAnyPermission(employeeSession, ["products", "inventory"]);
+    return updateEmployeeProduct(request, env, decodeURIComponent(employeeProduct[1]), employeeSession.employee, ctx);
+  }
+  if (request.method === "GET" && path === "/api/employee/categories") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeeAnyPermission(employeeSession, ["categories", "products", "add_product"]);
+    return listCategories(env, "glamia", true);
+  }
+  if (request.method === "POST" && path === "/api/employee/categories") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "categories");
+    return createCategory(request, env);
+  }
+  if (request.method === "POST" && path === "/api/employee/subcategories") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "categories");
+    return createSubcategory(request, env);
+  }
+  if (request.method === "GET" && path === "/api/employee/hero") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "hero");
+    return listHeroSlides(env, true);
+  }
+  if (request.method === "GET" && path === "/api/employee/hero/insights") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "hero");
+    return heroInsights(env);
+  }
+  if (request.method === "POST" && path === "/api/employee/hero") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "hero");
+    return createHeroSlide(request, env);
+  }
+  const employeeHero = path.match(/^\/api\/employee\/hero\/([^/]+)$/);
+  if (employeeHero && request.method === "PATCH") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "hero");
+    return updateHeroSlide(request, env, decodeURIComponent(employeeHero[1]));
+  }
+  if (employeeHero && request.method === "DELETE") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "hero");
+    return deleteHeroSlide(env, decodeURIComponent(employeeHero[1]));
+  }
   if (request.method === "GET" && path === "/api/employee/orders") {
     const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "packing");
     return listEmployeeOrders(env, url.searchParams.get("status") || "unpacked", employeeSession);
   }
   const employeeOrder = path.match(/^\/api\/employee\/orders\/([^/]+)$/);
   if (employeeOrder && request.method === "GET") {
     const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "packing");
     return getEmployeeOrder(env, decodeURIComponent(employeeOrder[1]), employeeSession);
   }
   const employeePackedOrder = path.match(/^\/api\/employee\/orders\/([^/]+)\/packed$/);
   if (employeePackedOrder && request.method === "POST") {
     const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "packing");
     return markEmployeeOrderPacked(env, decodeURIComponent(employeePackedOrder[1]), employeeSession);
+  }
+  if (request.method === "GET" && path === "/api/employee/notifications") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "notifications");
+    return listEmployeeNotifications(env, employeeSession.employee);
+  }
+  if (request.method === "GET" && path === "/api/employee/notifications/count") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "notifications");
+    return getEmployeeNotificationCount(env, employeeSession.employee);
+  }
+  if (request.method === "POST" && path === "/api/employee/notifications/read-all") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "notifications");
+    await markAllEmployeeNotificationsRead(env, employeeSession.employee);
+    return listEmployeeNotifications(env, employeeSession.employee);
+  }
+  if (request.method === "DELETE" && path === "/api/employee/notifications/cleared") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "notifications");
+    await env.DB.prepare(`
+      UPDATE employee_notification_states
+      SET dismissed_at = COALESCE(dismissed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP
+      WHERE employee_id = ? AND read_at IS NOT NULL
+    `).bind(employeeSession.employee.id).run();
+    return listEmployeeNotifications(env, employeeSession.employee);
+  }
+  const employeeNotification = path.match(/^\/api\/employee\/notifications\/([^/]+)$/);
+  if (employeeNotification && request.method === "PATCH") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "notifications");
+    return updateEmployeeNotification(request, env, employeeSession.employee, decodeURIComponent(employeeNotification[1]));
   }
 
   if (request.method === "GET" && path === "/api/config") {
     return json({
       googleClientId: env.GOOGLE_CLIENT_ID || "",
       googleAnalyticsMeasurementId: env.GA4_MEASUREMENT_ID || "",
+      appleWebAvailable: appleWebConfigured(env),
     });
   }
 
@@ -662,6 +1510,24 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "POST" && path === "/api/auth/apple") {
     return loginWithApple(request, env);
   }
+  if (request.method === "GET" && path === "/api/auth/apple/mobile/config") {
+    return json({ available: Boolean(appleMobileServiceId(env)) }, 200, { "Cache-Control": "no-store" });
+  }
+  if (request.method === "POST" && path === "/api/auth/apple/mobile/start") {
+    return startAppleMobileLogin(request, env);
+  }
+  if (request.method === "POST" && path === APPLE_MOBILE_CALLBACK_PATH) {
+    return completeAppleMobileLogin(request, env);
+  }
+  if (request.method === "POST" && path === "/api/auth/apple/mobile/exchange") {
+    return exchangeAppleMobileLogin(request, env);
+  }
+  if (request.method === "GET" && path === "/api/auth/apple/web/start") {
+    return startAppleWebLogin(env);
+  }
+  if (request.method === "POST" && path === APPLE_WEB_CALLBACK_PATH) {
+    return completeAppleWebLogin(request, env);
+  }
 
   if (request.method === "GET" && path === "/api/auth/demo-admin") {
     return loginAsDemoAdmin(request, env);
@@ -669,8 +1535,11 @@ async function routeApi(request, env, url, ctx) {
 
   if (request.method === "POST" && path === "/api/logout") {
     if (user?.email) {
-      await env.DB.prepare("UPDATE users SET session_version = COALESCE(session_version, 0) + 1 WHERE email = ?")
-        .bind(user.email).run();
+      // Global sign-out revokes both sessions and their notification destinations.
+      await env.DB.batch([
+        env.DB.prepare("UPDATE users SET session_version = COALESCE(session_version, 0) + 1 WHERE email = ?").bind(user.email),
+        env.DB.prepare("UPDATE customer_push_tokens SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE user_email = ? AND active = 1").bind(user.email)
+      ]);
     }
     const response = json({ user: null });
     response.headers.append("Set-Cookie", clearSessionCookie(request, HOST_SESSION_COOKIE));
@@ -693,7 +1562,7 @@ async function routeApi(request, env, url, ctx) {
 
   if (request.method === "GET" && path === "/api/loyalty") {
     requireUser(user);
-    return getLoyalty(env, user);
+    return json(await creditWallet(env, user, url.searchParams.get("summary") === "1"));
   }
 
   if (request.method === "GET" && path === "/api/addresses") {
@@ -720,7 +1589,7 @@ async function routeApi(request, env, url, ctx) {
   }
 
   if (request.method === "GET" && path === "/api/products") {
-    return listProducts(env, user, url.searchParams.get("scope") || "public", url.searchParams);
+    return listProducts(env, user, url.searchParams.get("scope") || "public", url.searchParams, storefrontForRequest(url));
   }
 
   if (request.method === "POST" && path === "/api/analytics/track") {
@@ -733,9 +1602,9 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "GET" && path === "/api/search") {
     const query = url.searchParams.get("q") || url.searchParams.get("query") || "";
     const limit = Math.min(100, Math.max(1, Math.floor(Number(url.searchParams.get("limit")) || 40)));
-    const vector = await vectorSearchProducts(env, query, limit);
+    const vector = storefrontForRequest(url) === "wibrawl" ? null : await vectorSearchProducts(env, query, limit);
     if (vector) return json(vector);
-    const fallback = await listProducts(env, user, "public", new URLSearchParams({ q: query, view: "cards", limit: String(limit) }));
+    const fallback = await listProducts(env, user, "public", new URLSearchParams({ q: query, view: "cards", limit: String(limit) }), storefrontForRequest(url));
     const data = await fallback.json();
     return json({ products: data.products || [], engine: "keyword" });
   }
@@ -760,11 +1629,11 @@ async function routeApi(request, env, url, ctx) {
   }
 
   if (request.method === "POST" && path === "/api/payments/razorpay/verify") {
-    return verifyRazorpayPayment(request, env, user);
+    return verifyRazorpayPayment(request, env, user, ctx);
   }
 
   if (request.method === "GET" && path === "/api/payments/phonepe/status") {
-    return getPhonePePaymentStatus(request, env, user, url);
+    return getPhonePePaymentStatus(request, env, user, url, ctx);
   }
 
   if (request.method === "POST" && path === "/api/payments/webhooks/razorpay") {
@@ -772,18 +1641,16 @@ async function routeApi(request, env, url, ctx) {
   }
 
   if (request.method === "POST" && path === "/api/payments/webhooks/phonepe") {
-    return handlePhonePeWebhook(request, env);
+    return handlePhonePeWebhook(request, env, ctx);
   }
 
   if (request.method === "GET" && path === "/api/postal-lookup") {
-    return lookupIndianPostalCode(url.searchParams.get("pin"));
+    return lookupIndianPostalCode(url.searchParams.get("pin"),env);
   }
 
   if (request.method === "POST" && path === "/api/products") {
     requireUser(user);
-    const response = await createProduct(request, env, user);
-    if (response.ok) scheduleVectorReindex(env, ctx);
-    return response;
+    return createProduct(request, env, user, ctx);
   }
 
   if (request.method === "POST" && path === "/api/uploads/image") {
@@ -799,6 +1666,26 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "GET" && path === "/api/notifications") {
     requireUser(user);
     return listCustomerNotifications(env, user);
+  }
+  if (request.method === "GET" && path === "/api/saved-items") {
+    requireUser(user);
+    return getCustomerSavedItems(env, user);
+  }
+  if (request.method === "POST" && path === "/api/saved-items/merge") {
+    requireUser(user);
+    return changeCustomerSavedItems(request, env, user, true);
+  }
+  if (request.method === "PATCH" && path === "/api/saved-items") {
+    requireUser(user);
+    return changeCustomerSavedItems(request, env, user, false);
+  }
+  if (request.method === "GET" && path === "/api/notification-preferences") {
+    requireUser(user);
+    return getCustomerNotificationPreferences(env, user);
+  }
+  if (request.method === "PUT" && path === "/api/notification-preferences") {
+    requireUser(user);
+    return updateCustomerNotificationPreferences(request, env, user);
   }
   if (request.method === "POST" && path === "/api/notifications/read") {
     requireUser(user);
@@ -825,13 +1712,29 @@ async function routeApi(request, env, url, ctx) {
   if (orderInvoice && request.method === "GET") {
     return orderInvoiceResponse(env, user, decodeURIComponent(orderInvoice[1]), url.searchParams.get("token"));
   }
+  const orderBill = path.match(/^\/api\/orders\/([^/]+)\/bill$/);
+  if (orderBill && request.method === "GET") {
+    return orderBillResponse(env, user, decodeURIComponent(orderBill[1]), url.searchParams.get("token") || "");
+  }
 
+  const customerSupportOrder=path.match(/^\/api\/orders\/([^/]+)\/support-context$/);
+  if(customerSupportOrder && request.method==='GET') {
+    requireUser(user);
+    const order=await env.DB.prepare('SELECT * FROM orders WHERE id=? AND LOWER(TRIM(customer_email))=?')
+      .bind(decodeURIComponent(customerSupportOrder[1]),String(user.email).trim().toLowerCase()).first();
+    if(!order)return json({error:'Order not found'},404);
+    return json(await supportOrderContextData(env,order));
+  }
   const orderAction = path.match(/^\/api\/orders\/([^/]+)\/(cancel|returns)$/);
+  if (orderAction && request.method === "GET" && orderAction[2] === "returns") {
+    requireUser(user);
+    return customerOrderReturnOptions(env, user, decodeURIComponent(orderAction[1]));
+  }
   if (orderAction && request.method === "POST") {
     requireUser(user);
     const orderId = decodeURIComponent(orderAction[1]);
     return orderAction[2] === "cancel"
-      ? cancelOwnOrder(request, env, user, orderId)
+      ? cancelOwnOrder(request, env, user, orderId, ctx)
       : createReturnRequest(request, env, user, orderId);
   }
 
@@ -840,6 +1743,23 @@ async function routeApi(request, env, url, ctx) {
     return listReturns(env, user, url.searchParams.get("scope") || "own");
   }
 
+  const returnDocumentRoute=path.match(/^\/api\/returns\/([^/]+)\/(label|receipt)$/);
+  const returnDocumentAccess=path.match(/^\/api\/returns\/([^/]+)\/document-access$/);
+  if(returnDocumentAccess && request.method==='POST') {
+    requireUser(user);
+    return createReturnDocumentAccess(request,env,user,decodeURIComponent(returnDocumentAccess[1]));
+  }
+  if(returnDocumentRoute && request.method==='GET') {
+    const returned=await getReturnRequest(env,decodeURIComponent(returnDocumentRoute[1]));
+    if(!user) {
+      const valid=returned && await consumeReturnDocumentAccess(env,returned.id,returnDocumentRoute[2],url.searchParams.get('access'));
+      if(!valid) return json({error:'Sign in to download this document'},401);
+      return returnDocument(env,returned,returnDocumentRoute[2]);
+    }
+    if(!returned || (String(returned.customer_email).toLowerCase()!==user.email.toLowerCase() && user.role!=='admin')) return json({error:'Not found'},404);
+    if(user.role==='admin' && String(returned.customer_email).toLowerCase()!==user.email.toLowerCase()) requireReturnsAdmin(user);
+    return returnDocument(env,returned,returnDocumentRoute[2]);
+  }
   if (request.method === "GET" && path === "/api/restock-subscriptions") {
     requireUser(user);
     return listRestockSubscriptions(env, user);
@@ -851,6 +1771,10 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "GET" && path === "/api/support/tickets") {
     requireUser(user);
     return listSupportTickets(env, user, "own");
+  }
+  const supportEscalateRoute=path.match(/^\/api\/support\/tickets\/([^/]+)\/escalate$/);
+  if(supportEscalateRoute&&request.method==='POST'){
+    requireUser(user);return escalateOwnSupportTicket(env,user,decodeURIComponent(supportEscalateRoute[1]));
   }
   const supportMessagesRoute = path.match(/^\/api\/support\/tickets\/([^/]+)\/messages$/);
   if (supportMessagesRoute && ["GET", "POST"].includes(request.method)) {
@@ -902,13 +1826,11 @@ async function routeApi(request, env, url, ctx) {
     const context = url.searchParams.has("category") || url.searchParams.has("subcategory")
       ? { category: url.searchParams.get("category") || "", subcategory: url.searchParams.get("subcategory") || "" }
       : null;
-    return getProduct(env, user, decodeURIComponent(productResource[1]), context);
+    return getProduct(env, user, decodeURIComponent(productResource[1]), context, storefrontForRequest(url));
   }
   if (productResource && request.method === "DELETE") {
     requireUser(user);
-    const response = await deleteProduct(env, user, decodeURIComponent(productResource[1]));
-    if (response.ok) scheduleVectorReindex(env, ctx);
-    return response;
+    return deleteProduct(env, user, decodeURIComponent(productResource[1]), ctx);
   }
 
   const productReviews = path.match(/^\/api\/products\/([^/]+)\/reviews$/);
@@ -964,7 +1886,7 @@ async function routeApi(request, env, url, ctx) {
   }
 
   if (request.method === "GET" && path === "/api/categories") {
-    return listCategories(env);
+    return listCategories(env, storefrontForRequest(url), user?.role === "admin");
   }
 
   if (request.method === "POST" && path === "/api/admin/categories") {
@@ -992,9 +1914,7 @@ async function routeApi(request, env, url, ctx) {
   const adminProduct = path.match(/^\/api\/admin\/products\/([^/]+)$/);
   if (adminProduct && request.method === "PATCH") {
     requireAdmin(user);
-    const response = await updateProduct(request, env, decodeURIComponent(adminProduct[1]), user);
-    if (response.ok) scheduleVectorReindex(env, ctx);
-    return response;
+    return updateProduct(request, env, decodeURIComponent(adminProduct[1]), user, ctx);
   }
 
   const adminOrder = path.match(/^\/api\/admin\/orders\/([^/]+)$/);
@@ -1003,10 +1923,46 @@ async function routeApi(request, env, url, ctx) {
     return updateOrderStatus(request, env, decodeURIComponent(adminOrder[1]), user);
   }
 
+  const adminOrderReturn = path.match(/^\/api\/admin\/returns\/orders\/([^/]+)$/);
+  const returnCompletionRoute=path.match(/^\/api\/admin\/returns\/([^/]+)\/complete$/);
+  if(returnCompletionRoute && request.method==='POST') return completeReturnComplaint(request,env,user,decodeURIComponent(returnCompletionRoute[1]));
+  const returnPickupRoute=path.match(/^\/api\/admin\/returns\/([^/]+)\/pickup$/);
+  if(returnPickupRoute && request.method==='POST') {
+    return confirmReturnPickup(request,env,user,decodeURIComponent(returnPickupRoute[1]));
+  }
+  const returnReceiptRoute=path.match(/^\/api\/admin\/returns\/([^/]+)\/receipt$/);
+  if(returnReceiptRoute && request.method==='POST') return confirmWarehouseReceipt(request,env,user,decodeURIComponent(returnReceiptRoute[1]),ctx);
+  const returnLogisticsRoute=path.match(/^\/api\/admin\/returns\/([^/]+)\/logistics$/);
+  if(returnLogisticsRoute && request.method==='PATCH') {
+    requireReturnsAdmin(user);
+    const id=decodeURIComponent(returnLogisticsRoute[1]);
+    const current=await getReturnRequest(env,id);
+    if(!current) return json({error:'Not found'},404);
+    const settings=await storefrontSettingsObject(env,true);
+    await saveReturnLogistics(request,env,current,user.email,{warehouse_address:settings.fulfillment?.warehouse_address,shipping:current.order?.shipping,customer_name:current.order?.customer_name});
+    await createCustomerNotification(env,{email:current.customer_email,type:'return_update',title:'Your return instructions were updated',message:'Open your orders to view pickup, label and inspection details.',orderId:current.order_id,deepLink:'/orders',dedupeKey:`return-logistics:${id}:${crypto.randomUUID()}`});
+    return json({request:await getReturnRequest(env,id)});
+  }
+  if (adminOrderReturn && ["GET", "POST"].includes(request.method)) {
+    requireReturnsAdmin(user);
+    const orderId = decodeURIComponent(adminOrderReturn[1]);
+    return request.method === "GET" ? adminOrderReturnOptions(request, env, user, orderId)
+      : createReturnRequest(request, env, user, orderId, { adminInitiated: true });
+  }
+  const cancellationRefund = path.match(/^\/api\/admin\/orders\/([^/]+)\/cancellation-refund(?:\/(process|reconcile|recover))?$/);
+  if (cancellationRefund && ['GET','POST'].includes(request.method)) {
+    requireAdmin(user);
+    return handleCancellationRefund(request,env,user,decodeURIComponent(cancellationRefund[1]),cancellationRefund[2]);
+  }
+  const adminGatewayRefund = path.match(/^\/api\/admin\/returns\/([^/]+)\/refund(?:\/(approve|execute|reconcile|recover|process))?$/);
+  if (adminGatewayRefund && ["GET", "POST"].includes(request.method)) {
+    requireAdmin(user);
+    return handleGatewayRefund(request, env, user, decodeURIComponent(adminGatewayRefund[1]), adminGatewayRefund[2]);
+  }
   const adminReturn = path.match(/^\/api\/admin\/returns\/([^/]+)$/);
   if (adminReturn && request.method === "PATCH") {
     requireAdmin(user);
-    return updateReturnRequest(request, env, user, decodeURIComponent(adminReturn[1]));
+    return updateReturnRequest(request, env, user, decodeURIComponent(adminReturn[1]), ctx);
   }
 
   if (request.method === "GET" && path === "/api/admin/email-events") {
@@ -1031,10 +1987,18 @@ async function routeApi(request, env, url, ctx) {
     requireAdmin(user);
     return listCustomers(env);
   }
+  const adminCustomerOrders = path.match(/^\/api\/admin\/customers\/([^/]+)\/orders$/);
+  if (adminCustomerOrders && request.method === "GET") {
+    return listAdminCustomerOrders(env, user, decodeURIComponent(adminCustomerOrders[1]), url.searchParams);
+  }
+  if (request.method === "GET" && path === "/api/admin/coupon-recipients") {
+    requireAdmin(user);
+    return listCouponRecipients(env);
+  }
 
   if (request.method === "GET" && path === "/api/admin/employees") {
     requireAdmin(user);
-    return listEmployees(env);
+    return listEmployees(env, user);
   }
   if (request.method === "POST" && path === "/api/admin/employees") {
     requireAdmin(user);
@@ -1044,6 +2008,10 @@ async function routeApi(request, env, url, ctx) {
   if (adminEmployee && request.method === "PATCH") {
     requireAdmin(user);
     return updateEmployee(request, env, decodeURIComponent(adminEmployee[1]), user);
+  }
+  if (adminEmployee && request.method === "DELETE") {
+    requireAdmin(user);
+    return deleteEmployee(env, decodeURIComponent(adminEmployee[1]), user);
   }
 
   if (request.method === "GET" && path === "/api/admin/tax-compliance") {
@@ -1064,6 +2032,12 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "GET" && path === "/api/admin/support/tickets") {
     requireAdmin(user);
     return listSupportTickets(env, user, "admin");
+  }
+  const supportContextRoute=path.match(/^\/api\/admin\/support\/tickets\/([^/]+)\/(order-context|return-access)$/);
+  if(supportContextRoute){
+    const id=decodeURIComponent(supportContextRoute[1]);
+    if(request.method==='GET' && supportContextRoute[2]==='order-context') return supportTicketOrderContext(env,user,id);
+    if(request.method==='PATCH' && supportContextRoute[2]==='return-access') return updateSupportReturnAccess(request,env,user,id);
   }
   const adminSupportTicket = path.match(/^\/api\/admin\/support\/tickets\/([^/]+)$/);
   if (adminSupportTicket && request.method === "PATCH") {
@@ -1129,6 +2103,36 @@ async function routeApi(request, env, url, ctx) {
     return updateStorefrontSettings(request, env);
   }
 
+  if (request.method === "GET" && path === "/api/admin/events") {
+    requireAdmin(user);
+    return listEvents(env);
+  }
+
+  if (request.method === "POST" && path === "/api/admin/events") {
+    requireAdmin(user);
+    return createEvent(request, env, user);
+  }
+
+  const adminEvent = path.match(/^\/api\/admin\/events\/([^/]+)$/);
+  if (adminEvent && request.method === "PATCH") {
+    requireAdmin(user);
+    return updateEvent(request, env, decodeURIComponent(adminEvent[1]), user);
+  }
+  if (adminEvent && request.method === "DELETE") {
+    requireAdmin(user);
+    return deleteEvent(request, env, decodeURIComponent(adminEvent[1]), user);
+  }
+
+  if (request.method === "GET" && path === "/api/admin/cinematic-reel") {
+    requireAdmin(user);
+    return getCinematicReelSettings(env);
+  }
+
+  if (request.method === "PUT" && path === "/api/admin/cinematic-reel") {
+    requireAdmin(user);
+    return updateCinematicReelSettings(request, env);
+  }
+
   if (request.method === "POST" && path === "/api/admin/hero") {
     requireAdmin(user);
     return createHeroSlide(request, env);
@@ -1155,6 +2159,10 @@ async function routeApi(request, env, url, ctx) {
   }
 
   const adminCoupon = path.match(/^\/api\/admin\/coupons\/([^/]+)$/);
+  if (adminCoupon && request.method === "PATCH") {
+    requireAdmin(user);
+    return updateCoupon(request, env, decodeURIComponent(adminCoupon[1]));
+  }
   if (adminCoupon && request.method === "DELETE") {
     requireAdmin(user);
     return deleteCoupon(env, decodeURIComponent(adminCoupon[1]));
@@ -1196,9 +2204,11 @@ async function loginWithGoogle(request, env) {
   ).bind(user.email).first();
   const authEmailType = existing ? (!existing.auth_email_sent_at ? "first-login" : null) : "welcome";
 
+  if (!existing && referralCode) await validateReferral(env, user.email, referralCode);
+
   await env.DB.prepare(`
-    INSERT INTO users (email, google_sub, name, picture, role, last_login_at)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO users (email, google_sub, name, picture, role, last_login_at, referral_onboarding_open)
+    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1)
     ON CONFLICT(email) DO UPDATE SET
       google_sub = excluded.google_sub,
       name = CASE WHEN COALESCE(users.first_name, '') <> '' THEN users.name ELSE excluded.name END,
@@ -1219,10 +2229,12 @@ async function loginWithGoogle(request, env) {
   }
 
   if (!existing && referralCode) {
-    await applyReferral(env, user.email, referralCode).catch(() => null);
+    await claimSignupReferral(env, user.email, referralCode);
   }
+  await ensureReferralCode(env, user.email);
 
-  const profileStatus = role === "admin"
+  Object.assign(user, await resolveWebsiteWorkspaceIdentity(user, env, request));
+  const profileStatus = user.role === "admin"
     ? { profile_complete: true, needs_profile_completion: false }
     : await getProfileCompletionStatus(env, user);
   const token = await signSession(user, env);
@@ -1255,16 +2267,19 @@ async function loginWithApple(request, env) {
   const user = { sub: `apple:${appleSub}`, email, name, picture: "", role };
   const existing = linked || await env.DB.prepare("SELECT auth_email_sent_at, name, first_name FROM users WHERE email = ?").bind(email).first();
   const authEmailType = existing ? (!existing.auth_email_sent_at ? "first-login" : null) : "welcome";
+  if (!existing && body.referral_code) await validateReferral(env, email, body.referral_code);
 
   await env.DB.prepare(`
-    INSERT INTO users (email, google_sub, apple_sub, name, picture, role, last_login_at)
-    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO users (email, google_sub, apple_sub, name, picture, role, last_login_at, referral_onboarding_open)
+    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1)
     ON CONFLICT(email) DO UPDATE SET
       apple_sub = excluded.apple_sub,
       name = CASE WHEN COALESCE(users.first_name, '') <> '' THEN users.name ELSE excluded.name END,
       role = excluded.role,
       last_login_at = CURRENT_TIMESTAMP
   `).bind(email, `apple:${appleSub}`, appleSub, name, "", role).run();
+  if (!existing && body.referral_code) await claimSignupReferral(env, email, body.referral_code);
+  await ensureReferralCode(env, email);
 
   const storedIdentity = await env.DB.prepare("SELECT name FROM users WHERE email = ?").bind(email).first();
   user.name = storedIdentity?.name || name;
@@ -1272,7 +2287,8 @@ async function loginWithApple(request, env) {
     const sent = await sendAuthEmail(env, user, authEmailType);
     if (sent) await env.DB.prepare("UPDATE users SET auth_email_sent_at = CURRENT_TIMESTAMP WHERE email = ?").bind(email).run();
   }
-  const profileStatus = role === "admin"
+  Object.assign(user, await resolveWebsiteWorkspaceIdentity(user, env, request));
+  const profileStatus = user.role === "admin"
     ? { profile_complete: true, needs_profile_completion: false }
     : await getProfileCompletionStatus(env, user);
   const token = await signSession(user, env);
@@ -1282,6 +2298,181 @@ async function loginWithApple(request, env) {
     ...profileStatus,
     ...(mobile ? { session_token: token } : {})
   }, 200, mobile ? {} : { "Set-Cookie": makeSessionCookie(request, token) });
+}
+
+function appleMobileServiceId(env) {
+  const value = String(env.APPLE_SERVICE_ID || "").trim();
+  return /^[A-Za-z0-9.-]{3,128}$/.test(value) && value !== String(env.APPLE_CLIENT_ID || "com.glamia.store").trim() ? value : "";
+}
+
+function appleWebConfigured(env) {
+  return Boolean(appleMobileServiceId(env) && /^[A-Z0-9]{10}$/.test(String(env.APPLE_TEAM_ID || "").trim())
+    && /^[A-Z0-9]{10}$/.test(String(env.APPLE_KEY_ID || "").trim())
+    && String(env.APPLE_PRIVATE_KEY || "").includes("BEGIN PRIVATE KEY"));
+}
+
+// Exchange Apple's one-time web authorization code using a short-lived, server-signed client secret.
+async function exchangeAppleWebCode(code, env) {
+  const serviceId = appleMobileServiceId(env);
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const header = base64UrlEncode(JSON.stringify({ alg: "ES256", kid: String(env.APPLE_KEY_ID).trim(), typ: "JWT" }));
+  const claims = base64UrlEncode(JSON.stringify({ iss: String(env.APPLE_TEAM_ID).trim(), iat: issuedAt, exp: issuedAt + 300, aud: "https://appleid.apple.com", sub: serviceId }));
+  const pem = String(env.APPLE_PRIVATE_KEY).replace(/\\n/g, "\n").replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g, "");
+  const key = await crypto.subtle.importKey("pkcs8", Uint8Array.from(atob(pem), character => character.charCodeAt(0)), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(`${header}.${claims}`));
+  const clientSecret = `${header}.${claims}.${base64UrlEncodeBytes(new Uint8Array(signature))}`;
+  const response = await fetch("https://appleid.apple.com/auth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: serviceId, client_secret: clientSecret, code, grant_type: "authorization_code", redirect_uri: `${CANONICAL_ORIGIN}${APPLE_WEB_CALLBACK_PATH}` }),
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!response.ok) throw httpError("Apple authorization could not be verified", 401);
+  const body = await response.json();
+  if (!body.id_token) throw httpError("Apple did not return an identity token", 401);
+  return body.id_token;
+}
+
+function appleWebFlowCookie(value, maxAge) {
+  return `${APPLE_WEB_FLOW_COOKIE}=${value}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=${maxAge}`;
+}
+
+function appleWebRedirect(error) {
+  const location = error ? `/login?apple_error=${error}` : "/";
+  return new Response(null, { status: 303, headers: { Location: location, "Set-Cookie": appleWebFlowCookie("", 0), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+}
+
+// A SameSite=None, HttpOnly browser cookie binds Apple's cross-site POST to the initiating browser.
+async function startAppleWebLogin(env) {
+  if (!appleWebConfigured(env)) return json({ error: "Apple sign-in is not configured yet" }, 503);
+  const state = `w-${crypto.randomUUID()}`;
+  const nonce = crypto.randomUUID();
+  const browserSecret = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+  await env.DB.prepare("INSERT INTO apple_mobile_login_flows (state, nonce, verifier_hash, expires_at) VALUES (?, ?, ?, unixepoch() + ?)")
+    .bind(state, nonce, await appleMobileSha256Hex(browserSecret), APPLE_MOBILE_FLOW_SECONDS).run();
+  const authorize = new URL("https://appleid.apple.com/auth/authorize");
+  authorize.searchParams.set("client_id", appleMobileServiceId(env));
+  authorize.searchParams.set("redirect_uri", `${CANONICAL_ORIGIN}${APPLE_WEB_CALLBACK_PATH}`);
+  authorize.searchParams.set("response_type", "code id_token");
+  authorize.searchParams.set("response_mode", "form_post");
+  authorize.searchParams.set("scope", "name email");
+  authorize.searchParams.set("state", state);
+  authorize.searchParams.set("nonce", nonce);
+  return new Response(null, { status: 303, headers: { Location: authorize.toString(), "Set-Cookie": appleWebFlowCookie(browserSecret, APPLE_MOBILE_FLOW_SECONDS), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+}
+
+// The flow is consumed once, and only a verified Apple code can establish a Glamia browser session.
+async function completeAppleWebLogin(request, env) {
+  if (!String(request.headers.get("Content-Type") || "").toLowerCase().startsWith("application/x-www-form-urlencoded")) return appleWebRedirect("failed");
+  const form = new URLSearchParams(new TextDecoder().decode(await readBoundedBody(request, 16 * 1024)));
+  const state = String(form.get("state") || "");
+  const browserSecret = parseCookies(request.headers.get("Cookie") || "")[APPLE_WEB_FLOW_COOKIE] || "";
+  if (!/^w-[a-f0-9-]{36}$/i.test(state) || !/^(?:[a-f0-9-]{36}){2}$/i.test(browserSecret)) return appleWebRedirect("failed");
+  const flow = await env.DB.prepare("DELETE FROM apple_mobile_login_flows WHERE state = ? AND verifier_hash = ? AND expires_at > unixepoch() RETURNING nonce")
+    .bind(state, await appleMobileSha256Hex(browserSecret)).first();
+  if (!flow) return appleWebRedirect("failed");
+  if (form.get("error")) return appleWebRedirect("cancelled");
+  if (!appleWebConfigured(env) || !form.get("code")) return appleWebRedirect("failed");
+  try {
+    const token = await exchangeAppleWebCode(String(form.get("code")), env);
+    const profile = await verifyAppleIdentityToken(token, { ...env, APPLE_CLIENT_ID: appleMobileServiceId(env) });
+    if (profile.nonce !== flow.nonce) return appleWebRedirect("failed");
+    let name = "";
+    try {
+      const user = JSON.parse(String(form.get("user") || "{}"));
+      name = [user?.name?.firstName, user?.name?.lastName].map(value => String(value || "").trim()).filter(Boolean).join(" ").slice(0, 160);
+    } catch { /* Apple provides the name only on the first authorization. */ }
+    const loginRequest = new Request(request.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identity_token: token, name }) });
+    const loginResponse = await loginWithApple(loginRequest, { ...env, APPLE_CLIENT_ID: appleMobileServiceId(env) });
+    if (!loginResponse.ok) return appleWebRedirect("failed");
+    const response = appleWebRedirect("");
+    response.headers.append("Set-Cookie", loginResponse.headers.get("Set-Cookie"));
+    return response;
+  } catch (error) {
+    console.error("Apple web sign-in failed", error?.message || "Unknown error");
+    return appleWebRedirect("failed");
+  }
+}
+
+async function appleMobileSha256Hex(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+// Start a browser flow bound to a verifier that remains only in the originating app.
+async function startAppleMobileLogin(request, env) {
+  const serviceId = appleMobileServiceId(env);
+  if (!serviceId) return json({ error: "Apple sign-in for Android is not configured yet" }, 503);
+  const body = await readJson(request);
+  const verifierHash = String(body.verifier_hash || "").trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(verifierHash)) return json({ error: "Invalid Apple sign-in verifier" }, 400);
+  const state = crypto.randomUUID();
+  const nonce = crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO apple_mobile_login_flows (state, nonce, verifier_hash, expires_at) VALUES (?, ?, ?, unixepoch() + ?)")
+    .bind(state, nonce, verifierHash, APPLE_MOBILE_FLOW_SECONDS).run();
+  const authorize = new URL("https://appleid.apple.com/auth/authorize");
+  authorize.searchParams.set("client_id", serviceId);
+  authorize.searchParams.set("redirect_uri", `${CANONICAL_ORIGIN}${APPLE_MOBILE_CALLBACK_PATH}`);
+  authorize.searchParams.set("response_type", "code id_token");
+  authorize.searchParams.set("response_mode", "form_post");
+  authorize.searchParams.set("scope", "name email");
+  authorize.searchParams.set("state", state);
+  authorize.searchParams.set("nonce", nonce);
+  return json({ authorization_url: authorize.toString(), redirect_url: "glamia-store://apple-auth" }, 200, { "Cache-Control": "no-store" });
+}
+
+// Apple posts to this HTTPS return URL; only a one-time opaque ticket returns to the app.
+async function completeAppleMobileLogin(request, env) {
+  if (!String(request.headers.get("Content-Type") || "").toLowerCase().startsWith("application/x-www-form-urlencoded")) {
+    return json({ error: "Invalid Apple callback" }, 415);
+  }
+  const bytes = await readBoundedBody(request, 16 * 1024);
+  const form = new URLSearchParams(new TextDecoder().decode(bytes));
+  const state = String(form.get("state") || "");
+  if (!/^[a-f0-9-]{36}$/i.test(state)) return json({ error: "Invalid Apple sign-in state" }, 400);
+  const flow = await env.DB.prepare("SELECT nonce, ticket_hash FROM apple_mobile_login_flows WHERE state = ? AND expires_at > unixepoch()")
+    .bind(state).first();
+  if (!flow || flow.ticket_hash) return json({ error: "Apple sign-in expired or was already completed" }, 401);
+  const redirect = new URL("glamia-store://apple-auth");
+  if (form.get("error")) {
+    await env.DB.prepare("DELETE FROM apple_mobile_login_flows WHERE state = ?").bind(state).run();
+    redirect.searchParams.set("error", "cancelled");
+    return new Response(null, { status: 303, headers: { Location: redirect.toString(), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+  }
+  const identityToken = String(form.get("id_token") || "");
+  const serviceId = appleMobileServiceId(env);
+  if (!serviceId || !identityToken) return json({ error: "Apple identity token was not returned" }, 401);
+  const profile = await verifyAppleIdentityToken(identityToken, { ...env, APPLE_CLIENT_ID: serviceId });
+  if (profile.nonce !== flow.nonce) return json({ error: "Apple sign-in nonce mismatch" }, 401);
+  let name = "";
+  try {
+    const user = JSON.parse(String(form.get("user") || "{}"));
+    name = [user?.name?.firstName, user?.name?.lastName].map(value => String(value || "").trim()).filter(Boolean).join(" ").slice(0, 160);
+  } catch { /* Apple may omit the one-time display name on subsequent sign-ins. */ }
+  const mobileRequest = new Request(request.url, { method: "POST", headers: { "Content-Type": "application/json", "X-Glamia-Mobile": "1" }, body: JSON.stringify({ identity_token: identityToken, name }) });
+  const loginResponse = await loginWithApple(mobileRequest, { ...env, APPLE_CLIENT_ID: serviceId });
+  if (!loginResponse.ok) return loginResponse;
+  const result = await loginResponse.json();
+  const ticket = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+  const saved = await env.DB.prepare("UPDATE apple_mobile_login_flows SET ticket_hash = ?, result_json = ? WHERE state = ? AND ticket_hash IS NULL AND expires_at > unixepoch()")
+    .bind(await appleMobileSha256Hex(ticket), JSON.stringify(result), state).run();
+  if (Number(saved.meta?.changes || 0) !== 1) return json({ error: "Apple sign-in was already completed" }, 401);
+  redirect.searchParams.set("ticket", ticket);
+  return new Response(null, { status: 303, headers: { Location: redirect.toString(), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+}
+
+// A stolen callback URL alone cannot redeem the ticket without the app's verifier.
+async function exchangeAppleMobileLogin(request, env) {
+  const body = await readJson(request);
+  const ticket = String(body.ticket || "");
+  const verifier = String(body.verifier || "");
+  if (!/^(?:[a-f0-9-]{36}){2}$/i.test(ticket) || !/^[a-f0-9]{64}$/i.test(verifier)) {
+    return json({ error: "Invalid Apple sign-in exchange" }, 400);
+  }
+  const row = await env.DB.prepare("DELETE FROM apple_mobile_login_flows WHERE ticket_hash = ? AND verifier_hash = ? AND expires_at > unixepoch() RETURNING result_json")
+    .bind(await appleMobileSha256Hex(ticket), await appleMobileSha256Hex(verifier.toLowerCase())).first();
+  if (!row?.result_json) return json({ error: "Apple sign-in expired or was already used" }, 401);
+  return json(JSON.parse(row.result_json), 200, { "Cache-Control": "no-store" });
 }
 
 async function sendAuthEmail(env, user, type) {
@@ -1466,8 +2657,8 @@ const PRODUCT_SELECT = `
 
 const PRODUCT_CARD_SELECT = `
   SELECT
-    p.id, p.name, p.category, p.subcategory, p.brand, p.price, p.mrp, p.stock,
-    p.rating, p.status, p.featured, p.color, p.material, p.sizes_json,
+    p.id, p.product_code, p.name, p.category, p.subcategory, p.brand, p.price, p.mrp, p.stock,
+    p.rating, p.status, p.featured, p.storefront_visibility, p.color, p.material, p.sizes_json,
     p.color_hex, p.returnable,
     p.image_url, p.thumbnail_url, p.thumbnail_images_json, p.variant_group,
     p.deal_starts_at, p.deal_ends_at, p.deal_price, p.reorder_point,
@@ -1487,7 +2678,7 @@ function productSearchQuery(value) {
     .join(" AND ") || "";
 }
 
-async function listProducts(env, user, scope, searchParams = new URLSearchParams()) {
+async function listProducts(env, user, scope, searchParams = new URLSearchParams(), storefront = "glamia") {
   if (scope === "admin") {
     requireAdmin(user);
     const requestedLimit = Number(searchParams.get("limit"));
@@ -1512,7 +2703,9 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
     return json({ products: await withSizeStock(env, results) });
   }
 
-  const where = ["p.status = 'live'"];
+  const visibility = storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
+  const where = ["p.status = 'live'", `COALESCE(p.storefront_visibility, 'glamia') IN ${visibility}`];
+  const activePrice="CASE WHEN p.deal_price IS NOT NULL AND (p.deal_starts_at IS NULL OR julianday(p.deal_starts_at)<=julianday('now')) AND julianday(p.deal_ends_at)>julianday('now') THEN p.deal_price ELSE p.price END";
   const bindings = [];
   const requestedIds = [...new Set(String(searchParams.get("ids") || "")
     .split(",")
@@ -1527,11 +2720,20 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
   const minPrice = Number(searchParams.get("min_price"));
   const maxPrice = Number(searchParams.get("max_price"));
   if (requestedIds.length) {
-    where.push(`p.id IN (${requestedIds.map(() => "?").join(", ")})`);
-    bindings.push(...requestedIds);
+    // One JSON binding leaves room for filters and pagination within D1's parameter limit.
+    where.push("p.id IN (SELECT value FROM json_each(?))");
+    bindings.push(JSON.stringify(requestedIds));
   }
   if (category) { where.push("p.category = ?"); bindings.push(category); }
   if (subcategory) { where.push("p.subcategory = ?"); bindings.push(subcategory); }
+  const facetWhere=[...where],facetBindings=[...bindings];
+  if(searchParams.get('color_family')){
+    const family=searchParams.get('color_family').toLowerCase();
+    const words={blue:['blue','navy','cyan','aqua'],green:['green','olive','teal','sage','mint','emerald'],red:['red','wine','maroon','burgundy'],pink:['pink','rose'],purple:['purple','violet','lilac','plum'],brown:['brown','chocolate','coffee'],white:['white','ivory','cream'],black:['black','charcoal','graphite'],yellow:['yellow','mustard','gold'],orange:['orange','rust','terracotta'],beige:['beige','sand','tan'],grey:['grey','gray']}[family]||[family.replace(/[%_]/g,'')];
+    where.push('('+words.map(()=>"LOWER(p.color) LIKE ?").join(' OR ')+')');bindings.push(...words.map(word=>'%'+word+'%'));
+  }
+  if(searchParams.get('offers')==='1')where.push(`(${activePrice})<p.mrp`);
+  if(searchParams.get('featured')==='1')where.push('p.featured=1');
   if (color) { where.push("LOWER(p.color) = LOWER(?)"); bindings.push(color); }
   if (material) { where.push("LOWER(p.material) = LOWER(?)"); bindings.push(material); }
   if (size) {
@@ -1543,16 +2745,16 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
     bindings.push(search);
   }
   if (searchParams.get("in_stock") === "1") where.push("p.stock > 0");
-  if (Number.isFinite(minPrice) && searchParams.has("min_price")) { where.push("p.price >= ?"); bindings.push(Math.max(0, Math.floor(minPrice))); }
-  if (Number.isFinite(maxPrice) && searchParams.has("max_price")) { where.push("p.price <= ?"); bindings.push(Math.max(0, Math.floor(maxPrice))); }
+  if (Number.isFinite(minPrice) && searchParams.has("min_price")) { where.push(`(${activePrice}) >= ?`); bindings.push(Math.max(0,minPrice)); }
+  if (Number.isFinite(maxPrice) && searchParams.has("max_price")) { where.push(`(${activePrice}) <= ?`); bindings.push(Math.max(0,maxPrice)); }
 
   const sortSql = {
-    featured: "p.featured DESC, p.rating DESC, p.created_at DESC",
+    featured: "p.featured DESC, COALESCE(AVG(r.rating),0) DESC, p.created_at DESC, p.id ASC",
     newest: "p.created_at DESC",
-    price_low: "p.price ASC, p.created_at DESC",
-    price_high: "p.price DESC, p.created_at DESC",
-    rating: "p.rating DESC, p.created_at DESC"
-  }[searchParams.get("sort") || "featured"] || "p.featured DESC, p.rating DESC, p.created_at DESC";
+    price_low: `(${activePrice}) ASC, p.created_at DESC, p.id ASC`,
+    price_high: `(${activePrice}) DESC, p.created_at DESC, p.id ASC`,
+    rating: "COALESCE(AVG(r.rating),0) DESC, COUNT(r.id) DESC, p.created_at DESC, p.id ASC"
+  }[searchParams.get("sort") || "featured"] || "p.featured DESC, p.created_at DESC, p.id ASC";
   const wantsCards = searchParams.get("view") === "cards";
   const requestedLimit = Number(searchParams.get("limit"));
   const hasPagination = Number.isSafeInteger(requestedLimit) && requestedLimit > 0;
@@ -1564,9 +2766,10 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
   const queryBindings = limit ? [...bindings, limit, offset] : bindings;
   const { results } = await env.DB.prepare(sql).bind(...queryBindings).all();
   const shouldEnrich = !wantsCards || searchParams.get("include_stock") === "1";
-  const products = shouldEnrich
+  const enrichedProducts = shouldEnrich
     ? await withSizeStock(env, results, wantsCards ? formatProductCard : formatProduct)
     : results.map(formatProductCard);
+  const products = enrichedProducts.map(publicProductView);
   if (!limit) return json({ products });
   const total = await cachedCount(
     env,
@@ -1574,7 +2777,13 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
     `SELECT COUNT(*) AS count FROM products p WHERE ${where.join(" AND ")}`,
     bindings
   );
-  return json({ products, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + products.length < total } });
+  let facets;
+  if(searchParams.get('facets')==='1'&&page===1){
+    const {results:colors}=await env.DB.prepare(`SELECT DISTINCT p.color FROM products p WHERE ${facetWhere.join(' AND ')} AND p.color!='' ORDER BY p.color LIMIT 100`).bind(...facetBindings).all();
+    const {results:sizes}=await env.DB.prepare(`SELECT DISTINCT ps.size FROM products p JOIN product_sizes ps ON ps.product_id=p.id WHERE ${facetWhere.join(' AND ')} AND ps.stock>0 ORDER BY ps.size LIMIT 100`).bind(...facetBindings).all();
+    facets={colors:colors.map(row=>row.color),sizes:sizes.map(row=>row.size)};
+  }
+  return json({ products, facets, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + products.length < total } });
 }
 
 /* First-party page-view tracking: one D1 row per storefront page view.
@@ -1692,9 +2901,24 @@ async function reindexProductVectors(env) {
   return { indexed, skipped: false };
 }
 
-function scheduleVectorReindex(env, ctx) {
+// Refresh only the affected listing group; inventory-only edits never invoke AI.
+function scheduleProductVectorUpdate(env, ctx, id, variantGroup = null) {
   if (!env.AI || !env.VEC || !ctx?.waitUntil) return;
-  ctx.waitUntil(reindexProductVectors(env).catch(() => {}));
+  ctx.waitUntil((async () => {
+    const { results } = await env.DB.prepare(`
+      SELECT id, status, name, brand, category, subcategory, color, material, description
+      FROM products WHERE id = ? OR variant_group = ?
+    `).bind(id, variantGroup).all();
+    const removed = results.filter(row => row.status !== "live").map(row => String(row.id));
+    if (!results.some(row => row.id === id)) removed.push(String(id));
+    if (removed.length) await env.VEC.deleteByIds(removed);
+    const live = results.filter(row => row.status === "live");
+    for (let index = 0; index < live.length; index += VECTOR_EMBED_BATCH) {
+      const batch = live.slice(index, index + VECTOR_EMBED_BATCH);
+      const embeddings = await embedTexts(env, batch.map(productEmbeddingText));
+      await env.VEC.upsert(batch.map((row, position) => ({ id: String(row.id), values: embeddings[position] })));
+    }
+  })().catch(() => console.error("Product search index refresh failed")));
 }
 
 async function vectorSearchProducts(env, rawQuery, limit = 40) {
@@ -1710,7 +2934,7 @@ async function vectorSearchProducts(env, rawQuery, limit = 40) {
     const { results } = await env.DB.prepare(`${PRODUCT_CARD_SELECT} WHERE p.status = 'live' AND p.id IN (${placeholders}) GROUP BY p.id`)
       .bind(...hits).all();
     const byId = new Map(results.map(row => [String(row.id), row]));
-    const products = hits.map(id => byId.get(id)).filter(Boolean).map(formatProductCard);
+    const products = hits.map(id => byId.get(id)).filter(Boolean).map(formatProductCard).map(publicProductView);
     return { products, engine: "vector" };
   } catch {
     return null;
@@ -1724,9 +2948,13 @@ async function withSizeStock(env, rows, formatter = formatProduct) {
   if (productEnrichmentCache.expiresAt <= Date.now()) {
     productEnrichmentCache = { expiresAt: Date.now() + 10000, entries: new Map() };
   }
+  // Keep this request's snapshot stable if a concurrent stock write clears the shared cache.
+  const entries = productEnrichmentCache.entries;
   const ids = [...new Set(products.map(product => product.id).filter(Boolean))];
-  const missingIds = ids.filter(id => !productEnrichmentCache.entries.has(id));
-  if (missingIds.length) {
+  const uncachedIds = ids.filter(id => !entries.has(id));
+  // D1 accepts at most 100 bound variables per statement, including large admin catalogs.
+  for (let offset = 0; offset < uncachedIds.length; offset += 80) {
+    const missingIds = uncachedIds.slice(offset, offset + 80);
     const placeholders = missingIds.map(() => "?").join(",");
     const [sizeResult, salesResult] = await env.DB.batch([
       env.DB.prepare(`
@@ -1745,19 +2973,19 @@ async function withSizeStock(env, rows, formatter = formatProduct) {
       `).bind(...missingIds)
     ]);
     for (const id of missingIds) {
-      productEnrichmentCache.entries.set(id, { sizeStock: {}, sold: 0, soldRecent: 0 });
+      entries.set(id, { sizeStock: {}, sold: 0, soldRecent: 0 });
     }
     for (const row of sizeResult.results || []) {
-      productEnrichmentCache.entries.get(row.product_id).sizeStock[row.size] = Number(row.stock || 0);
+      entries.get(row.product_id).sizeStock[row.size] = Number(row.stock || 0);
     }
     for (const row of salesResult.results || []) {
-      const entry = productEnrichmentCache.entries.get(row.product_id);
+      const entry = entries.get(row.product_id);
       entry.sold = Number(row.sold_total || 0);
       entry.soldRecent = Number(row.sold_7d || 0);
     }
   }
   return products.map(product => {
-    const metrics = productEnrichmentCache.entries.get(product.id);
+    const metrics = entries.get(product.id);
     return {
       ...product,
       size_stock: Object.keys(metrics?.sizeStock || {}).length ? metrics.sizeStock : null,
@@ -1788,19 +3016,21 @@ async function resolveProductReference(env, reference, context = null) {
     productReferenceCache.set(cacheKey, { id: String(id), expiresAt: Date.now() + PRODUCT_REFERENCE_CACHE_TTL_MS });
     return String(id);
   };
-  // Canonical URLs end in the product's complete UUID. Resolve that suffix
-  // directly so a product page does not need to scan every live product.
+  // Canonical URLs end in the readable product code for new listings. Legacy
+  // URLs still end in the internal UUID, so both forms resolve directly.
   const canonicalId = value.match(/(?:^|-)([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i)?.[1] || "";
-  const direct = await env.DB.prepare("SELECT id FROM products WHERE id = ? OR (? != '' AND lower(id) = ?) LIMIT 1")
-    .bind(value, canonicalId.toLowerCase(), canonicalId.toLowerCase()).first();
+  const direct = await env.DB.prepare("SELECT id FROM products WHERE id = ? OR (? != '' AND lower(id) = ?) OR lower(COALESCE(product_code, '')) = ? LIMIT 1")
+    .bind(value, canonicalId.toLowerCase(), canonicalId.toLowerCase(), value.toLowerCase()).first();
   if (direct) return remember(direct.id);
-  const { results } = await env.DB.prepare("SELECT id, name, category, subcategory FROM products WHERE status = 'live'").all();
+  const { results } = await env.DB.prepare("SELECT id, product_code, name, category, subcategory FROM products WHERE status = 'live'").all();
   const candidates = results
-    .map(row => ({ id: String(row.id), slug: slugifyName(row.name), category: productUrlSlug(row.category), subcategory: productUrlSlug(row.subcategory) }))
+    .map(row => ({ id: String(row.id), productCode: String(row.product_code || "").toLowerCase(), slug: slugifyName(row.name), category: productUrlSlug(row.category), subcategory: productUrlSlug(row.subcategory) }))
     .filter(row => row.slug);
   const normalizedValue = value.toLowerCase();
   const exact = candidates.filter(row => row.slug === normalizedValue);
   const canonical = candidates.filter(row => `${row.slug}-${row.id.toLowerCase()}` === normalizedValue);
+  const publicCodeCanonical = candidates.filter(row => row.productCode && `${row.slug}-${row.productCode}` === normalizedValue);
+  if (publicCodeCanonical.length === 1) return remember(publicCodeCanonical[0].id);
   if (canonical.length === 1) return remember(canonical[0].id);
   // Keep the short-id form compatible with the first rollout of this URL
   // system, so links shared during that window still reach the right item.
@@ -1826,13 +3056,14 @@ async function resolveProductReference(env, reference, context = null) {
   return "";
 }
 
-async function getProduct(env, user, reference, context = null) {
+async function getProduct(env, user, reference, context = null, storefront = "glamia") {
   const canManage = user?.role === "admin";
   const sellerEmail = String(user?.email || "").toLowerCase();
+  const visibility = storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
   const resolvedId = await resolveProductReference(env, reference, context);
   if (!resolvedId) return json({ error: "Product not found" }, 404);
   const row = await env.DB.prepare(`${PRODUCT_SELECT}
-    WHERE p.id = ? AND (p.status = 'live' OR ? = 1 OR LOWER(p.seller_email) = ?)
+    WHERE p.id = ? AND (p.status = 'live' AND COALESCE(p.storefront_visibility, 'glamia') IN ${visibility} OR ? = 1 OR LOWER(p.seller_email) = ?)
     GROUP BY p.id`)
     .bind(resolvedId, canManage ? 1 : 0, sellerEmail)
     .first();
@@ -1840,7 +3071,7 @@ async function getProduct(env, user, reference, context = null) {
   let colourwayRows = [];
   if (row.variant_group) {
     const { results } = await env.DB.prepare(`${PRODUCT_SELECT}
-      WHERE p.variant_group = ? AND (p.status = 'live' OR ? = 1 OR LOWER(p.seller_email) = ?)
+      WHERE p.variant_group = ? AND (p.status = 'live' AND COALESCE(p.storefront_visibility, 'glamia') IN ${visibility} OR ? = 1 OR LOWER(p.seller_email) = ?)
       GROUP BY p.id ORDER BY p.created_at ASC`)
       .bind(row.variant_group, canManage ? 1 : 0, sellerEmail)
       .all();
@@ -1850,9 +3081,10 @@ async function getProduct(env, user, reference, context = null) {
   // colourway query intentionally keeps its existing ordering and contents.
   // withSizeStock deduplicates IDs, so the primary row is not queried twice.
   const enriched = await withSizeStock(env, [row, ...colourwayRows]);
-  const product = enriched[0];
-  const colourways = enriched.slice(1);
-  return json({ product, colourways });
+  const visible = enriched.map((product) => canManage || (sellerEmail && product.seller_email?.toLowerCase() === sellerEmail) ? product : publicProductView(product));
+  const product = visible[0];
+  const colourways = visible.slice(1);
+  return json({ product:selectedVariantCopy(product,visible.map(item=>item.color)), colourways });
 }
 
 function jsonArray(value) {
@@ -1885,6 +3117,7 @@ function formatHeroSlide(row, productsById) {
     }));
   return {
     id: row.id,
+    variant: "editorial",
     eyebrow: row.eyebrow,
     title: row.title,
     tagline: row.tagline,
@@ -1904,14 +3137,15 @@ async function listHeroSlides(env, admin = false) {
   const slideQuery = admin
     ? "SELECT * FROM hero_slides ORDER BY position ASC, created_at ASC"
     : "SELECT * FROM hero_slides WHERE active = 1 ORDER BY position ASC, created_at ASC";
-  const [{ results: rows }, productRows] = await Promise.all([
-    env.DB.prepare(slideQuery).all(),
-    allProductRows(env)
-  ]);
-  const productsById = new Map(productRows.filter(row => row.status === "live").map(row => {
-    const product = formatProduct(row);
-    return [product.id, product];
-  }));
+  const { results: rows } = await env.DB.prepare(slideQuery).all();
+  // Hero frames need only their linked products, not the entire catalog and review aggregates.
+  const ids = [...new Set(rows.flatMap(row => heroArray(row.product_ids_json).slice(0, 3)).filter(id => typeof id === "string" && id.trim()))];
+  const productsById = new Map();
+  for (let offset = 0; offset < ids.length; offset += 80) {
+    const batch = ids.slice(offset, offset + 80);
+    const { results } = await env.DB.prepare(`SELECT id, name, image_url, thumbnail_url, color FROM products WHERE status = 'live' AND id IN (${batch.map(() => "?").join(",")})`).bind(...batch).all();
+    for (const product of results) productsById.set(product.id, { ...product, image: admin ? product.image_url : product.thumbnail_url || product.image_url });
+  }
   const slides = rows.map(row => formatHeroSlide(row, productsById));
   return json({ slides: admin ? slides : slides.filter(slide => slide.frames.length) });
 }
@@ -1972,6 +3206,7 @@ async function validateHeroPayload(body, env) {
     ? [...new Set(body.words.map(word => String(word || "").trim().toUpperCase()).filter(Boolean))].slice(0, 5)
     : [];
   return {
+    variant: "editorial",
     eyebrow: heroText(body.eyebrow, "The Glamia Edit", 60),
     title,
     tagline,
@@ -1992,11 +3227,11 @@ async function createHeroSlide(request, env) {
   const position = next.position ?? Number(last?.position || -1) + 1;
   await env.DB.prepare(`
     INSERT INTO hero_slides (
-      id, eyebrow, title, tagline, cta_label, cta_category, product_ids_json,
+      id, variant, eyebrow, title, tagline, cta_label, cta_category, product_ids_json,
       words_json, position, active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
-    id, next.eyebrow, next.title, next.tagline, next.ctaLabel, next.ctaCategory,
+    id, next.variant, next.eyebrow, next.title, next.tagline, next.ctaLabel, next.ctaCategory,
     JSON.stringify(next.productIds), JSON.stringify(next.words), position, next.active ? 1 : 0
   ).run();
   return json({ ok: true, id }, 201);
@@ -2007,6 +3242,7 @@ async function updateHeroSlide(request, env, id) {
   if (!current) return json({ error: "Hero slide not found" }, 404);
   const body = await readJson(request);
   const merged = {
+    variant: body.variant ?? current.variant,
     eyebrow: body.eyebrow ?? current.eyebrow,
     title: body.title ?? current.title,
     tagline: body.tagline ?? current.tagline,
@@ -2019,11 +3255,11 @@ async function updateHeroSlide(request, env, id) {
   };
   const next = await validateHeroPayload(merged, env);
   await env.DB.prepare(`
-    UPDATE hero_slides SET eyebrow = ?, title = ?, tagline = ?, cta_label = ?,
+    UPDATE hero_slides SET variant = ?, eyebrow = ?, title = ?, tagline = ?, cta_label = ?,
       cta_category = ?, product_ids_json = ?, words_json = ?, position = ?,
       active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
   `).bind(
-    next.eyebrow, next.title, next.tagline, next.ctaLabel, next.ctaCategory,
+    next.variant, next.eyebrow, next.title, next.tagline, next.ctaLabel, next.ctaCategory,
     JSON.stringify(next.productIds), JSON.stringify(next.words),
     next.position ?? Number(current.position), next.active ? 1 : 0, id
   ).run();
@@ -2149,6 +3385,195 @@ function paymentMethods(env, settings = {}) {
   return methods;
 }
 
+const EVENT_TYPES = new Set(["sale", "launch", "seasonal", "announcement", "campaign"]);
+const EVENT_STATUSES = new Set(["draft", "published", "archived"]);
+const EVENT_THEMES = new Set(["evergreen", "terracotta", "cobalt", "plum", "sand", "graphite", "festival", "aurora", "sunset", "prism", "spotlight"]);
+
+function eventSlug(value, id = "") {
+  const base = String(value || "event")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 70) || "event";
+  const suffix = String(id || crypto.randomUUID()).replace(/-/g, "").slice(0, 8).toLowerCase();
+  return `${base}-${suffix}`;
+}
+
+function eventLifecycle(row, now = Date.now()) {
+  const status = String(row?.status || "draft");
+  if (status === "draft") return "draft";
+  if (status === "archived") return "archived";
+  const startsAt = String(row?.starts_at || "").trim();
+  const endsAt = String(row?.ends_at || "").trim();
+  const startsAtMs = startsAt ? Date.parse(startsAt) : 0;
+  const endsAtMs = endsAt ? Date.parse(endsAt) : 0;
+  if (startsAtMs && Number.isFinite(startsAtMs) && startsAtMs > now) return "upcoming";
+  if (endsAtMs && Number.isFinite(endsAtMs) && endsAtMs <= now) return "ended";
+  return "live";
+}
+
+function normalizeEventRow(row) {
+  const startsAt = String(row?.starts_at || "").trim();
+  const endsAt = String(row?.ends_at || "").trim();
+  const lifecycle = eventLifecycle(row);
+  return {
+    id: String(row?.id || ""),
+    slug: String(row?.slug || ""),
+    name: String(row?.name || ""),
+    type: String(row?.type || "sale"),
+    status: String(row?.status || "draft"),
+    theme: String(row?.theme || "evergreen"),
+    headline: String(row?.headline || ""),
+    message: String(row?.message || ""),
+    coupon_code: String(row?.coupon_code || "").toUpperCase(),
+    cta_label: String(row?.cta_label || "Shop the edit"),
+    cta_href: String(row?.cta_href || "/offers"),
+    starts_at: startsAt,
+    ends_at: endsAt,
+    show_on_home: Boolean(row?.show_on_home),
+    show_after_sign_in: Boolean(row?.show_after_sign_in),
+    show_once: Boolean(row?.show_once),
+    notify_customers: Boolean(row?.notify_customers),
+    lifecycle,
+    active: String(row?.status || "draft") === "published" && lifecycle === "live",
+    created_at: row?.created_at || "",
+    updated_at: row?.updated_at || ""
+  };
+}
+
+function normalizeEventDate(value, label) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) throw httpError(`${label} is invalid`, 400);
+  return date.toISOString();
+}
+
+function eventPayload(body, current = {}) {
+  const input = body?.event && typeof body.event === "object" ? body.event : body || {};
+  const name = String(input.name ?? current.name ?? "").trim().slice(0, 80);
+  const headline = String(input.headline ?? current.headline ?? "").trim().slice(0, 90);
+  const message = String(input.message ?? current.message ?? "").trim().slice(0, 260);
+  if (name.length < 2) throw httpError("Event name must be 2–80 characters", 400);
+  if (headline.length < 2) throw httpError("Event headline must be 2–90 characters", 400);
+  if (message.length < 2) throw httpError("Event message must be 2–260 characters", 400);
+  const type = String(input.type ?? current.type ?? "sale").trim().toLowerCase();
+  if (!EVENT_TYPES.has(type)) throw httpError("Event type is invalid", 400);
+  const status = String(input.status ?? current.status ?? "draft").trim().toLowerCase();
+  if (!EVENT_STATUSES.has(status)) throw httpError("Event status is invalid", 400);
+  const theme = String(input.theme ?? current.theme ?? "evergreen").trim().toLowerCase();
+  if (!EVENT_THEMES.has(theme)) throw httpError("Event theme is invalid", 400);
+  const couponCode = String(input.coupon_code ?? current.coupon_code ?? "").trim().toUpperCase().slice(0, 24);
+  if (couponCode && !/^[A-Z0-9_-]+$/.test(couponCode)) throw httpError("Coupon code can use only letters, numbers, hyphens, and underscores", 400);
+  const ctaHref = String(input.cta_href ?? current.cta_href ?? "/offers").trim().slice(0, 180);
+  if (!/^\/(?!\/)[^\\\u0000-\u001f]*$/.test(ctaHref)) throw httpError("Event CTA must use an internal site path", 400);
+  const startsAt = normalizeEventDate(input.starts_at ?? current.starts_at, "Event start time");
+  const endsAt = normalizeEventDate(input.ends_at ?? current.ends_at, "Event end time");
+  if (startsAt && endsAt && new Date(startsAt) >= new Date(endsAt)) throw httpError("Event end time must be after its start time", 400);
+  return {
+    name,
+    type,
+    status,
+    theme,
+    headline,
+    message,
+    coupon_code: couponCode,
+    cta_label: String(input.cta_label ?? current.cta_label ?? "Shop the edit").trim().slice(0, 40) || "Shop the edit",
+    cta_href: ctaHref || "/offers",
+    starts_at: startsAt,
+    ends_at: endsAt,
+    show_on_home: input.show_on_home === undefined ? Boolean(current.show_on_home ?? true) : Boolean(input.show_on_home),
+    show_after_sign_in: input.show_after_sign_in === undefined ? Boolean(current.show_after_sign_in ?? true) : Boolean(input.show_after_sign_in),
+    show_once: input.show_once === undefined ? Boolean(current.show_once ?? true) : Boolean(input.show_once),
+    notify_customers: input.notify_customers === undefined ? Boolean(current.notify_customers ?? false) : Boolean(input.notify_customers)
+  };
+}
+
+async function listEvents(env) {
+  const { results } = await env.DB.prepare(`
+    SELECT * FROM events
+    ORDER BY CASE status WHEN 'published' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
+      COALESCE(starts_at, '9999-12-31T23:59:59.999Z') DESC, created_at DESC
+  `).all();
+  return json({ events: results.map(normalizeEventRow) });
+}
+
+async function createEvent(request, env, adminUser) {
+  const body = await readJson(request);
+  const event = eventPayload(body);
+  const id = crypto.randomUUID();
+  const slug = eventSlug(event.name, id);
+  await env.DB.prepare(`
+    INSERT INTO events (
+      id, slug, name, type, status, theme, headline, message, coupon_code,
+      cta_label, cta_href, starts_at, ends_at, show_on_home,
+      show_after_sign_in, show_once, notify_customers
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    id, slug, event.name, event.type, event.status, event.theme, event.headline,
+    event.message, event.coupon_code, event.cta_label, event.cta_href,
+    event.starts_at, event.ends_at, event.show_on_home ? 1 : 0,
+    event.show_after_sign_in ? 1 : 0, event.show_once ? 1 : 0, event.notify_customers ? 1 : 0
+  ).run();
+  await writeAuditLog(env, adminUser.email, "create_event", "event", id, { name: event.name, type: event.type, status: event.status });
+  await invalidateStorefrontCache(request);
+  const created = await env.DB.prepare("SELECT * FROM events WHERE id = ?").bind(id).first();
+  return json({ ok: true, event: normalizeEventRow(created) }, 201);
+}
+
+async function updateEvent(request, env, id, adminUser) {
+  const currentRow = await env.DB.prepare("SELECT * FROM events WHERE id = ?").bind(id).first();
+  if (!currentRow) return json({ error: "Event not found" }, 404);
+  const current = normalizeEventRow(currentRow);
+  const body = await readJson(request);
+  const event = eventPayload(body, current);
+  await env.DB.prepare(`
+    UPDATE events SET name = ?, type = ?, status = ?, theme = ?, headline = ?, message = ?,
+      coupon_code = ?, cta_label = ?, cta_href = ?, starts_at = ?, ends_at = ?,
+      show_on_home = ?, show_after_sign_in = ?, show_once = ?, notify_customers = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(
+    event.name, event.type, event.status, event.theme, event.headline, event.message,
+    event.coupon_code, event.cta_label, event.cta_href, event.starts_at, event.ends_at,
+    event.show_on_home ? 1 : 0, event.show_after_sign_in ? 1 : 0, event.show_once ? 1 : 0, event.notify_customers ? 1 : 0, id
+  ).run();
+  await writeAuditLog(env, adminUser.email, "update_event", "event", id, { from: current.status, to: event.status, name: event.name });
+  await invalidateStorefrontCache(request);
+  const updated = await env.DB.prepare("SELECT * FROM events WHERE id = ?").bind(id).first();
+  return json({ ok: true, event: normalizeEventRow(updated) });
+}
+
+async function deleteEvent(request, env, id, adminUser) {
+  const current = await env.DB.prepare("SELECT * FROM events WHERE id = ?").bind(id).first();
+  if (!current) return json({ error: "Event not found" }, 404);
+  await env.DB.prepare("DELETE FROM events WHERE id = ?").bind(id).run();
+  await writeAuditLog(env, adminUser.email, "delete_event", "event", id, { name: current.name, slug: current.slug });
+  await invalidateStorefrontCache(request);
+  return json({ ok: true });
+}
+
+async function getActiveEvents(env) {
+  const now = new Date().toISOString();
+  // Choose each placement independently in one D1 read so a popup-only event cannot displace the homepage.
+  const { results } = await env.DB.prepare(`
+    SELECT 'home' AS placement, e.* FROM (
+      SELECT * FROM events WHERE status = 'published' AND show_on_home = 1
+        AND (starts_at IS NULL OR starts_at = '' OR starts_at <= ?)
+        AND (ends_at IS NULL OR ends_at = '' OR ends_at > ?)
+      ORDER BY COALESCE(starts_at, '') DESC, updated_at DESC LIMIT 1
+    ) e
+    UNION ALL
+    SELECT 'sign_in' AS placement, e.* FROM (
+      SELECT * FROM events WHERE status = 'published' AND show_after_sign_in = 1
+        AND (starts_at IS NULL OR starts_at = '' OR starts_at <= ?)
+        AND (ends_at IS NULL OR ends_at = '' OR ends_at > ?)
+      ORDER BY COALESCE(starts_at, '') DESC, updated_at DESC LIMIT 1
+    ) e
+  `).bind(now, now, now, now).all();
+  return { home: results.find((row) => row.placement === "home") || null, signIn: results.find((row) => row.placement === "sign_in") || null };
+}
+
 const STOREFRONT_DEFAULTS = {
   announcement: {
     visible: true,
@@ -2159,7 +3584,7 @@ const STOREFRONT_DEFAULTS = {
     visible: true,
     items: [
       { id: "shipping", visible: true, title: "Free & Fast Shipping", body: "Complimentary on every order" },
-      { id: "returns", visible: true, title: "7-Day Easy Returns", body: "Simple exchanges, no questions" },
+      { id: "returns", visible: true, title: "7-Day Easy Returns", body: "Eligible returns and size exchanges · policy conditions apply" },
       { id: "secure", visible: true, title: "Secure Payments", body: "Protected checkout with trusted providers" }
     ]
   },
@@ -2174,8 +3599,65 @@ const STOREFRONT_DEFAULTS = {
     visible: false,
     country_code: "+91",
     phone_number: ""
+  },
+  socials: {
+    instagram: "",
+    facebook: "",
+    youtube: "",
+    tiktok: "",
+    pinterest: "",
+    x: "",
+    linkedin: ""
+  },
+  cinematic_reel: {
+    visible: true,
+    eyebrow: "The current mood",
+    title: "Pieces that move",
+    emphasis: "with you.",
+    description: "",
+    product_ids: []
   }
 };
+
+const STOREFRONT_SOCIALS = [
+  { id: "instagram", label: "Instagram", hosts: ["instagram.com"] },
+  { id: "facebook", label: "Facebook", hosts: ["facebook.com", "fb.com"] },
+  { id: "youtube", label: "YouTube", hosts: ["youtube.com", "youtu.be"] },
+  { id: "tiktok", label: "TikTok", hosts: ["tiktok.com"] },
+  { id: "pinterest", label: "Pinterest", hosts: ["pinterest.com"] },
+  { id: "x", label: "X", hosts: ["x.com", "twitter.com"] },
+  { id: "linkedin", label: "LinkedIn", hosts: ["linkedin.com"] }
+];
+
+function normalizeSocialUrl(value, social, strict = false) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const fail = message => {
+    if (strict) throw httpError(message, 400);
+    return "";
+  };
+  if (text.length > 500) return fail(`${social.label} URL must be 500 characters or fewer`);
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch {
+    return fail(`Enter a valid ${social.label} URL`);
+  }
+  if (parsed.protocol !== "https:") return fail(`${social.label} URL must use HTTPS`);
+  const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+  const allowed = social.hosts.some(host => hostname === host || hostname.endsWith(`.${host}`));
+  if (!allowed) return fail(`Use an official ${social.label} URL`);
+  parsed.hash = "";
+  return parsed.toString().slice(0, 500);
+}
+
+function normalizeSocialLinks(value, fallback = {}, strict = false) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(STOREFRONT_SOCIALS.map(social => [
+    social.id,
+    normalizeSocialUrl(source[social.id] === undefined ? fallback?.[social.id] : source[social.id], social, strict)
+  ]));
+}
 
 function parseSettingObject(value) {
   try {
@@ -2184,6 +3666,17 @@ function parseSettingObject(value) {
   } catch {
     return {};
   }
+}
+
+function normalizeSeoImage(value, fallback = `${CANONICAL_ORIGIN}/glamia-social-banner.png`, strict = false) {
+  const image = String(value ?? "").trim();
+  if (!image) return fallback;
+  try {
+    const url = new URL(image);
+    if (image.length <= 500 && url.protocol === "https:" && !url.username && !url.password) return url.href;
+  } catch { /* Invalid URLs must not become sharing metadata. */ }
+  if (strict) throw httpError("Social sharing image must be a valid HTTPS URL", 400);
+  return fallback;
 }
 
 async function storefrontSettingsObject(env, includePrivate = false) {
@@ -2198,6 +3691,13 @@ async function storefrontSettingsObject(env, includePrivate = false) {
     text: announcementTextValue,
     items: includePrivate ? allAnnouncementItems : allAnnouncementItems.filter(item => (!item.starts_at || Date.parse(item.starts_at) <= now) && Date.parse(item.ends_at) > now)
   };
+  const announcementBoundaries = allAnnouncementItems.flatMap(item => [Date.parse(item.starts_at), Date.parse(item.ends_at)])
+    .filter(time => Number.isFinite(time) && time > now);
+  if (!includePrivate) announcement.next_change_at = announcementBoundaries.length ? new Date(Math.min(...announcementBoundaries)).toISOString() : null;
+  // Resolve each placement separately so a sign-in-only event cannot hide the homepage event.
+  const { home: activeEventRow, signIn: signInEventRow } = await getActiveEvents(env);
+  const activeEvent = activeEventRow ? normalizeEventRow(activeEventRow) : null;
+  const signInEvent = signInEventRow ? normalizeEventRow(signInEventRow) : null;
   const rawItems = Array.isArray(raw.trust_strip?.items) ? raw.trust_strip.items : [];
   const items = STOREFRONT_DEFAULTS.trust_strip.items.map(defaultItem => {
     const item = rawItems.find(entry => entry?.id === defaultItem.id) || {};
@@ -2205,7 +3705,8 @@ async function storefrontSettingsObject(env, includePrivate = false) {
       id: defaultItem.id,
       visible: item.visible === undefined ? defaultItem.visible : Boolean(item.visible),
       title: heroText(item.title, defaultItem.title, 70),
-      body: heroText(item.body, defaultItem.body, 120)
+      body: item.id === 'returns' && /^Simple exchanges, no questions\.?$/i.test(String(item.body || '').trim())
+        ? defaultItem.body : heroText(item.body, defaultItem.body, 120)
     };
   });
   const supportContactVisible = raw.support_contact?.visible === undefined ? STOREFRONT_DEFAULTS.support_contact.visible : Boolean(raw.support_contact.visible);
@@ -2214,8 +3715,23 @@ async function storefrontSettingsObject(env, includePrivate = false) {
     country_code: String(raw.support_contact?.country_code || STOREFRONT_DEFAULTS.support_contact.country_code),
     phone_number: includePrivate || supportContactVisible ? String(raw.support_contact?.phone_number || "") : ""
   };
+  const socials = normalizeSocialLinks(raw.socials, STOREFRONT_DEFAULTS.socials);
+  const rawCinematicReel = raw.cinematic_reel && typeof raw.cinematic_reel === "object" ? raw.cinematic_reel : {};
+  const cinematicReel = {
+    visible: rawCinematicReel.visible === undefined ? STOREFRONT_DEFAULTS.cinematic_reel.visible : Boolean(rawCinematicReel.visible),
+    eyebrow: heroText(rawCinematicReel.eyebrow, STOREFRONT_DEFAULTS.cinematic_reel.eyebrow, 70),
+    title: heroText(rawCinematicReel.title, STOREFRONT_DEFAULTS.cinematic_reel.title, 100),
+    emphasis: heroText(rawCinematicReel.emphasis, STOREFRONT_DEFAULTS.cinematic_reel.emphasis, 100),
+    description: heroText(rawCinematicReel.description, STOREFRONT_DEFAULTS.cinematic_reel.description, 180),
+    product_ids: [...new Set((Array.isArray(rawCinematicReel.product_ids) ? rawCinematicReel.product_ids : []).map(value => String(value || "").trim()).filter(Boolean))].slice(0, 8)
+  };
   return {
     announcement,
+    // Keep the public app compatibility field, but Events is now the only
+    // campaign source. Old Storefront campaign records are no longer used.
+    ...(!includePrivate ? { sales_campaign: activeEvent || { active: false } } : {}),
+    active_event: activeEvent,
+    sign_in_event: signInEvent,
     trust_strip: {
       visible: raw.trust_strip?.visible === undefined ? true : Boolean(raw.trust_strip.visible),
       items
@@ -2230,10 +3746,13 @@ async function storefrontSettingsObject(env, includePrivate = false) {
       gateway_status: paymentGatewayStatus(env, raw.payments)
     },
     support_contact: supportContact,
+    customer_experience: customerPromises(raw.customer_experience),
+    socials,
+    cinematic_reel: cinematicReel,
     seo: {
       title: heroText(raw.seo?.title, "Glamia — Curated apparel for every wardrobe", 120),
       description: heroText(raw.seo?.description, "Discover refined everyday pieces, occasionwear, and accessories from independent ateliers.", 220),
-      image: heroText(raw.seo?.image, "", 500)
+      image: normalizeSeoImage(raw.seo?.image)
     }
   };
 }
@@ -2262,6 +3781,12 @@ async function updateStorefrontSettings(request, env) {
   const nextSupportContact = body.support_contact && typeof body.support_contact === "object"
     ? body.support_contact
     : current.support_contact;
+  const nextSocials = body.socials && typeof body.socials === "object" && !Array.isArray(body.socials)
+    ? body.socials
+    : current.socials;
+  const nextCinematicReel = body.cinematic_reel && typeof body.cinematic_reel === "object"
+    ? body.cinematic_reel
+    : current.cinematic_reel;
   const nextSeo = body.seo && typeof body.seo === "object" ? body.seo : current.seo;
   const announcementTextValue = announcementText(nextAnnouncement.text, current.announcement.text);
   const announcementVisible = nextAnnouncement.visible === undefined ? current.announcement.visible : Boolean(nextAnnouncement.visible);
@@ -2278,7 +3803,7 @@ async function updateStorefrontSettings(request, env) {
       id: defaultItem.id,
       visible: item.visible === undefined ? defaultItem.visible : Boolean(item.visible),
       title: heroText(item.title, defaultItem.title, 70),
-      body: heroText(item.body, defaultItem.body, 120)
+      body: defaultItem.id==='returns' && /^Simple exchanges, no questions\.?$/i.test(String(item.body||'').trim()) ? defaultItem.body : heroText(item.body, defaultItem.body, 120)
     };
   });
   const trustStrip = {
@@ -2298,10 +3823,21 @@ async function updateStorefrontSettings(request, env) {
     phone_number: nextSupportContact.phone_number ? normalizePhoneNumber(nextSupportContact.phone_number) : ""
   };
   if (supportContact.visible && !supportContact.phone_number) throw httpError("Add a support mobile number before showing it", 400);
+  const socials = normalizeSocialLinks(nextSocials, current.socials, true);
+  const experience=customerPromises(body.customer_experience||current.customer_experience);
+  if(['dispatch','delhi','india'].some(key=>experience[`${key}_min`]>experience[`${key}_max`]))throw httpError('Delivery minimum must not exceed maximum',400);
   const seo = {
     title: heroText(nextSeo.title, current.seo.title, 120),
     description: heroText(nextSeo.description, current.seo.description, 220),
-    image: heroText(nextSeo.image, current.seo.image, 500)
+    image: normalizeSeoImage(nextSeo.image === undefined ? current.seo.image : nextSeo.image, `${CANONICAL_ORIGIN}/glamia-social-banner.png`, true)
+  };
+  const cinematicReel = {
+    visible: nextCinematicReel.visible === undefined ? current.cinematic_reel.visible : Boolean(nextCinematicReel.visible),
+    eyebrow: heroText(nextCinematicReel.eyebrow, current.cinematic_reel.eyebrow, 70),
+    title: heroText(nextCinematicReel.title, current.cinematic_reel.title, 100),
+    emphasis: heroText(nextCinematicReel.emphasis, current.cinematic_reel.emphasis, 100),
+    description: heroText(nextCinematicReel.description, current.cinematic_reel.description, 180),
+    product_ids: [...new Set((Array.isArray(nextCinematicReel.product_ids) ? nextCinematicReel.product_ids : current.cinematic_reel.product_ids).map(value => String(value || "").trim()).filter(Boolean))].slice(0, 8)
   };
   await env.DB.batch([
     env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
@@ -2315,17 +3851,49 @@ async function updateStorefrontSettings(request, env) {
     env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
       .bind("support_contact", JSON.stringify(supportContact)),
     env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
+      .bind("socials", JSON.stringify(socials)),
+    env.DB.prepare("INSERT INTO storefront_settings(setting_key,value_json) VALUES(?,?) ON CONFLICT(setting_key) DO UPDATE SET value_json=excluded.value_json").bind('customer_experience',JSON.stringify(experience)),
+    env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
+      .bind("cinematic_reel", JSON.stringify(cinematicReel)),
+    env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
       .bind("seo", JSON.stringify(seo))
   ]);
+  await invalidateStorefrontCache(request);
   return json({
     ok: true,
     announcement,
+    customer_experience:experience,
     trust_strip: trustStrip,
     fulfillment,
     payments: { ...payments, methods: paymentMethods(env, payments), gateway_status: paymentGatewayStatus(env, payments) },
     support_contact: supportContact,
+    socials,
+    cinematic_reel: cinematicReel,
     seo
   });
+}
+
+async function getCinematicReelSettings(env) {
+  const settings = await storefrontSettingsObject(env, true);
+  return json({ cinematic_reel: settings.cinematic_reel });
+}
+
+async function updateCinematicReelSettings(request, env) {
+  const body = await readJson(request);
+  const current = await storefrontSettingsObject(env, true);
+  const input = body.cinematic_reel && typeof body.cinematic_reel === "object" ? body.cinematic_reel : body;
+  const currentReel = current.cinematic_reel || STOREFRONT_DEFAULTS.cinematic_reel;
+  const cinematicReel = {
+    visible: input.visible === undefined ? currentReel.visible : Boolean(input.visible),
+    eyebrow: heroText(input.eyebrow, currentReel.eyebrow, 70),
+    title: heroText(input.title, currentReel.title, 100),
+    emphasis: heroText(input.emphasis, currentReel.emphasis, 100),
+    description: heroText(input.description, currentReel.description, 180),
+    product_ids: [...new Set((Array.isArray(input.product_ids) ? input.product_ids : currentReel.product_ids).map(value => String(value || "").trim()).filter(Boolean))].slice(0, 8)
+  };
+  await env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
+    .bind("cinematic_reel", JSON.stringify(cinematicReel)).run();
+  return json({ ok: true, cinematic_reel: cinematicReel });
 }
 
 function splitProfileName(value) {
@@ -2381,6 +3949,7 @@ function formatProfile(row, user) {
     dob: row?.dob || "",
     gender: row?.gender || "",
     phone: row?.phone || "",
+    referral_onboarding_open: Boolean(row?.referral_onboarding_open),
     dob_updated_at: row?.dob_updated_at || null,
     dob_change_available_at: dobChangeAvailableAt,
     can_change_dob: !row?.dob || !dobChangeAvailableAt || Date.now() >= Date.parse(dobChangeAvailableAt)
@@ -2389,7 +3958,7 @@ function formatProfile(row, user) {
 
 async function profileRow(env, email) {
   return env.DB.prepare(`
-    SELECT name, first_name, middle_name, last_name, dob, gender, phone, dob_updated_at
+    SELECT name, first_name, middle_name, last_name, dob, gender, phone, dob_updated_at, referral_onboarding_open
     FROM users WHERE email = ?
   `).bind(email).first();
 }
@@ -2549,6 +4118,10 @@ async function updateProfile(request, env, user) {
   }
 
   const dobChanged = String(current?.dob || "") !== dob;
+  if (body.referral_code) {
+    if (!current?.referral_onboarding_open) throw httpError("A referral can only be entered during account creation", 409);
+    await validateReferral(env, user.email, body.referral_code);
+  }
   if (dobChanged && !currentProfile.can_change_dob) {
     const available = currentProfile.dob_change_available_at?.slice(0, 10);
     throw httpError(`Birthday can only be changed once every 12 months${available ? `. You can change it again on ${available}` : ""}`, 409);
@@ -2580,6 +4153,10 @@ async function updateProfile(request, env, user) {
     await env.DB.batch(statements);
   }
   const updatedRow = await profileRow(env, user.email);
+  if (current?.referral_onboarding_open && profileIsComplete(updatedRow)) {
+    await claimSignupReferral(env, user.email, body.referral_code || "");
+    updatedRow.referral_onboarding_open = false;
+  }
   const updated = { ...formatProfile(updatedRow, { ...user, name }), phones: await profilePhones(env, user.email, updatedRow?.phone || "") };
   const token = await signSession({ ...user, name: updated.name }, env);
   return json(updated, 200, {
@@ -2615,6 +4192,8 @@ async function deleteCustomerAccount(request, env, user) {
     env.DB.prepare("DELETE FROM restock_subscriptions WHERE user_email = ?").bind(email),
     env.DB.prepare("DELETE FROM customer_notifications WHERE user_email = ?").bind(email),
     env.DB.prepare("DELETE FROM customer_push_tokens WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM customer_saved_items WHERE user_email = ?").bind(email),
+    env.DB.prepare("DELETE FROM customer_notification_preferences WHERE user_email = ?").bind(email),
     env.DB.prepare(`
       UPDATE users SET
         email = ?, google_sub = ?, apple_sub = NULL, name = 'Deleted account', picture = '',
@@ -2672,7 +4251,7 @@ function rejectDuplicateAddress(address, existingAddresses, excludedId = null) {
   }
 }
 
-async function lookupIndianPostalCode(value) {
+async function lookupIndianPostalCode(value,env=null) {
   const pin = String(value || "").replace(/\D/g, "");
   if (!/^\d{6}$/.test(pin)) return json({ error: "Enter a 6-digit Indian PIN code" }, 400);
   try {
@@ -2689,7 +4268,8 @@ async function lookupIndianPostalCode(value) {
       country: "India",
       state: String(office.State || "").trim(),
       city: String(office.District || office.Block || office.Name || "").trim(),
-      locality: String(office.Name || "").trim()
+      locality: String(office.Name || "").trim(),
+      delivery_estimate:deliveryPromise(office.State,env?(await storefrontSettingsObject(env)).customer_experience:{})
     });
   } catch {
     return json({ error: "Postal code lookup is temporarily unavailable" }, 502);
@@ -2970,19 +4550,21 @@ function normalizeTaxConfig(input = {}, current = {}) {
 function productInsertStatement(env, entry) {
   return env.DB.prepare(`
     INSERT INTO products (
-      id, seller_email, name, category, brand, price, mrp, stock, rating, status, featured,
+      id, product_code, seller_email, name, category, brand, price, mrp, stock, rating, status, featured,
       color, color_hex, sizes_json, image_url, image_key, images_json, image_keys_json, thumbnail_url, thumbnail_key,
-      thumbnail_images_json, thumbnail_keys_json, thumbnail_source_url, material, description, specifications, variants_json, variant_group,
+      thumbnail_images_json, thumbnail_keys_json, thumbnail_source_url, material, description, specifications, what_in_box, variants_json, variant_group,
       subcategory, size_chart_url, cost_price, reorder_point, preorder_enabled, preorder_release_at,
-      preorder_limit, preorder_sold, hsn_sac_code, hsn_sac_type, gst_rate, gst_tax_inclusive, returnable
+      preorder_limit, preorder_sold, hsn_sac_code, hsn_sac_type, gst_rate, gst_tax_inclusive, returnable,
+      storefront_visibility
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?
     )
   `).bind(
     entry.id,
+    entry.productCode || null,
     entry.sellerEmail,
     entry.name,
     entry.category,
@@ -3008,6 +4590,7 @@ function productInsertStatement(env, entry) {
     entry.material,
     entry.description,
     entry.specifications || "",
+    entry.whatInBox || "",
     JSON.stringify(entry.variants || []),
     entry.variantGroup,
     entry.subcategory || "",
@@ -3022,17 +4605,20 @@ function productInsertStatement(env, entry) {
     entry.hsnSacType || "HSN",
     entry.gstRate ?? null,
     entry.gstTaxInclusive ?? 1,
-    entry.returnable ?? 1
+    entry.returnable ?? 1,
+    entry.storefrontVisibility || "glamia"
   );
 }
 
-async function createProduct(request, env, user) {
+async function createProduct(request, env, user, ctx) {
   const product = await readJson(request);
   validateProduct(product);
+  const storefrontVisibility = String(product.storefront_visibility || "glamia");
+  if (!["glamia", "wibrawl", "both"].includes(storefrontVisibility)) return json({ error: "Choose Glamia, Wibrawl, or both storefronts" }, 400);
   if (!(await categoryExists(env, product.category))) {
     return json({ error: `Unknown category "${product.category}"` }, 400);
   }
-  const rating = Number((4.2 + Math.random() * 0.7).toFixed(1));
+  const rating = 0; // Ratings come only from published customer reviews.
   const images = product.images.map(image => String(image).trim());
   const imageKeys = keysFromImages(images);
   const thumbnailImages = Array.isArray(product.thumbnail_urls) ? product.thumbnail_urls.map(image => String(image || "").trim()).filter(Boolean) : [];
@@ -3053,9 +4639,16 @@ async function createProduct(request, env, user) {
   const preorder = normalizePreorderConfig(product);
   const tax = normalizeTaxConfig(product);
   if (costPrice > Number(product.price)) return json({ error: "Cost price cannot exceed the selling price" }, 400);
+  const productSequence = await nextProductSequence(env);
+  if (!Number.isSafeInteger(productSequence) || productSequence < 1) {
+    return json({ error: "Product numbering is not configured yet. Apply the latest database migration and try again." }, 503);
+  }
+  const brandCode = await productBrandCode(env, product.brand);
+  const baseProductCode = buildProductCode(brandCode.token, product.category, subcategory, productSequence, brandCode.prefixBeforeGlamia);
 
   const entries = [{
     id: mainId,
+    productCode: baseProductCode,
     sellerEmail: user.email,
     name: product.name,
     category: product.category,
@@ -3077,6 +4670,7 @@ async function createProduct(request, env, user) {
     material: product.material,
     description: product.description,
     specifications: product.specifications || "",
+    whatInBox: product.what_in_box || "",
     variants,
     variantGroup: groupId,
     subcategory,
@@ -3090,14 +4684,16 @@ async function createProduct(request, env, user) {
     hsnSacType: tax.hsn_sac_type,
     gstRate: tax.gst_rate,
     gstTaxInclusive: tax.gst_tax_inclusive,
-    returnable: product.returnable === undefined ? 1 : normalizeReturnable(product.returnable)
+    returnable: product.returnable === undefined ? 1 : normalizeReturnable(product.returnable),
+    storefrontVisibility
   }];
 
   const createdVariants = [];
-  for (const variant of variants) {
+  for (const [variantIndex, variant] of variants.entries()) {
     const id = crypto.randomUUID();
     entries.push({
       id,
+      productCode: `${baseProductCode}-C${String(variantIndex + 1).padStart(2, "0")}`,
       sellerEmail: user.email,
       name: product.name,
       category: product.category,
@@ -3121,6 +4717,7 @@ async function createProduct(request, env, user) {
       material: product.material,
       description: product.description,
       specifications: product.specifications || "",
+      whatInBox: product.what_in_box || "",
       variantGroup: groupId,
       subcategory,
       sizeChartUrl,
@@ -3133,7 +4730,8 @@ async function createProduct(request, env, user) {
       hsnSacType: tax.hsn_sac_type,
       gstRate: tax.gst_rate,
       gstTaxInclusive: tax.gst_tax_inclusive,
-      returnable: product.returnable === undefined ? 1 : normalizeReturnable(product.returnable)
+      returnable: product.returnable === undefined ? 1 : normalizeReturnable(product.returnable),
+      storefrontVisibility
     });
     createdVariants.push(id);
   }
@@ -3153,13 +4751,14 @@ async function createProduct(request, env, user) {
   invalidateProductEnrichment();
 
   const created = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(mainId).first();
+  scheduleProductVectorUpdate(env, ctx, mainId, groupId);
   return json({
     product: { ...formatProduct(created), size_stock: await getSizeStockMap(env, mainId) },
     variants: createdVariants
   }, 201);
 }
 
-async function updateProduct(request, env, id, adminUser = null) {
+async function updateProduct(request, env, id, adminUser = null, ctx) {
   const body = await readJson(request);
   const current = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(id).first();
   if (!current) return json({ error: "Product not found" }, 404);
@@ -3174,6 +4773,11 @@ async function updateProduct(request, env, id, adminUser = null) {
     next.status = body.status;
   }
   if (body.featured !== undefined) next.featured = Number(Boolean(body.featured));
+  if (body.storefront_visibility !== undefined) {
+    const visibility = String(body.storefront_visibility || "");
+    if (!["glamia", "wibrawl", "both"].includes(visibility)) return json({ error: "Choose Glamia, Wibrawl, or both storefronts" }, 400);
+    next.storefront_visibility = visibility;
+  }
 
   const hasPreorderEdit = ["preorder_enabled", "preorder_release_at", "preorder_limit"].some(field => body[field] !== undefined);
   if (hasPreorderEdit) Object.assign(next, normalizePreorderConfig(body, current));
@@ -3212,7 +4816,9 @@ async function updateProduct(request, env, id, adminUser = null) {
     }
   }
 
-    const catalogFields = ["name", "category", "brand", "price", "mrp", "color", "color_hex", "returnable", "material", "sizes", "description", "specifications", "images", "thumbnail_urls", "thumbnail_keys", "thumbnail_source_url", "subcategory", "size_chart_url", "cost_price", "reorder_point", "variants"];
+    const catalogFields = ["name", "category", "brand", "price", "mrp", "color", "color_hex", "returnable", "material", "sizes", "description", "specifications", "what_in_box", "images", "thumbnail_urls", "thumbnail_keys", "thumbnail_source_url", "subcategory", "size_chart_url", "cost_price", "reorder_point", "variants"];
+  const sharedCatalogFields = ["category", "brand", "price", "mrp", "returnable", "material", "description", "specifications", "what_in_box", "subcategory", "size_chart_url", "cost_price", "reorder_point", "storefront_visibility"];
+  const hasSharedCatalogEdit = sharedCatalogFields.some(field => body[field] !== undefined);
   const hasCatalogEdit = catalogFields.some(field => body[field] !== undefined);
   if (hasCatalogEdit) {
     let currentImages = [];
@@ -3253,6 +4859,7 @@ async function updateProduct(request, env, id, adminUser = null) {
       sizes: body.sizes ?? jsonArray(current.sizes_json),
       description: body.description ?? current.description,
       specifications: body.specifications ?? current.specifications ?? "",
+      what_in_box: body.what_in_box ?? current.what_in_box ?? "",
       variants: body.variants !== undefined ? sanitizeVariants(body.variants) : jsonArray(current.variants_json),
       images: mergedImages,
       image_keys: Array.isArray(mergedImages) ? keysFromImages(mergedImages) : [],
@@ -3304,6 +4911,7 @@ async function updateProduct(request, env, id, adminUser = null) {
       material: merged.material,
       description: merged.description,
       specifications: merged.specifications,
+      what_in_box: merged.what_in_box,
       variants_json: JSON.stringify(merged.variants),
       sizes_json: JSON.stringify(merged.sizes),
       image_url: merged.images[0],
@@ -3355,30 +4963,61 @@ async function updateProduct(request, env, id, adminUser = null) {
   const updateStatement = env.DB.prepare(`
     UPDATE products SET
       name = ?, category = ?, brand = ?, price = ?, mrp = ?, stock = ?, color = ?, color_hex = ?, returnable = ?, material = ?,
-      description = ?, specifications = ?, sizes_json = ?, image_url = ?, image_key = ?, images_json = ?,
+      description = ?, specifications = ?, what_in_box = ?, sizes_json = ?, image_url = ?, image_key = ?, images_json = ?,
       image_keys_json = ?, thumbnail_url = ?, thumbnail_key = ?, thumbnail_images_json = ?, thumbnail_keys_json = ?, thumbnail_source_url = ?,
       variants_json = ?, status = ?, featured = ?, deal_ends_at = ?,
       deal_starts_at = ?, deal_price = ?, size_chart_url = ?, subcategory = ?, cost_price = ?, reorder_point = ?,
       preorder_enabled = ?, preorder_release_at = ?, preorder_limit = ?, hsn_sac_code = ?, hsn_sac_type = ?,
-      gst_rate = ?, gst_tax_inclusive = ?, updated_at = CURRENT_TIMESTAMP
+      gst_rate = ?, gst_tax_inclusive = ?, storefront_visibility = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
     next.name, next.category, next.brand, next.price, next.mrp, next.stock, next.color, next.color_hex ?? "", next.returnable ?? 1, next.material,
-    next.description, next.specifications ?? "", next.sizes_json, next.image_url, next.image_key, next.images_json,
+    next.description, next.specifications ?? "", next.what_in_box ?? "", next.sizes_json, next.image_url, next.image_key, next.images_json,
     next.image_keys_json, next.thumbnail_url ?? null, next.thumbnail_key ?? null, next.thumbnail_images_json ?? "[]", next.thumbnail_keys_json ?? "[]", next.thumbnail_source_url ?? "",
     next.variants_json, next.status, next.featured, next.deal_ends_at ?? null,
     next.deal_starts_at ?? null, next.deal_price ?? null, next.size_chart_url ?? null, next.subcategory ?? "", next.cost_price ?? 0,
     next.reorder_point ?? 15, next.preorder_enabled ? 1 : 0, next.preorder_release_at ?? null, next.preorder_limit ?? null,
-    next.hsn_sac_code ?? "", next.hsn_sac_type ?? "HSN", next.gst_rate ?? null, next.gst_tax_inclusive ? 1 : 0, id
+    next.hsn_sac_code ?? "", next.hsn_sac_type ?? "HSN", next.gst_rate ?? null, next.gst_tax_inclusive ? 1 : 0, next.storefront_visibility || "glamia", id
   );
   const updateStatements = sizePlan ? [...sizePlan.statements] : [];
   if (current.variant_group && body.status !== undefined) {
     updateStatements.push(env.DB.prepare("UPDATE products SET status = ? WHERE variant_group = ? AND id != ?")
       .bind(body.status, current.variant_group, id));
   }
-  if (current.variant_group && body.returnable !== undefined) {
-    updateStatements.push(env.DB.prepare("UPDATE products SET returnable = ?, updated_at = CURRENT_TIMESTAMP WHERE variant_group = ? AND id != ?")
-      .bind(next.returnable ?? 1, current.variant_group, id));
+  const hasSharedGroupEdit = current.variant_group && (
+    hasSharedCatalogEdit ||
+    hasPreorderEdit ||
+    hasTaxEdit ||
+    body.featured !== undefined ||
+    body.deal_ends_at !== undefined ||
+    body.deal_starts_at !== undefined ||
+    body.deal_price !== undefined
+  );
+  if (hasSharedGroupEdit) {
+    updateStatements.push(env.DB.prepare(`
+      UPDATE products SET
+        category = ?, brand = ?, price = ?, mrp = ?, returnable = ?, material = ?,
+        description = ?, what_in_box = ?, size_chart_url = ?, subcategory = ?, cost_price = ?, reorder_point = ?,
+        preorder_enabled = ?, preorder_release_at = ?, preorder_limit = ?,
+        hsn_sac_code = ?, hsn_sac_type = ?, gst_rate = ?, gst_tax_inclusive = ?,
+        featured = ?, deal_ends_at = ?, deal_starts_at = ?, deal_price = ?, storefront_visibility = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE variant_group = ? AND id != ?
+    `).bind(
+      next.category, next.brand, next.price, next.mrp, next.returnable ?? 1, next.material,
+      next.description, next.what_in_box ?? "", next.size_chart_url ?? null, next.subcategory ?? "", next.cost_price ?? 0, next.reorder_point ?? 15,
+      next.preorder_enabled ? 1 : 0, next.preorder_release_at ?? null, next.preorder_limit ?? null,
+      next.hsn_sac_code ?? "", next.hsn_sac_type ?? "HSN", next.gst_rate ?? null, next.gst_tax_inclusive ? 1 : 0,
+      next.featured ? 1 : 0, next.deal_ends_at ?? null, next.deal_starts_at ?? null, next.deal_price ?? null, next.storefront_visibility || "glamia",
+      current.variant_group, id
+    ));
+    if (body.specifications !== undefined) {
+      const siblings = await env.DB.prepare('SELECT id,name,color,specifications FROM products WHERE variant_group = ? AND id != ?')
+        .bind(current.variant_group, id).all();
+      for (const sibling of siblings.results || []) {
+        updateStatements.push(env.DB.prepare('UPDATE products SET specifications = ? WHERE id = ? AND variant_group = ?')
+          .bind(linkedSpecificationCopy(next.specifications, sibling), sibling.id, current.variant_group));
+      }
+    }
   }
   updateStatements.push(updateStatement);
   await env.DB.batch(updateStatements);
@@ -3395,16 +5034,22 @@ async function updateProduct(request, env, id, adminUser = null) {
   }
 
   const updated = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(id).first();
+  if (["status", "name", "brand", "category", "subcategory", "color", "material", "description"].some(key => body[key] !== undefined)) {
+    scheduleProductVectorUpdate(env, ctx, id, current.variant_group);
+  }
   if (adminUser) await writeAuditLog(env, adminUser.email, "update_product", "product", id, { fields: Object.keys(body) });
   return json({ product: { ...formatProduct(updated), size_stock: await getSizeStockMap(env, id) } });
 }
 
-async function deleteProduct(env, user, id) {
+async function deleteProduct(env, user, id, ctx) {
   const product = await env.DB.prepare("SELECT * FROM products WHERE id = ?").bind(id).first();
   if (!product) return json({ ok: true });
   if (user.role !== "admin" && product.seller_email !== user.email) throw httpError("You can delete only your own listings", 403);
-  await env.DB.prepare("DELETE FROM products WHERE id = ?").bind(id).run();
-  await env.DB.prepare("DELETE FROM product_sizes WHERE product_id = ?").bind(id).run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM product_sizes WHERE product_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM products WHERE id = ?").bind(id)
+  ]);
+  scheduleProductVectorUpdate(env, ctx, id);
   let keys = [];
   try {
     const productImages = JSON.parse(product.images_json || "[]");
@@ -3436,10 +5081,13 @@ async function deleteProduct(env, user, id) {
   return json({ ok: true });
 }
 
-async function listCategories(env) {
+async function listCategories(env, storefront = "glamia", includeUnassigned = false) {
+  const visibility = storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
+  const categoryFilter = includeUnassigned ? "" : `WHERE EXISTS (SELECT 1 FROM products p WHERE p.category = c.name AND p.status = 'live' AND COALESCE(p.storefront_visibility, 'glamia') IN ${visibility})`;
+  const subcategoryFilter = includeUnassigned ? "" : `WHERE EXISTS (SELECT 1 FROM products p WHERE p.category = s.category AND p.subcategory = s.name AND p.status = 'live' AND COALESCE(p.storefront_visibility, 'glamia') IN ${visibility})`;
   const [categoryRows, subcategoryRows] = await env.DB.batch([
-    env.DB.prepare("SELECT name FROM categories ORDER BY name ASC"),
-    env.DB.prepare("SELECT category, name FROM subcategories ORDER BY category ASC, name ASC")
+    env.DB.prepare(`SELECT c.name FROM categories c ${categoryFilter} ORDER BY c.name ASC`),
+    env.DB.prepare(`SELECT s.category, s.name FROM subcategories s ${subcategoryFilter} ORDER BY s.category ASC, s.name ASC`)
   ]);
   return json({
     categories: (categoryRows.results || []).map(row => row.name),
@@ -4101,10 +5749,6 @@ async function uploadImage(request, env, user) {
   const uploadKind = String(form.get("kind") || "").trim().toLowerCase();
   if (uploadKind === "review") return json({ error: "Review media uploads are disabled" }, 400);
   const adminUpload = adminEmails(env, request).includes(String(user?.email || "").trim().toLowerCase());
-  // Every non-review asset is part of the product/admin media workflow. Keep
-  // the legacy empty kind unlimited as well so older listing screens do not
-  // unexpectedly hit the customer upload budget.
-  const productUpload = uploadKind !== "review";
   const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
   if (!allowedTypes.has(file.type)) return json({ error: "Upload a JPEG, PNG, WebP, or GIF image" }, 400);
   const isThumbnail = uploadKind === "product-thumbnail";
@@ -4115,7 +5759,8 @@ async function uploadImage(request, env, user) {
   const kind = isThumbnail ? "products/thumbs" : "products";
   const ownerKey = await hashIdentifier(user.email);
   const key = `${kind}/${ownerKey}/${crypto.randomUUID()}.${extension}`;
-  const quotaRequired = !adminUpload && !productUpload;
+  // A caller-controlled upload kind must never bypass a non-admin's storage quota.
+  const quotaRequired = !adminUpload;
   if (quotaRequired) await reserveUploadQuota(env, user.email, file.size);
   try {
     await env.PRODUCT_IMAGES.put(key, file, {
@@ -4156,6 +5801,47 @@ async function releaseUploadQuota(env, email, bytes) {
     .bind(bytes, String(email).toLowerCase(), usageDate).run();
 }
 
+async function serveShopperApk(request, env) {
+  if (!["GET", "HEAD"].includes(request.method)) {
+    return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
+  }
+  const key = "app-downloads/glamia-shopper.apk";
+  const headOnly = request.method === "HEAD";
+  const object = headOnly ? await env.PRODUCT_IMAGES.head(key) : await env.PRODUCT_IMAGES.get(key);
+  if (!object) {
+    return new Response(headOnly ? null : "The Android app download is coming soon.", {
+      status: 404,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }
+    });
+  }
+  return new Response(headOnly ? null : object.body, {
+    headers: {
+      "Content-Type": "application/vnd.android.package-archive",
+      "Content-Disposition": 'attachment; filename="Glamia-Store.apk"',
+      "Content-Length": String(object.size),
+      "ETag": object.httpEtag,
+      "Cache-Control": "no-store"
+    }
+  });
+}
+
+async function cachedProductImage(request, env, url, ctx) {
+  // Uploads use immutable UUID keys. Product media is already public and never
+  // contains account data, so cookies/authorization cannot vary this response.
+  const cache = globalThis.caches?.default;
+  const key = new Request(`${url.origin}${url.pathname}`, { method: 'GET' });
+  const headOnly = request.method === 'HEAD';
+  const hit = cache ? await cache.match(key) : null;
+  if (hit) return headOnly ? new Response(null, { status: hit.status, headers: hit.headers }) : hit;
+  const response = await serveR2Asset(env, url.pathname.slice('/api/assets/'.length), headOnly);
+  if (cache && ctx?.waitUntil && !headOnly && response.status === 200) {
+    ctx.waitUntil(cache.put(key, response.clone()).catch(error => {
+      console.error('product_image_cache_failed', { error_type: error.name });
+    }));
+  }
+  return response;
+}
+
 async function serveR2Asset(env, rawKey, headOnly = false) {
   let key = rawKey;
   try {
@@ -4184,13 +5870,69 @@ async function hasPurchasedProduct(env, email, productId) {
   return Boolean(row);
 }
 
+async function employeePushTokenRows(env, permission, ownerOnly = false) {
+  const { results } = await env.DB.prepare(`
+    SELECT t.token, e.position, e.permissions_json, e.employee_email, e.owner_approved
+    FROM employee_push_tokens t
+    JOIN employees e ON e.id = t.employee_id
+    WHERE t.active = 1 AND e.active = 1
+    ORDER BY t.updated_at DESC
+    LIMIT 500
+  `).all();
+  return (results || []).filter(row => ownerOnly ? employeeIsOwner(row, env) : employeeHasPermission(row, permission));
+}
+
+async function pushEmployeeNotification(env, id) {
+  const notification = await env.DB.prepare(`
+    SELECT id, type, title, message, priority, order_id, product_id, review_id, dismissed_at, employee_push_sent_at, owner_only
+    FROM admin_notifications
+    WHERE id = ?
+  `).bind(id).first();
+  if (!notification || notification.dismissed_at || notification.employee_push_sent_at) return;
+  const claimed = await env.DB.prepare(`
+    UPDATE admin_notifications
+    SET employee_push_sent_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND employee_push_sent_at IS NULL
+  `).bind(id).run();
+  if (!Number(claimed.meta?.changes || 0)) return;
+  const permission = notificationPermission(notification.type);
+  if (!permission) return;
+  const rows = await employeePushTokenRows(env, permission, Boolean(notification.owner_only));
+  if (!rows.length) return;
+  await sendExpoPushMessages(rows.map(row => row.token), {
+    title: notification.title,
+    body: notification.message,
+    priority: notification.priority === "urgent" || notification.priority === "high" ? "high" : "default",
+    channelId: "employee-updates",
+    data: {
+      type: notification.type,
+      order_id: notification.order_id,
+      product_id: notification.product_id,
+      review_id: notification.review_id,
+      deep_link: "/notifications"
+    }
+  }, env);
+}
+
+async function pushPendingEmployeeNotifications(env) {
+  const { results } = await env.DB.prepare(`
+    SELECT id
+    FROM admin_notifications
+    WHERE dismissed_at IS NULL AND employee_push_sent_at IS NULL
+    ORDER BY created_at ASC
+    LIMIT 100
+  `).all();
+  for (const row of results || []) await pushEmployeeNotification(env, row.id);
+}
+
 async function createAdminNotification(env, {
-  type, title, message, dedupeKey, orderId = null, productId = null, reviewId = null, priority = "normal"
+  type, title, message, dedupeKey, orderId = null, productId = null, reviewId = null, priority = "normal", ownerOnly = false, ctx = null
 }) {
+  const id = crypto.randomUUID();
   await env.DB.prepare(`
     INSERT INTO admin_notifications
-      (id, type, priority, title, message, dedupe_key, order_id, product_id, review_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, type, priority, title, message, dedupe_key, order_id, product_id, review_id, created_at, owner_only)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(dedupe_key) DO UPDATE SET
       priority = excluded.priority,
       title = excluded.title,
@@ -4198,10 +5940,16 @@ async function createAdminNotification(env, {
       order_id = excluded.order_id,
       product_id = excluded.product_id,
       review_id = excluded.review_id,
-      created_at = excluded.created_at
+      created_at = excluded.created_at,
+      employee_push_sent_at = NULL,
+      owner_only = excluded.owner_only
   `).bind(
-    crypto.randomUUID(), type, priority, title, message, dedupeKey, orderId, productId, reviewId, new Date().toISOString()
+    id, type, priority, title, message, dedupeKey, orderId, productId, reviewId, new Date().toISOString(), ownerOnly ? 1 : 0
   ).run();
+  const notification = await env.DB.prepare("SELECT id FROM admin_notifications WHERE dedupe_key = ?").bind(dedupeKey).first();
+  const push = pushEmployeeNotification(env, notification?.id || id);
+  if (ctx?.waitUntil) ctx.waitUntil(push.catch(() => null));
+  else await push;
 }
 
 async function ensureStockNotifications(env) {
@@ -4265,6 +6013,7 @@ async function ensureStockNotifications(env) {
         AND (admin_notifications.last_triggered_at IS NULL OR admin_notifications.last_triggered_at <= datetime('now', '-1 day'))
     `)
   ]);
+  await pushPendingEmployeeNotifications(env);
 }
 
 async function ensurePendingOrderNotifications(env) {
@@ -4295,15 +6044,38 @@ async function ensurePendingOrderNotifications(env) {
         order_id = excluded.order_id
     `)
   ]);
+  await pushPendingEmployeeNotifications(env);
+}
+
+async function ensureEmployeeNotificationMaintenance(env) {
+  const now = Date.now();
+  if (employeeNotificationMaintenance.inFlight) return employeeNotificationMaintenance.inFlight;
+  if (employeeNotificationMaintenance.completedAt > now - 60_000) return;
+  const task = (async () => {
+    await ensureStockNotifications(env);
+    await ensurePendingOrderNotifications(env);
+    employeeNotificationMaintenance.completedAt = Date.now();
+  })().finally(() => {
+    if (employeeNotificationMaintenance.inFlight === task) employeeNotificationMaintenance.inFlight = null;
+  });
+  employeeNotificationMaintenance.inFlight = task;
+  return task;
 }
 
 async function listAdminNotifications(env) {
-  await ensureStockNotifications(env);
-  await ensurePendingOrderNotifications(env);
+  await ensureEmployeeNotificationMaintenance(env);
   const { results } = await env.DB.prepare(`
-    SELECT id, type, priority, title, message, order_id, product_id, review_id, read_at, created_at
+    SELECT id, type, priority, title, message, order_id, product_id, review_id, read_at, created_at, owner_only
     FROM admin_notifications
     WHERE dismissed_at IS NULL
+      AND NOT (
+        type = 'new_order'
+        AND EXISTS (
+        SELECT 1 FROM orders o
+          WHERE o.id = admin_notifications.order_id
+            AND ${paymentIncompleteOrderPredicate("o", false)}
+        )
+      )
     ORDER BY created_at DESC
     LIMIT 200
   `).all();
@@ -4311,11 +6083,130 @@ async function listAdminNotifications(env) {
   return json({ notifications: results, unread_count: unread });
 }
 
+function notificationPermission(type) {
+  return ADMIN_NOTIFICATION_PERMISSIONS[String(type || "")] || "";
+}
+
+function employeeCanSeeNotification(employee, notification, env) {
+  if (notification?.owner_only) return Boolean(env && employeeIsOwner(employee, env));
+  const permission = notificationPermission(notification?.type);
+  return Boolean(permission && employeeHasPermission(employee, permission));
+}
+
+async function employeeNotificationRows(env, employee) {
+  await ensureEmployeeNotificationMaintenance(env);
+  const { results } = await env.DB.prepare(`
+    SELECT n.id, n.type, n.priority, n.title, n.message, n.order_id, n.product_id, n.review_id, n.owner_only,
+      n.created_at, s.read_at AS employee_read_at, s.dismissed_at AS employee_dismissed_at
+    FROM admin_notifications n
+    LEFT JOIN employee_notification_states s
+      ON s.notification_id = n.id AND s.employee_id = ?
+    WHERE n.dismissed_at IS NULL
+      AND (s.dismissed_at IS NULL)
+      AND NOT (
+        n.type = 'new_order'
+        AND EXISTS (
+          SELECT 1 FROM orders o
+          WHERE o.id = n.order_id
+            AND ${paymentIncompleteOrderPredicate("o", false)}
+        )
+      )
+    ORDER BY CASE n.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 ELSE 2 END, n.created_at DESC
+    LIMIT 200
+  `).bind(employee.id).all();
+  return results
+    .filter((notification) => employeeCanSeeNotification(employee, notification, env))
+    .map((notification) => ({
+      id: notification.id,
+      type: notification.type,
+      priority: notification.priority,
+      title: notification.title,
+      message: notification.message,
+      order_id: notification.order_id,
+      product_id: notification.product_id,
+      review_id: notification.review_id,
+      owner_only: notification.owner_only,
+      read_at: notification.employee_read_at || null,
+      created_at: notification.created_at
+    }));
+}
+
+async function listEmployeeNotifications(env, employee) {
+  const notifications = await employeeNotificationRows(env, employee);
+  return json({
+    notifications,
+    unread_count: notifications.filter((notification) => !notification.read_at).length
+  });
+}
+
+async function getEmployeeNotificationCount(env, employee) {
+  const notifications = await employeeNotificationRows(env, employee);
+  return json({ unread_count: notifications.filter((notification) => !notification.read_at).length });
+}
+
+async function markAllEmployeeNotificationsRead(env, employee) {
+  const notifications = await employeeNotificationRows(env, employee);
+  if (!notifications.length) return;
+  await env.DB.batch(notifications.map((notification) => env.DB.prepare(`
+    INSERT INTO employee_notification_states (employee_id, notification_id, read_at, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(employee_id, notification_id) DO UPDATE SET
+      read_at = COALESCE(employee_notification_states.read_at, CURRENT_TIMESTAMP),
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(employee.id, notification.id)));
+}
+
+async function updateEmployeeNotification(request, env, employee, id) {
+  const current = await env.DB.prepare(`
+    SELECT n.id, n.type, n.owner_only, s.read_at, s.dismissed_at
+    FROM admin_notifications n
+    LEFT JOIN employee_notification_states s
+      ON s.notification_id = n.id AND s.employee_id = ?
+    WHERE n.id = ? AND n.dismissed_at IS NULL
+      AND NOT (
+        n.type = 'new_order'
+        AND EXISTS (
+          SELECT 1 FROM orders o
+          WHERE o.id = n.order_id
+            AND ${paymentIncompleteOrderPredicate("o", false)}
+        )
+      )
+  `).bind(employee.id, id).first();
+  if (!current || !employeeCanSeeNotification(employee, current, env)) return json({ error: "Notification not found" }, 404);
+  const body = await readJson(request);
+  let readAt = current.read_at || null;
+  let dismissedAt = current.dismissed_at || null;
+  if (body.read === true) readAt = new Date().toISOString();
+  else if (body.read === false) readAt = null;
+  if (body.dismissed === true) dismissedAt = new Date().toISOString();
+  else if (body.dismissed === false) dismissedAt = null;
+  if (body.read !== true && body.read !== false && body.dismissed !== true && body.dismissed !== false) {
+    return json({ error: "Choose read or dismissed" }, 400);
+  }
+  await env.DB.prepare(`
+    INSERT INTO employee_notification_states (employee_id, notification_id, read_at, dismissed_at, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(employee_id, notification_id) DO UPDATE SET
+      read_at = excluded.read_at,
+      dismissed_at = excluded.dismissed_at,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(employee.id, id, readAt, dismissedAt).run();
+  return listEmployeeNotifications(env, employee);
+}
+
 async function getAdminNotificationCount(env) {
   const row = await env.DB.prepare(`
     SELECT COUNT(*) AS unread_count
     FROM admin_notifications
     WHERE dismissed_at IS NULL AND read_at IS NULL
+      AND NOT (
+        type = 'new_order'
+        AND EXISTS (
+          SELECT 1 FROM orders o
+            WHERE o.id = admin_notifications.order_id
+            AND ${paymentIncompleteOrderPredicate("o", false)}
+        )
+      )
   `).first();
   return json({ unread_count: Number(row?.unread_count || 0) });
 }
@@ -4579,6 +6470,11 @@ function formatOrder(row) {
     discount: row.discount,
     coupon_code: row.coupon_code,
     total: row.total,
+    credits_used: Number(row.credits_used || 0),
+    payable_total: Number(row.payable_total ?? row.total),
+    bill_available: Boolean(row.bill_issued_at),
+    bill_number: row.bill_number || null,
+    bill_issued_at: row.bill_issued_at || null,
     status: row.status,
     payment_method: formatPaymentMethod(row.payment_method),
     payment_gateway: row.payment_gateway || null,
@@ -4588,15 +6484,33 @@ function formatOrder(row) {
     tracking_token: row.tracking_token || "",
     tracking_number: row.tracking_number || "",
     order_type: row.order_type || "standard",
+    orderType: String(row.order_type || 'standard').toUpperCase(),
+    is_replacement: row.order_type === 'replacement',
+    isReplacement: row.order_type === 'replacement',
+    replacement_fulfilment_mode: row.order_type==='replacement' ? (row.replacement_fulfilment_mode||'after_receipt') : null,
+    original_order_id: row.replacement_for_order_id || null,
+    originalOrderId: row.replacement_for_order_id || null,
+    trackingNumber: row.tracking_number || '',
+    ...(row.order_type === 'replacement' ? {tax_total:0,shipping_total:0} : {}),
     replacement_for_order_id: row.replacement_for_order_id || null,
     replacement_request_id: row.replacement_request_id || null,
-    packing_status: row.packing_status || "unpacked",
+    packing_status: row.status === "cancelled" ? "not_required" : (row.packing_status || "unpacked"),
     packed_at: row.packed_at || null,
     packed_by: row.packed_by || null,
     shipping,
+    delivery_estimate:row.delivery_estimate||'',
     created_at: row.created_at,
     updated_at: row.updated_at
   };
+}
+
+// Payment confirmations need actual issued-bill metadata, not an assumption
+// based on payment status. Read only after settlement; never issue a bill here.
+async function formatPaymentOrder(env, row) {
+  if (!row) return null;
+  if (!["paid", "refunded"].includes(row.payment_status)) return formatOrder(row);
+  const bill = await env.DB.prepare("SELECT bill_number, issued_at AS bill_issued_at FROM order_bills WHERE order_id = ? LIMIT 1").bind(row.id).first();
+  return formatOrder({ ...row, bill_number: bill?.bill_number, bill_issued_at: bill?.bill_issued_at });
 }
 
 function fallbackOrderNumber(row) {
@@ -4608,40 +6522,158 @@ function fallbackOrderNumber(row) {
 async function listOrders(env, user, scope, searchParams = new URLSearchParams()) {
   if (scope === "admin") {
     requireAdmin(user);
+    const completed = searchParams.get("completed") === "1";
+    const query = String(searchParams.get("q") || "").trim().slice(0, 100).replace(/[\\%_]/g, "");
+    const filters = [`NOT ${paymentIncompleteOrderPredicate("o", true)}`];
+    const args = [];
+    const selectedOrder=String(searchParams.get('order')||'').trim().slice(0,128);
+    if(selectedOrder){filters.push('o.id=?');args.push(selectedOrder);}
+    if (completed) filters.push("(b.order_id IS NOT NULL OR (o.order_type='replacement' AND o.status='delivered'))");
+    if (query) { filters.push("(o.order_number LIKE ? OR o.customer_email LIKE ? OR o.customer_name LIKE ?)"); args.push(...Array(3).fill(`%${query}%`)); }
+    const where = filters.join(" AND ");
     const requestedLimit = Number(searchParams.get("limit"));
     const hasPagination = Number.isSafeInteger(requestedLimit) && requestedLimit > 0;
     const limit = hasPagination ? Math.min(requestedLimit, 100) : null;
     const page = hasPagination ? Math.max(1, Math.floor(Number(searchParams.get("page")) || 1)) : 1;
     const offset = limit ? (page - 1) * limit : 0;
     const { results } = await env.DB.prepare(`
-      SELECT id, order_number, customer_email, customer_name, items_json, subtotal, discount,
-        coupon_code, total, status, payment_method, payment_gateway, payment_status, payment_reference, payment_updated_at,
-        tracking_token, tracking_number,
-        order_type, replacement_for_order_id, replacement_request_id, packing_status, packed_at, packed_by, shipping_json,
-        created_at, updated_at
-      FROM orders
-      ORDER BY created_at DESC, id DESC${limit ? " LIMIT ? OFFSET ?" : ""}
-    `).bind(...(limit ? [limit, offset] : [])).all();
-    const orders = results.map(formatOrder);
+      SELECT o.*, b.bill_number, b.issued_at AS bill_issued_at
+      FROM orders o LEFT JOIN order_bills b ON b.order_id = o.id
+      WHERE ${where}
+      ORDER BY ${completed ? "COALESCE(b.issued_at,o.delivered_at,o.created_at)" : "o.created_at"} DESC, o.id DESC${limit ? " LIMIT ? OFFSET ?" : ""}
+    `).bind(...args, ...(limit ? [limit, offset] : [])).all();
+    const orders = await attachCancellationRefunds(env,results.map(formatOrder));
     if (!limit) return json({ orders });
-    const total = await cachedCount(env, "admin-orders", "SELECT COUNT(*) AS count FROM orders");
+    const total = query || completed || selectedOrder
+      ? Number((await env.DB.prepare(`SELECT COUNT(*) AS count FROM orders o LEFT JOIN order_bills b ON b.order_id = o.id WHERE ${where}`).bind(...args).first())?.count || 0)
+      : await cachedCount(env, "admin-orders", `SELECT COUNT(*) AS count FROM orders o WHERE NOT ${paymentIncompleteOrderPredicate("o", true)}`);
     return json({ orders, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + orders.length < total } });
   }
-  const { results } = await env.DB.prepare("SELECT * FROM orders WHERE customer_email = ? ORDER BY created_at DESC")
+  const { results } = await env.DB.prepare(`
+    SELECT o.*, b.bill_number, b.issued_at AS bill_issued_at FROM orders o LEFT JOIN order_bills b ON b.order_id = o.id
+    WHERE o.customer_email = ?
+      ${searchParams.get('cancellation_updates')==='1'?"AND o.status='cancelled'":''}
+      AND NOT ${paymentIncompleteOrderPredicate("o", true)}
+    ORDER BY o.created_at DESC
+  `)
     .bind(String(user.email || "").trim().toLowerCase())
     .all();
-  return json({ orders: results.map(formatOrder) });
+  return json({ orders: await attachCancellationRefunds(env,results.map(formatOrder)) });
 }
 
 async function listCustomerNotifications(env, user) {
   const { results } = await env.DB.prepare(`
-    SELECT id, type, title, message, order_id, deep_link, read_at, created_at
-    FROM customer_notifications
-    WHERE user_email = ?
-    ORDER BY created_at DESC, id DESC
+    SELECT n.id, n.type, n.title, n.message, n.order_id, n.deep_link, n.read_at, n.created_at
+    FROM customer_notifications n
+    LEFT JOIN orders o ON o.id = n.order_id
+    WHERE n.user_email = ?
+      AND NOT (
+        n.type = 'order_placed'
+        AND o.id IS NOT NULL
+        AND ${paymentIncompleteOrderPredicate("o", false)}
+      )
+      AND NOT (o.id IS NOT NULL AND ${paymentIncompleteOrderPredicate("o", true)})
+    ORDER BY n.created_at DESC, n.id DESC
     LIMIT 100
   `).bind(String(user.email || "").trim().toLowerCase()).all();
   return json({ notifications: results || [] });
+}
+
+// Signed-in saved selections are small account snapshots; mutations apply per item to avoid stale-device overwrites.
+function savedItemId(value) {
+  const id = String(value || "").trim();
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw httpError("Invalid saved product", 400);
+  return id;
+}
+
+function savedCartLine(value, allowRemoval = false) {
+  const quantity = Number(value?.quantity);
+  if (!Number.isSafeInteger(quantity) || quantity < (allowRemoval ? 0 : 1) || quantity > 10) throw httpError("Invalid saved quantity", 400);
+  const size = String(value?.size || "").trim().slice(0, 32);
+  const variant = String(value?.variant || "").trim().slice(0, 128);
+  return { id: savedItemId(value?.id), size, variant, quantity };
+}
+
+function savedCartKey(line) { return JSON.stringify([line.id, line.size, line.variant]); }
+
+function parseSavedArray(value) {
+  try { const parsed = JSON.parse(value || "[]"); return Array.isArray(parsed) ? parsed : []; }
+  catch { return []; }
+}
+
+function savedItemsResponse(row) {
+  return { cart: parseSavedArray(row?.cart_json), wishlist: parseSavedArray(row?.wishlist_json), saved_for_later: parseSavedArray(row?.saved_for_later_json), revision: Number(row?.revision || 0) };
+}
+
+async function getCustomerSavedItems(env, user) {
+  const row = await env.DB.prepare("SELECT cart_json, wishlist_json, saved_for_later_json, revision FROM customer_saved_items WHERE user_email = ?")
+    .bind(String(user.email).toLowerCase()).first();
+  return json(savedItemsResponse(row));
+}
+
+async function changeCustomerSavedItems(request, env, user, merge) {
+  const body = await readJson(request);
+  if (!Array.isArray(body.cart) || !Array.isArray(body.wishlist) || body.cart.length > 100 || body.wishlist.length > 200) throw httpError("Saved items exceed the allowed size", 400);
+  if (body.saved_for_later !== undefined && (!Array.isArray(body.saved_for_later) || body.saved_for_later.length > 100)) throw httpError("Saved for later exceeds the allowed size", 400);
+  if (!merge && body.wishlist.some(entry => !entry || typeof entry !== "object" || typeof entry.saved !== "boolean")) throw httpError("Wishlist changes must be explicit", 400);
+  const cartChanges = body.cart.map(line => savedCartLine(line, !merge));
+  const laterChanges = (body.saved_for_later || []).map(line => savedCartLine(line, !merge));
+  const wishlistChanges = body.wishlist.map(entry => merge
+    ? { id: savedItemId(entry), saved: true }
+    : { id: savedItemId(entry?.id), saved: entry?.saved === true });
+  const email = String(user.email).trim().toLowerCase();
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const row = await env.DB.prepare("SELECT cart_json, wishlist_json, saved_for_later_json, revision FROM customer_saved_items WHERE user_email = ?").bind(email).first();
+    if (!row) {
+      await env.DB.prepare("INSERT OR IGNORE INTO customer_saved_items (user_email) VALUES (?)").bind(email).run();
+      continue;
+    }
+    const prior = savedItemsResponse(row);
+    const cart = new Map(prior.cart.map(line => [savedCartKey(line), line]));
+    const wishlist = new Set(prior.wishlist);
+    const later = new Map(prior.saved_for_later.map(line => [savedCartKey(line), line]));
+    for (const line of cartChanges) {
+      const key = savedCartKey(line);
+      if (line.quantity === 0) cart.delete(key);
+      else cart.set(key, { ...line, quantity: merge ? Math.max(line.quantity, Number(cart.get(key)?.quantity || 0)) : line.quantity });
+    }
+    for (const entry of wishlistChanges) entry.saved ? wishlist.add(entry.id) : wishlist.delete(entry.id);
+    for (const line of laterChanges) {
+      const key = savedCartKey(line);
+      if (line.quantity === 0) later.delete(key);
+      else later.set(key, { ...line, quantity: merge ? Math.max(line.quantity, Number(later.get(key)?.quantity || 0)) : line.quantity });
+    }
+    if (cart.size > 100 || wishlist.size > 200 || later.size > 100) throw httpError("Too many saved items", 400);
+    const next = { cart: [...cart.values()], wishlist: [...wishlist], saved_for_later: [...later.values()] };
+    const cartJson = JSON.stringify(next.cart);
+    const wishlistJson = JSON.stringify(next.wishlist);
+    const laterJson = JSON.stringify(next.saved_for_later);
+    if (cartJson === row.cart_json && wishlistJson === row.wishlist_json && laterJson === row.saved_for_later_json) return json(prior);
+    const updated = await env.DB.prepare(`
+      UPDATE customer_saved_items SET cart_json = ?, wishlist_json = ?, saved_for_later_json = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+      WHERE user_email = ? AND revision = ?
+    `).bind(cartJson, wishlistJson, laterJson, email, row.revision).run();
+    if (Number(updated.meta?.changes || 0)) return json({ ...next, revision: prior.revision + 1 });
+  }
+  throw httpError("Saved items changed on another device. Please retry.", 409);
+}
+
+async function getCustomerNotificationPreferences(env, user) {
+  const row = await env.DB.prepare("SELECT event_push_enabled FROM customer_notification_preferences WHERE user_email = ?")
+    .bind(String(user.email).toLowerCase()).first();
+  return json({ event_push_enabled: Boolean(row?.event_push_enabled) });
+}
+
+async function updateCustomerNotificationPreferences(request, env, user) {
+  const body = await readJson(request);
+  if (typeof body.event_push_enabled !== "boolean") throw httpError("Choose whether event alerts are enabled", 400);
+  const email = String(user.email).trim().toLowerCase();
+  await env.DB.prepare(`
+    INSERT INTO customer_notification_preferences (user_email, event_push_enabled) VALUES (?, ?)
+    ON CONFLICT(user_email) DO UPDATE SET event_push_enabled = excluded.event_push_enabled, updated_at = CURRENT_TIMESTAMP
+    WHERE customer_notification_preferences.event_push_enabled != excluded.event_push_enabled
+  `).bind(email, body.event_push_enabled ? 1 : 0).run();
+  return json({ event_push_enabled: body.event_push_enabled });
 }
 
 async function markCustomerNotificationsRead(request, env, user) {
@@ -4649,10 +6681,10 @@ async function markCustomerNotificationsRead(request, env, user) {
   const email = String(user.email || "").trim().toLowerCase();
   const id = String(body.id || "").trim();
   if (id) {
-    await env.DB.prepare("UPDATE customer_notifications SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE id = ? AND user_email = ?")
+    await env.DB.prepare("UPDATE customer_notifications SET read_at = CURRENT_TIMESTAMP WHERE id = ? AND user_email = ? AND read_at IS NULL")
       .bind(id, email).run();
   } else {
-    await env.DB.prepare("UPDATE customer_notifications SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE user_email = ?")
+    await env.DB.prepare("UPDATE customer_notifications SET read_at = CURRENT_TIMESTAMP WHERE user_email = ? AND read_at IS NULL")
       .bind(email).run();
   }
   return json({ ok: true });
@@ -4672,6 +6704,7 @@ async function registerCustomerPushToken(request, env, user) {
       platform = excluded.platform,
       active = 1,
       updated_at = CURRENT_TIMESTAMP
+    WHERE customer_push_tokens.user_email != excluded.user_email OR customer_push_tokens.platform != excluded.platform OR customer_push_tokens.active != 1
   `).bind(crypto.randomUUID(), email, token, platform).run();
   return json({ ok: true });
 }
@@ -4690,7 +6723,8 @@ async function removeCustomerPushToken(request, env, user) {
   return json({ ok: true });
 }
 
-async function sendExpoPushMessages(tokens, message) {
+async function sendExpoPushMessages(tokens, message, env = null) {
+  if (env?.DISABLE_OUTBOUND_PUSH === "true") return;
   const uniqueTokens = [...new Set(tokens.map(token => String(token || "").trim()).filter(Boolean))];
   for (let index = 0; index < uniqueTokens.length; index += 100) {
     const chunk = uniqueTokens.slice(index, index + 100);
@@ -4698,7 +6732,15 @@ async function sendExpoPushMessages(tokens, message) {
       await fetch("https://exp.host/--/api/v2/push/send", {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify(chunk.map(to => ({ to, sound: "default", title: message.title, body: message.body, data: message.data || {} })))
+        body: JSON.stringify(chunk.map(to => ({
+          to,
+          sound: "default",
+          title: message.title,
+          body: message.body,
+          priority: message.priority,
+          channelId: message.channelId,
+          data: message.data || {}
+        })))
       });
     } catch {
       // In-app notification history remains authoritative if a push provider
@@ -4707,7 +6749,51 @@ async function sendExpoPushMessages(tokens, message) {
   }
 }
 
-async function createCustomerNotification(env, { email, type, title, message, orderId = null, deepLink = "/orders", dedupeKey }) {
+// Each cron tick fans out a bounded set of live events to customers who explicitly opted in.
+async function sendDueEventAlerts(env) {
+  let events;
+  try {
+    ({ results: events } = await env.DB.prepare(`
+      SELECT id, headline, message, cta_href FROM events
+      WHERE status = 'published' AND notify_customers = 1
+        AND (starts_at IS NULL OR julianday(starts_at) <= julianday('now'))
+        AND (ends_at IS NULL OR julianday(ends_at) > julianday('now'))
+      ORDER BY COALESCE(starts_at, created_at) DESC LIMIT 4
+    `).all());
+  } catch (error) {
+    // The next cron tick will retry after a pending migration is applied.
+    console.error("Event alert lookup failed", error);
+    return;
+  }
+  for (const event of events || []) {
+    const dedupePrefix = `event:${event.id}:`;
+    const title = String(event.headline || "A Glamia moment is live").slice(0, 160);
+    const body = String(event.message || "Explore the latest edit.").slice(0, 1000);
+    const deepLink = String(event.cta_href || "/offers");
+    const batch = crypto.randomUUID();
+    // One indexed INSERT SELECT replaces a write per shopper and marks exactly this push batch.
+    const inserted = await env.DB.prepare(`
+      INSERT OR IGNORE INTO customer_notifications
+        (id, user_email, type, title, message, deep_link, dedupe_key, dispatch_batch)
+      SELECT lower(hex(randomblob(16))), p.user_email, 'event', ?, ?, ?, ? || p.user_email, ?
+      FROM customer_notification_preferences p
+      WHERE p.event_push_enabled = 1
+        AND EXISTS (SELECT 1 FROM customer_push_tokens t WHERE t.user_email = p.user_email AND t.active = 1)
+        AND NOT EXISTS (SELECT 1 FROM customer_notifications n WHERE n.dedupe_key = ? || p.user_email)
+      ORDER BY p.user_email LIMIT 100
+    `).bind(title, body, deepLink, dedupePrefix, batch, dedupePrefix).run();
+    if (!Number(inserted.meta?.changes || 0)) continue;
+    const { results: tokens } = await env.DB.prepare(`
+      SELECT t.token FROM customer_notifications n
+      JOIN customer_push_tokens t ON t.user_email = n.user_email AND t.active = 1
+      JOIN customer_notification_preferences p ON p.user_email = n.user_email AND p.event_push_enabled = 1
+      WHERE n.dispatch_batch = ?
+    `).bind(batch).all();
+    if (tokens?.length) await sendExpoPushMessages(tokens.map(row => row.token), { title, body, data: { type: "event", deep_link: deepLink } }, env);
+  }
+}
+
+async function createCustomerNotification(env, { email, type, title, message, orderId = null, deepLink = "/orders", dedupeKey, ctx = null }) {
   const customerEmail = String(email || "").trim().toLowerCase();
   if (!customerEmail || !title || !message || !dedupeKey) return false;
   const result = await env.DB.prepare(`
@@ -4721,15 +6807,99 @@ async function createCustomerNotification(env, { email, type, title, message, or
   if (!Number(result.meta?.changes || 0)) return false;
   const { results } = await env.DB.prepare("SELECT token FROM customer_push_tokens WHERE user_email = ? AND active = 1 ORDER BY updated_at DESC LIMIT 20")
     .bind(customerEmail).all();
-  if (results?.length) await sendExpoPushMessages(results.map(row => row.token), { title, body: message, data: { type, order_id: orderId, deep_link: deepLink } });
+  if (results?.length) {
+    const push = sendExpoPushMessages(results.map(row => row.token), { title, body: message, data: { type, order_id: orderId, deep_link: deepLink } }, env);
+    if (ctx?.waitUntil) ctx.waitUntil(push.catch(() => null));
+    else await push;
+  }
   return true;
 }
 
-function employeePublicProfile(employee) {
+async function notifyOrderPlaced(env, order, ctx = null) {
+  if (!order || String(order.status || "").toLowerCase() === "cancelled" || String(order.payment_status || "").toLowerCase() !== "paid") return;
+  let itemCount = 0;
+  try {
+    const items = JSON.parse(order.items_json || "[]");
+    itemCount = Array.isArray(items) ? items.length : 0;
+  } catch {
+    itemCount = 0;
+  }
+  await createAdminNotification(env, {
+    type: "new_order",
+    title: "New order received",
+    message: `${order.customer_name || order.customer_email} placed ${itemCount} item${itemCount === 1 ? "" : "s"} · ${order.order_number || order.id}`,
+    dedupeKey: `order:${order.id}`, ctx,
+    orderId: order.id
+  }).catch(() => null);
+  await createCustomerNotification(env, {
+    email: order.customer_email,
+    type: "order_placed",
+    title: "Order placed",
+    message: `We’ve received ${order.order_number || order.id}. We’ll keep you updated as it moves.`,
+    orderId: order.id,
+    dedupeKey: `customer-order:${order.id}:placed`, ctx
+  }).catch(() => null);
+}
+
+function normalizeEmployeePosition(value) {
+  const position = String(value || "packing_staff").trim().toLowerCase();
+  return EMPLOYEE_POSITION_IDS.has(position) ? position : "packing_staff";
+}
+
+function employeePermissionsObject(value, position = "packing_staff") {
+  let source = value;
+  if (typeof source === "string") {
+    try { source = JSON.parse(source); } catch { source = null; }
+  }
+  const defaults = new Set(EMPLOYEE_POSITION_DEFAULTS[normalizeEmployeePosition(position)] || EMPLOYEE_POSITION_DEFAULTS.packing_staff);
+  const object = source && typeof source === "object" && !Array.isArray(source) ? source : null;
+  return Object.fromEntries(EMPLOYEE_PERMISSION_OPTIONS.map(({ id }) => [id, object
+    ? Object.prototype.hasOwnProperty.call(object, id) && object[id] === true
+    : defaults.has(id)]));
+}
+
+function normalizeEmployeePermissions(value, position = "packing_staff") {
+  let source = value;
+  if (typeof source === "string") {
+    try { source = JSON.parse(source); } catch { source = null; }
+  }
+  if (Array.isArray(source)) source = Object.fromEntries(source.map((permission) => [permission, true]));
+  return employeePermissionsObject(source, position);
+}
+
+function employeeHasPermission(employee, permission) {
+  return employeePermissionsObject(employee?.permissions_json || employee?.permissions, employee?.position)[permission] === true;
+}
+
+function requireEmployeePermission(session, permission) {
+  if (!employeeHasPermission(session?.employee, permission)) throw httpError("This employee account does not have access to this area", 403);
+}
+
+function requireEmployeeAnyPermission(session, permissions) {
+  if (!permissions.some((permission) => employeeHasPermission(session?.employee, permission))) {
+    throw httpError("This employee account does not have access to this area", 403);
+  }
+}
+
+function employeeIsOwner(employee, env) {
+  return employee?.position === "admin" && Number(employee?.owner_approved) === 1 && adminEmails(env).includes(String(employee?.employee_email || "").trim().toLowerCase());
+}
+
+function employeePublicProfile(employee, env) {
+  const position = normalizeEmployeePosition(employee.position);
+  const owner = env ? employeeIsOwner(employee, env) : false;
   return {
     id: employee.id,
     employee_code: employee.employee_code,
     name: employee.name,
+    employee_email: employee.employee_email || "",
+    position,
+    is_owner: owner,
+    access_level: owner ? "owner" : position === "admin" ? "top_employee" : position,
+    created_by_email: employee.created_by_email || "",
+    created_by_employee_id: employee.created_by_employee_id || null,
+    creation_origin: employee.created_by_owner ? "owner" : employee.created_by_employee_id ? "employee" : "unknown",
+    permissions: { ...employeePermissionsObject(employee.permissions_json || employee.permissions, position), ...(owner ? { credits: true } : {}) },
     active: Boolean(employee.active)
   };
 }
@@ -4775,6 +6945,7 @@ async function employeeLogin(request, env) {
   const employeeCode = String(body.employee_id || body.employee_code || "").trim().toUpperCase();
   const password = String(body.password || "");
   if (!employeeCode || !password) return json({ error: "Enter your employee ID and password" }, 400);
+  if (employeeCode.length > 31 || password.length > 200) return json({ error: "Employee ID or password is incorrect" }, 401);
   const employee = await env.DB.prepare("SELECT * FROM employees WHERE employee_code = ? LIMIT 1").bind(employeeCode).first();
   if (!employee) return json({ error: "Employee ID or password is incorrect" }, 401);
   if (!Number(employee.active)) return json({ error: "This employee account is disabled. Contact an admin." }, 403);
@@ -4793,12 +6964,12 @@ async function employeeLogin(request, env) {
       base64UrlToBytes(passwordHash), base64UrlToBytes(String(employee.password_hash || ""))
     )).catch(() => false));
   if (!valid) {
-    const failures = Math.min(EMPLOYEE_LOGIN_MAX_FAILURES, Number(employee.failed_login_count || 0) + 1);
-    const lockedUntil = failures >= EMPLOYEE_LOGIN_MAX_FAILURES
-      ? new Date(Date.now() + EMPLOYEE_LOGIN_LOCK_MS).toISOString()
-      : null;
-    await env.DB.prepare("UPDATE employees SET failed_login_count = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(failures, lockedUntil, employee.id).run();
+    // Increment failed attempts atomically so concurrent guesses cannot overwrite each other.
+    await env.DB.prepare(`UPDATE employees SET
+      failed_login_count = MIN(?, CASE WHEN locked_until IS NOT NULL AND locked_until <= ? THEN 1 ELSE failed_login_count + 1 END),
+      locked_until = CASE WHEN (CASE WHEN locked_until IS NOT NULL AND locked_until <= ? THEN 1 ELSE failed_login_count + 1 END) >= ? THEN ? ELSE NULL END,
+      updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .bind(EMPLOYEE_LOGIN_MAX_FAILURES, new Date().toISOString(), new Date().toISOString(), EMPLOYEE_LOGIN_MAX_FAILURES, new Date(Date.now() + EMPLOYEE_LOGIN_LOCK_MS).toISOString(), employee.id).run();
     return json({ error: "Employee ID or password is incorrect" }, 401);
   }
 
@@ -4809,7 +6980,7 @@ async function employeeLogin(request, env) {
     env.DB.prepare("UPDATE employees SET failed_login_count = 0, locked_until = NULL, last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(employee.id),
     env.DB.prepare("INSERT INTO employee_sessions (token_hash, employee_id, expires_at) VALUES (?, ?, ?)").bind(tokenHash, employee.id, expiresAt)
   ]);
-  return json({ token, expires_at: expiresAt, employee: employeePublicProfile(employee) });
+  return json({ token, expires_at: expiresAt, employee: employeePublicProfile(employee, env) });
 }
 
 async function requireEmployee(request, env) {
@@ -4817,7 +6988,7 @@ async function requireEmployee(request, env) {
   if (!token || token.length > 300) throw httpError("Employee sign-in required", 401);
   const tokenHash = await digestBase64Url(token);
   const session = await env.DB.prepare(`
-    SELECT s.token_hash, s.expires_at, e.*
+    SELECT s.token_hash, s.expires_at, s.last_seen_at AS session_last_seen_at, e.*
     FROM employee_sessions s
     JOIN employees e ON e.id = s.employee_id
     WHERE s.token_hash = ? AND s.revoked_at IS NULL
@@ -4826,8 +6997,11 @@ async function requireEmployee(request, env) {
   if (!session || !Number(session.active) || !session.expires_at || Date.parse(session.expires_at) <= Date.now()) {
     throw httpError("Employee session expired. Sign in again.", 401);
   }
-  await env.DB.prepare("UPDATE employee_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?")
-    .bind(tokenHash).run().catch(() => {});
+  const lastSeenAt = Date.parse(session.session_last_seen_at || "");
+  if (!Number.isFinite(lastSeenAt) || Date.now() - lastSeenAt >= EMPLOYEE_SESSION_TOUCH_INTERVAL_MS) {
+    await env.DB.prepare("UPDATE employee_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND (last_seen_at IS NULL OR last_seen_at <= datetime('now', '-5 minutes'))")
+      .bind(tokenHash).run().catch(() => {});
+  }
   return { employee: session, tokenHash };
 }
 
@@ -4840,7 +7014,106 @@ async function employeeLogout(request, env) {
 
 async function getEmployeeSession(request, env) {
   const session = await requireEmployee(request, env);
-  return json({ employee: employeePublicProfile(session.employee), expires_at: session.employee.expires_at });
+  return json({ employee: employeePublicProfile(session.employee, env), expires_at: session.employee.expires_at });
+}
+
+async function registerEmployeePushToken(request, env, employee) {
+  const body = await readJson(request);
+  const token = String(body.token || "").trim();
+  const platform = String(body.platform || "unknown").trim().toLowerCase().slice(0, 20) || "unknown";
+  if (!token || token.length > 512) return json({ error: "A valid notification token is required" }, 400);
+  await env.DB.prepare(`
+    INSERT INTO employee_push_tokens (id, employee_id, token, platform, active, updated_at)
+    VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+    ON CONFLICT(token) DO UPDATE SET
+      employee_id = excluded.employee_id,
+      platform = excluded.platform,
+      active = 1,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE employee_push_tokens.employee_id != excluded.employee_id OR employee_push_tokens.platform != excluded.platform OR employee_push_tokens.active != 1
+  `).bind(crypto.randomUUID(), employee.id, token, platform).run();
+  return json({ ok: true });
+}
+
+async function removeEmployeePushToken(request, env, employee) {
+  const body = await readJson(request).catch(() => ({}));
+  const token = String(body.token || "").trim();
+  if (token) {
+    await env.DB.prepare("UPDATE employee_push_tokens SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE token = ? AND employee_id = ?")
+      .bind(token, employee.id).run();
+  } else {
+    await env.DB.prepare("UPDATE employee_push_tokens SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE employee_id = ?")
+      .bind(employee.id).run();
+  }
+  return json({ ok: true });
+}
+
+function employeeCatalogActor(employee) {
+  return {
+    email: String(employee?.employee_email || `${String(employee?.employee_code || "employee").toLowerCase()}@glamia.local`).trim().toLowerCase()
+  };
+}
+
+function employeeAdminActor(employee, env) {
+  return {
+    ...employeeCatalogActor(employee),
+    name: employee?.name || employee?.employee_code || "Glamia employee",
+    role: "admin",
+    employee_id: employee?.id || null,
+    employee_position: normalizeEmployeePosition(employee?.position),
+    is_owner: env ? employeeIsOwner(employee, env) : false,
+    employee_permissions: employeePermissionsObject(employee?.permissions_json || employee?.permissions, employee?.position)
+  };
+}
+
+async function employeeDashboard(env) {
+  const [orders, unpacked, products, lowStock, inventory] = await Promise.all([
+    env.DB.prepare("SELECT COUNT(*) AS count FROM orders WHERE status != 'cancelled'").first(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM orders WHERE status != 'cancelled' AND payment_status IN ('paid', 'not_required') AND packing_status = 'unpacked' AND ${replacementFulfilmentPredicate()}`).first(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM products").first(),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM products WHERE stock <= reorder_point").first(),
+    env.DB.prepare("SELECT COALESCE(SUM(stock), 0) AS units FROM products").first()
+  ]);
+  return json({ stats: {
+    orders: Number(orders?.count || 0),
+    unpacked_orders: Number(unpacked?.count || 0),
+    products: Number(products?.count || 0),
+    low_stock: Number(lowStock?.count || 0),
+    inventory_units: Number(inventory?.units || 0)
+  } });
+}
+
+async function listEmployeeProducts(env) {
+  return json({ products: await withSizeStock(env, await allProductRows(env)) });
+}
+
+async function createEmployeeProduct(request, env, employee, ctx) {
+  return createProduct(request, env, employeeCatalogActor(employee), ctx);
+}
+
+// Field-level authorization is shared by both mobile product update routes.
+function allowedEmployeeProductFields(employee) {
+  const allowed = new Set();
+  if (employeeHasPermission(employee, "products")) {
+    ["status", "featured", "preorder_enabled", "preorder_release_at", "preorder_limit", "name", "category", "brand", "price", "mrp", "color", "color_hex", "returnable", "material", "sizes", "description", "specifications", "what_in_box", "images", "thumbnail_urls", "thumbnail_keys", "thumbnail_source_url", "subcategory", "size_chart_url", "cost_price"].forEach((key) => allowed.add(key));
+  }
+  if (employeeHasPermission(employee, "inventory")) ["stock", "size_stock", "reorder_point", "variants"].forEach((key) => allowed.add(key));
+  if (employeeHasPermission(employee, "deals")) ["deal_starts_at", "deal_ends_at", "deal_price"].forEach((key) => allowed.add(key));
+  if (employeeHasPermission(employee, "tax")) ["hsn_sac_code", "hsn_sac_type", "gst_rate", "gst_tax_inclusive"].forEach((key) => allowed.add(key));
+  return allowed;
+}
+
+async function updateEmployeeProduct(request, env, id, employee, ctx) {
+  const body = await readJson(request);
+  const allowed = allowedEmployeeProductFields(employee);
+  const unexpected = Object.keys(body).filter((key) => !allowed.has(key));
+  if (unexpected.length) return json({ error: "This account cannot change those listing fields" }, 403);
+  const restrictedRequest = new Request(request.url, {
+    method: "PATCH",
+    headers: request.headers,
+    body: JSON.stringify(body)
+  });
+  return updateProduct(restrictedRequest, env, id, employeeCatalogActor(employee), ctx);
 }
 
 function formatEmployeeOrder(row) {
@@ -4856,9 +7129,10 @@ function formatEmployeeOrder(row) {
     customer_email: row.customer_email || "",
     total: row.total,
     payment_status: row.payment_status || "pending",
-    order_type: row.order_type || "standard",
+    // Packing-only staff see a regular job; customer/admin contracts retain identity.
+    order_type: row.order_type === 'replacement' ? 'standard' : (row.order_type || "standard"),
     status: row.status || "pending",
-    packing_status: row.packing_status || "unpacked",
+    packing_status: row.status === "cancelled" ? "not_required" : (row.packing_status || "unpacked"),
     packed_at: row.packed_at || null,
     packed_by: row.packed_by || null,
     created_at: row.created_at,
@@ -4888,14 +7162,14 @@ function formatEmployeeOrder(row) {
 
 const EMPLOYEE_ORDER_SELECT = `
   SELECT id, order_number, customer_name, customer_email, items_json, total,
-    payment_status, order_type, status, packing_status, packed_at, packed_by,
+    payment_status, order_type, replacement_fulfilment_mode, replacement_request_id, status, packing_status, packed_at, packed_by,
     shipping_json, created_at, updated_at
   FROM orders
 `;
 
 async function listEmployeeOrders(env, status, _employeeSession) {
   const normalizedStatus = ["unpacked", "packed", "all"].includes(status) ? status : "unpacked";
-  const conditions = ["status != 'cancelled'"];
+  const conditions = ["status != 'cancelled'", "payment_status IN ('paid', 'not_required')", replacementFulfilmentPredicate()];
   const bindings = [];
   if (normalizedStatus !== "all") {
     conditions.push("packing_status = ?");
@@ -4909,7 +7183,17 @@ async function listEmployeeOrders(env, status, _employeeSession) {
 async function getEmployeeOrder(env, id, _employeeSession) {
   const row = await env.DB.prepare(`${EMPLOYEE_ORDER_SELECT} WHERE id = ? OR order_number = ? LIMIT 1`).bind(id, id).first();
   if (!row || row.status === "cancelled") return json({ error: "Order not found" }, 404);
+  if (!["paid", "not_required"].includes(row.payment_status)) return json({ error: "Payment must be confirmed before packing this order" }, 409);
+  if (row.order_type==='replacement' && !await replacementReleased(env,row)) return json({error:"Replacement is held until the return is received"},409);
   return json({ order: formatEmployeeOrder(row) });
+}
+
+function replacementFulfilmentPredicate() {
+  return "(orders.order_type!='replacement' OR EXISTS(SELECT 1 FROM return_requests r WHERE r.id=orders.replacement_request_id AND ((orders.replacement_fulfilment_mode='immediate' AND r.status IN ('approved','received','completed')) OR (r.status IN ('received','completed') AND r.returned_at IS NOT NULL))))";
+}
+
+async function replacementReleased(env,order) {
+  return Boolean(await env.DB.prepare("SELECT id FROM return_requests WHERE id=? AND ((?='immediate' AND status IN ('approved','received','completed')) OR (status IN ('received','completed') AND returned_at IS NOT NULL))").bind(order.replacement_request_id,order.replacement_fulfilment_mode||'after_receipt').first());
 }
 
 async function writeEmployeeAuditLog(env, employeeId, action, orderId, details = {}) {
@@ -4925,15 +7209,18 @@ async function markEmployeeOrderPacked(env, id, employeeSession) {
   const current = await env.DB.prepare("SELECT * FROM orders WHERE id = ? OR order_number = ? LIMIT 1").bind(id, id).first();
   if (!current) return json({ error: "Order not found" }, 404);
   if (current.status === "cancelled") return json({ error: "Cancelled orders cannot be packed" }, 409);
+  if (current.order_type==='replacement' && !await replacementReleased(env,current)) return json({error:"Replacement is held until the return is received"},409);
+  if (!["paid", "not_required"].includes(current.payment_status)) return json({ error: "Payment must be confirmed before packing this order" }, 409);
   if (current.packing_status === "packed") return json({ order: formatEmployeeOrder(current), already_packed: true });
   const result = await env.DB.prepare(`
     UPDATE orders
     SET packing_status = 'packed', packed_at = CURRENT_TIMESTAMP, packed_by = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? AND status != 'cancelled' AND packing_status = 'unpacked'
+    WHERE id = ? AND status != 'cancelled' AND payment_status IN ('paid', 'not_required') AND packing_status = 'unpacked'
+      AND ${replacementFulfilmentPredicate()}
   `).bind(employeeSession.employee.id, current.id).run();
   if (!Number(result.meta?.changes || 0)) {
     const latest = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(current.id).first();
-    if (latest?.packing_status === "packed") return json({ order: formatEmployeeOrder(latest), already_packed: true });
+    if (latest?.packing_status === "packed" && latest.status !== "cancelled" && ["paid", "not_required"].includes(latest.payment_status)) return json({ order: formatEmployeeOrder(latest), already_packed: true });
     return json({ error: "Order could not be marked packed. Refresh and try again." }, 409);
   }
   const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(current.id).first();
@@ -4991,7 +7278,12 @@ function invoiceLineItems(order) {
 }
 
 async function orderInvoiceResponse(env, user, id, accessToken = "") {
-  const row = await env.DB.prepare("SELECT * FROM orders WHERE id = ? OR order_number = ? LIMIT 1").bind(id, id).first();
+  const row = await env.DB.prepare(`
+    SELECT * FROM orders
+    WHERE (id = ? OR order_number = ?)
+      AND NOT ${paymentIncompleteOrderPredicate("orders", true)}
+    LIMIT 1
+  `).bind(id, id).first();
   if (!row) return new Response("Order not found", { status: 404 });
   const isAdmin = user?.role === "admin";
   const tokenMatches = accessToken && String(row.tracking_token || "") === String(accessToken).trim();
@@ -5020,14 +7312,17 @@ async function orderInvoiceResponse(env, user, id, accessToken = "") {
     : classification === "inter_state"
       ? `<tr><td>IGST</td><td>${formatInr(igst)}</td></tr>`
       : `<tr><td>GST status</td><td>${tax ? formatInr(tax) : "Pending tax setup"}</td></tr>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ${escapeHtml(order.order_number)} · Glamia</title><style>body{margin:0;background:#f4f1eb;color:#242520;font:14px/1.5 Arial,sans-serif}.sheet{max-width:920px;margin:28px auto;padding:42px;background:#fff}@media(max-width:700px){.sheet{margin:0;padding:22px 16px}table{font-size:11px}}.top,.meta,.totals{display:flex;justify-content:space-between;gap:24px}.brand{letter-spacing:.28em;font-size:24px;margin:0 0 6px}.muted{color:#6e7069}.notice{border:1px solid #b56a4d;background:#fff6f0;padding:12px;margin:24px 0}.meta{border-top:1px solid #d8d4cb;border-bottom:1px solid #d8d4cb;padding:18px 0;margin:25px 0}.meta div{min-width:0}.meta strong,.meta span{display:block}.meta span{white-space:pre-wrap}.order-table{width:100%;border-collapse:collapse;margin:20px 0}.order-table th,.order-table td{padding:10px 7px;border-bottom:1px solid #e1ddd5;text-align:right;vertical-align:top}.order-table th:first-child,.order-table td:first-child{text-align:left}.order-table small{display:block;color:#6e7069}.totals{justify-content:flex-end}.totals table{min-width:290px;border-collapse:collapse}.totals td{padding:5px 0}.totals td:last-child{text-align:right}.grand{font-size:18px;border-top:1px solid #242520}.footer{margin-top:36px;padding-top:16px;border-top:1px solid #d8d4cb;color:#6e7069;font-size:12px}button{background:#242520;color:#fff;border:0;padding:10px 16px;cursor:pointer}@media print{body{background:#fff}.sheet{margin:0;max-width:none;padding:0}button{display:none}.notice{background:#fff}}</style></head><body><main class="sheet"><div class="top"><div><p class="brand">GLAMIA</p><span class="muted">Fashion, considered.</span></div><div style="text-align:right"><strong>${previewDocument ? "DEMO INVOICE PREVIEW" : "INVOICE PREVIEW"}</strong><br><span class="muted">${escapeHtml(order.order_number)}</span><br><button onclick="window.print()">Print / save PDF</button></div></div>${previewDocument ? `<div class="notice"><strong>Demo tax document — not a production tax invoice.</strong><br>Confirm GST classification, place of supply, invoice numbering, and tax treatment with your CA before enabling live payments.</div>` : ""}<div class="meta"><div><strong>Bill to</strong><span>${escapeHtml(order.customer_name || "Customer")}</span><span>${escapeHtml(order.customer_email || "")}</span><span>${escapeHtml(buyerAddress || "Address not supplied")}</span></div><div><strong>Order date</strong><span>${escapeHtml(formatOrderDate(order.created_at))}</span><strong style="margin-top:10px">Payment</strong><span>${escapeHtml(formatPaymentMethod(order.payment_method))} · ${escapeHtml(order.payment_status || "pending")}</span></div><div><strong>Seller</strong><span>Glamia</span><span>${escapeHtml(taxSettings?.business_state || "Business state not configured")}</span><span>${taxSettings?.gstin ? `GSTIN: ${escapeHtml(taxSettings.gstin)}` : "GSTIN not configured"}</span></div></div><table class="order-table"><thead><tr><th>Item</th><th>Qty</th><th>HSN/SAC</th><th>GST</th><th>Taxable</th><th>Tax</th><th>Amount</th></tr></thead><tbody>${lineMarkup || `<tr><td colspan="7">No line items</td></tr>`}</tbody></table><div class="totals"><table><tr><td>Subtotal</td><td>${formatInr(order.subtotal)}</td></tr><tr><td>Discount</td><td>−${formatInr(order.discount)}</td></tr><tr><td>Taxable value</td><td>${formatInr(taxable)}</td></tr>${taxSummary}<tr class="grand"><td><strong>Total</strong></td><td><strong>${formatInr(order.total)}</strong></td></tr></table></div><p class="footer">Place of supply: ${escapeHtml(shipping.state || "Not supplied")} · Classification: ${escapeHtml(classification.replace("_", " "))}. This preview reflects the tax codes and rates saved on the order at checkout.</p></main></body></html>`;
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invoice ${escapeHtml(order.order_number)} · Glamia</title><style>body{margin:0;background:#f4f1eb;color:#242520;font:14px/1.5 Arial,sans-serif}.sheet{max-width:920px;margin:28px auto;padding:42px;background:#fff}@media(max-width:700px){.sheet{margin:0;padding:22px 16px}table{font-size:11px}}.top,.meta,.totals{display:flex;justify-content:space-between;gap:24px}.brand{letter-spacing:.28em;font-size:24px;margin:0 0 6px}.muted{color:#6e7069}.notice{border:1px solid #b56a4d;background:#fff6f0;padding:12px;margin:24px 0}.meta{border-top:1px solid #d8d4cb;border-bottom:1px solid #d8d4cb;padding:18px 0;margin:25px 0}.meta div{min-width:0}.meta strong,.meta span{display:block}.meta span{white-space:pre-wrap}.order-table{width:100%;border-collapse:collapse;margin:20px 0}.order-table th,.order-table td{padding:10px 7px;border-bottom:1px solid #e1ddd5;text-align:right;vertical-align:top}.order-table th:first-child,.order-table td:first-child{text-align:left}.order-table small{display:block;color:#6e7069}.totals{justify-content:flex-end}.totals table{min-width:290px;border-collapse:collapse}.totals td{padding:5px 0}.totals td:last-child{text-align:right}.grand{font-size:18px;border-top:1px solid #242520}.footer{margin-top:36px;padding-top:16px;border-top:1px solid #d8d4cb;color:#6e7069;font-size:12px}button{background:#242520;color:#fff;border:0;padding:10px 16px;cursor:pointer}@media print{body{background:#fff}.sheet{margin:0;max-width:none;padding:0}button{display:none}.notice{background:#fff}}</style></head><body><main class="sheet"><div class="top"><div><p class="brand">GLAMIA</p><span class="muted">Fashion, considered.</span></div><div style="text-align:right"><strong>${previewDocument ? "DEMO INVOICE PREVIEW" : "INVOICE PREVIEW"}</strong><br><span class="muted">${escapeHtml(order.order_number)}</span><br><button onclick="window.print()">Print / save PDF</button></div></div>${previewDocument ? `<div class="notice"><strong>Demo tax document — not a production tax invoice.</strong><br>Confirm GST classification, place of supply, invoice numbering, and tax treatment with your CA before enabling live payments.</div>` : ""}<div class="meta"><div><strong>Bill to</strong><span>${escapeHtml(order.customer_name || "Customer")}</span><span>${escapeHtml(order.customer_email || "")}</span><span>${escapeHtml(buyerAddress || "Address not supplied")}</span></div><div><strong>Order date</strong><span>${escapeHtml(formatOrderDate(order.created_at))}</span><strong style="margin-top:10px">Payment</strong><span>${escapeHtml(formatPaymentMethod(order.payment_method))} · ${escapeHtml(order.payment_status || "pending")}</span></div><div><strong>Seller</strong><span>Glamia</span><span>${escapeHtml(taxSettings?.business_state || "Business state not configured")}</span><span>${taxSettings?.gstin ? `GSTIN: ${escapeHtml(taxSettings.gstin)}` : "GSTIN not configured"}</span></div></div><table class="order-table"><thead><tr><th>Item</th><th>Qty</th><th>HSN/SAC</th><th>GST</th><th>Taxable</th><th>Tax</th><th>Amount</th></tr></thead><tbody>${lineMarkup || `<tr><td colspan="7">No line items</td></tr>`}</tbody></table><div class="totals"><table><tr><td>Subtotal</td><td>${formatInr(order.subtotal)}</td></tr><tr><td>Discount</td><td>−${formatInr(order.discount)}</td></tr><tr><td>Taxable value</td><td>${formatInr(taxable)}</td></tr>${taxSummary}<tr class="grand"><td><strong>Total</strong></td><td><strong>${formatInr(order.total)}</strong></td></tr>${order.credits_used ? `<tr><td>Store credits used</td><td>−${formatInr(order.credits_used)}</td></tr><tr><td>Paid by ${escapeHtml(formatPaymentMethod(order.payment_method))}</td><td>${formatInr(order.payable_total)}</td></tr>` : ""}</table></div><p class="footer">Place of supply: ${escapeHtml(shipping.state || "Not supplied")} · Classification: ${escapeHtml(classification.replace("_", " "))}. This preview reflects the tax codes and rates saved on the order at checkout.</p></main></body></html>`;
   const invoiceDocument = html
     .replace(/<style>[\s\S]*?<\/style>/, '<link rel="stylesheet" href="/invoice.css">')
     .replace('<div style="text-align:right"><strong>', '<div class="invoice-top-actions"><span class="invoice-document-label">')
     .replace('</strong><br><span class="muted">', '</span><span class="invoice-number">')
     .replace('</span><br><button onclick="window.print()">', '</span><button onclick="window.print()">')
     .replace('<strong style="margin-top:10px">', '<strong>')
-    .replace('<td>Taxable value</td>', `<td>${taxableLabel}</td>`);
+    .replace('<td>Taxable value</td>', `<td>${taxableLabel}</td>`)
+    .replace('<p class="brand">GLAMIA</p>', '<div class="brand" aria-label="Glamia"><img src="/glamia-g-favicon.png" alt="Glamia logo" width="48" height="48"><span aria-hidden="true">LAMIA</span></div>')
+    .replace('<button onclick="window.print()">', '<button type="button" id="invoice-print">')
+    .replace('</body>', '<script src="/invoice.js" defer></script></body>');
   return new Response(invoiceDocument, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -5038,6 +7333,20 @@ async function orderInvoiceResponse(env, user, id, accessToken = "") {
   });
 }
 
+async function orderBillResponse(env, user, id, accessToken = "") {
+  const record = await env.DB.prepare(`SELECT b.*, o.customer_email, o.tracking_token FROM order_bills b
+    JOIN orders o ON o.id = b.order_id WHERE o.id = ? OR o.order_number = ? LIMIT 1`).bind(id, id).first();
+  if (!record || !canReadOrderBill(record, user, accessToken)) return new Response("Bill not found", { status: 404 });
+  const order = formatOrder(JSON.parse(record.snapshot_json));
+  const [fontBytes, logoBytes] = await Promise.all([billFontBytes(env), billLogoBytes(env)]);
+  const bytes = await createOrderBillPdf({ order, seller: JSON.parse(record.seller_json), issuedAt: record.issued_at,
+    fontBytes, logoBytes, lines: invoiceLineItems(order) });
+  return new Response(bytes, { headers: {
+    "Content-Type": "application/pdf", "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+    "Content-Disposition": `attachment; filename="Glamia-bill-${record.bill_number.replace(/[^A-Za-z0-9_-]/g, "-")}.pdf"`
+  } });
+}
+
 async function trackPublicOrder(env, rawOrderId, rawEmail) {
   const orderId = String(rawOrderId || "").trim();
   const email = String(rawEmail || "").trim().toLowerCase();
@@ -5045,15 +7354,17 @@ async function trackPublicOrder(env, rawOrderId, rawEmail) {
   if (email.length > 254) return json({ error: "Enter a valid email address" }, 400);
   const row = await env.DB.prepare(`
     SELECT id, order_number, items_json, status, payment_method, tracking_number,
-      order_type, created_at, updated_at
+      order_type, payment_status, total, payable_total, credits_used, payment_gateway, created_at, updated_at
     FROM orders
-    WHERE tracking_token = ?
-      OR ((order_number = ? OR id = ?) AND customer_email = ?)
+    WHERE (tracking_token = ?
+      OR ((order_number = ? OR id = ?) AND customer_email = ?))
+      AND NOT ${paymentIncompleteOrderPredicate("orders", true)}
     LIMIT 1
   `).bind(orderId, orderId, orderId, email).first();
   if (!row) return json({ error: "We could not find an order with that ID" }, 404);
   let rawItems = [];
   try { rawItems = JSON.parse(row.items_json || "[]"); } catch { rawItems = []; }
+  const [safeOrder]=await attachCancellationRefunds(env,[row]);
   return json({ order: {
     order_number: row.order_number || fallbackOrderNumber(row),
     status: row.status || "pending",
@@ -5062,6 +7373,7 @@ async function trackPublicOrder(env, rawOrderId, rawEmail) {
     order_type: row.order_type || "standard",
     created_at: row.created_at,
     updated_at: row.updated_at,
+    cancellation_refund: safeOrder.cancellation_refund || null,
     items: Array.isArray(rawItems) ? rawItems.map((item) => ({
       name: item.name || item.product_name || item.title || item.id || "Product",
       size: item.size || "",
@@ -5095,11 +7407,12 @@ function normalizeOrderItems(rawItems) {
   return [...merged.values()];
 }
 
-async function loadLiveProductsById(env, requested) {
+async function loadLiveProductsById(env, requested, storefront = "glamia") {
   const ids = [...new Set(requested.map(item => String(item.id || "").trim()).filter(Boolean))];
   if (!ids.length) return new Map();
   const placeholders = ids.map(() => "?").join(",");
-  const { results } = await env.DB.prepare(`SELECT * FROM products WHERE status = 'live' AND id IN (${placeholders})`)
+  const visibility = storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
+  const { results } = await env.DB.prepare(`SELECT * FROM products WHERE status = 'live' AND COALESCE(storefront_visibility, 'glamia') IN ${visibility} AND id IN (${placeholders})`)
     .bind(...ids).all();
   return new Map(results.map(row => [row.id, row]));
 }
@@ -5151,9 +7464,10 @@ function safeEqualText(left, right) {
 }
 
 function paymentSiteOrigin(request, env) {
+  const url = new URL(request.url);
+  if (url.hostname === WIBRAWL_HOSTNAME) return WIBRAWL_ORIGIN;
   const configured = String(env.PUBLIC_SITE_URL || "").trim().replace(/\/$/, "");
   if (/^https:\/\//i.test(configured)) return configured;
-  const url = new URL(request.url);
   return PRODUCTION_HOSTNAMES.has(url.hostname) ? CANONICAL_ORIGIN : url.origin;
 }
 
@@ -5173,6 +7487,7 @@ async function razorpayRequest(env, path, init = {}) {
   const auth = btoa(`${keyId}:${keySecret}`);
   return fetch(`${RAZORPAY_API_BASE}${path}`, {
     ...init,
+    signal: init.signal || AbortSignal.timeout(10000),
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
@@ -5193,6 +7508,7 @@ async function phonePeAccessToken(env) {
   if (!clientId || !clientSecret || !clientVersion) throw httpError("PhonePe is not configured on this deployment", 503);
   const tokenResponse = await fetch(environment === "production" ? PHONEPE_PRODUCTION_TOKEN_URL : PHONEPE_SANDBOX_TOKEN_URL, {
     method: "POST",
+    signal: AbortSignal.timeout(10000),
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body: new URLSearchParams({ client_id: clientId, client_version: clientVersion, client_secret: clientSecret, grant_type: "client_credentials" })
   });
@@ -5212,6 +7528,7 @@ async function phonePeRequest(env, path, init = {}) {
   const token = await phonePeAccessToken(env);
   return fetch(`${base}${path}`, {
     ...init,
+    signal: init.signal || AbortSignal.timeout(10000),
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
@@ -5222,55 +7539,69 @@ async function phonePeRequest(env, path, init = {}) {
 }
 
 async function failGatewayOrder(env, orderId, reference = "") {
-  const now = new Date().toISOString();
-  await env.DB.batch([
-    env.DB.prepare(`
-      INSERT OR IGNORE INTO order_stock_releases (order_id)
-      SELECT id FROM orders WHERE id = ? AND status != 'cancelled'
-    `).bind(orderId),
-    env.DB.prepare(`
-      UPDATE orders
-      SET status = 'cancelled', payment_status = 'failed', payment_reference = ?,
-        payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND payment_status != 'paid'
-    `).bind(reference || null, now, orderId)
-  ]);
+  const changed = await applyGatewayState(env.DB, orderId, { status: "failed", reference });
   invalidateProductEnrichment();
+  if (!changed) return;
+  const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(orderId).first();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM customer_notifications WHERE order_id = ? AND type = 'order_placed'").bind(orderId),
+    env.DB.prepare("DELETE FROM admin_notifications WHERE order_id = ? AND type = 'new_order'").bind(orderId)
+  ]);
+  await createAdminNotification(env, {
+    type: "cancelled_order",
+    priority: "normal",
+    title: "Payment incomplete — order cancelled",
+    message: `${updated.customer_name || updated.customer_email} · ${updated.order_number || updated.id}`,
+    dedupeKey: `cancelled-payment:${orderId}`,
+    orderId
+  }).catch(() => null);
+  await createCustomerNotification(env, {
+    email: updated.customer_email,
+    type: "order_payment_cancelled",
+    title: "Payment not completed",
+    message: `${updated.order_number || updated.id} was cancelled because the payment was not completed.`,
+    orderId,
+    dedupeKey: `customer-order:${orderId}:payment-cancelled`
+  }).catch(() => null);
 }
 
-async function settleGatewayPayment(env, row, { status, paymentId = "", amount = null, reference = "" } = {}) {
+async function settleGatewayPayment(env, row, { status, paymentId = "", amount = null, reference = "", ctx = null } = {}) {
   if (!row) return null;
-  const expectedAmount = Math.round(Number(row.total || 0) * 100);
-  if (amount !== null && Number(amount) !== expectedAmount) {
+  const expectedAmount = Math.round(Number(row.payable_total ?? row.total ?? 0) * 100);
+  if ((["paid", "authorized"].includes(status) && amount == null)
+    || (amount != null && (!Number.isSafeInteger(Number(amount)) || Number(amount) !== expectedAmount))) {
     console.error("payment_amount_mismatch", { order_id: row.id, expected: expectedAmount, received: amount });
-    return null;
+    throw httpError("Payment amount did not match this order. Please contact support for reconciliation.", 422);
   }
   const currentStatus = String(row.payment_status || "pending").trim().toLowerCase();
   if (status === "paid") {
-    if (row.status === "cancelled" || currentStatus === "refunded") return formatOrder(row);
-    if (currentStatus === "paid") return formatOrder(row);
-    await env.DB.prepare(`
-      UPDATE orders
-      SET status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END,
-        payment_status = 'paid', payment_reference = ?, gateway_payment_id = ?,
-        payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND status != 'cancelled'
-    `).bind(paymentId || reference || null, paymentId || null, new Date().toISOString(), row.id).run();
+    if (row.status === "cancelled") { await notifyLateGatewayPayment(env, row, paymentId, true); const latest=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(row.id).first();return (await attachCancellationRefunds(env,[formatOrder(latest)]))[0]; }
+    if (currentStatus === "refunded") return formatOrder(row);
+    if (currentStatus === "paid") {
+      await notifyOrderPlaced(env, row, ctx);
+      // Retry the durable side-effect, not the capture, if an earlier request
+      // stopped after committing payment but before queuing its confirmation.
+      if (!row.confirmation_email_sent_at) {
+        const sent = await sendOrderEmail(env, row, "confirmation", { ctx });
+        if (sent) await env.DB.prepare("UPDATE orders SET confirmation_email_sent_at = CURRENT_TIMESTAMP WHERE id = ?").bind(row.id).run();
+      }
+      return formatPaymentOrder(env, row);
+    }
+    const changed = await applyGatewayState(env.DB, row.id, { status, paymentId, reference });
     const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(row.id).first();
+    if (updated?.status === "cancelled") await notifyLateGatewayPayment(env, updated, paymentId, true);
+    if (!changed || updated?.payment_status !== "paid" || updated.status === "cancelled") return updated ? formatPaymentOrder(env, updated) : null;
+    await qualifyCreditReferral(env, updated);
+    await notifyOrderPlaced(env, updated, ctx);
     if (updated && !updated.confirmation_email_sent_at) {
-      const sent = await sendOrderEmail(env, updated, "confirmation");
+      const sent = await sendOrderEmail(env, updated, "confirmation", { ctx });
       if (sent) await env.DB.prepare("UPDATE orders SET confirmation_email_sent_at = CURRENT_TIMESTAMP WHERE id = ?").bind(row.id).run();
     }
-    return formatOrder(updated);
+    return formatPaymentOrder(env, updated);
   }
   if (status === "authorized") {
     if (currentStatus === "paid" || row.status === "cancelled") return formatOrder(row);
-    await env.DB.prepare(`
-      UPDATE orders
-      SET payment_status = 'authorized', payment_reference = ?, gateway_payment_id = ?,
-        payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).bind(paymentId || reference || null, paymentId || null, new Date().toISOString(), row.id).run();
+    await applyGatewayState(env.DB, row.id, { status, paymentId, reference });
     const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(row.id).first();
     return formatOrder(updated);
   }
@@ -5286,12 +7617,12 @@ async function paymentOrderForRequest(request, env, user, orderId, checkoutToken
   const normalizedId = String(orderId || "").trim();
   if (!normalizedId || normalizedId.length > 100) return null;
   if (user?.email) {
-    return env.DB.prepare("SELECT * FROM orders WHERE id = ? AND customer_email = ? LIMIT 1")
+    return env.DB.prepare("SELECT * FROM orders WHERE id = ? AND customer_email = ? AND status != 'cancelled' LIMIT 1")
       .bind(normalizedId, String(user.email).trim().toLowerCase()).first();
   }
   const token = String(checkoutToken || "").trim();
   if (!token) return null;
-  return env.DB.prepare("SELECT * FROM orders WHERE id = ? AND checkout_token = ? LIMIT 1")
+  return env.DB.prepare("SELECT * FROM orders WHERE id = ? AND checkout_token = ? AND status != 'cancelled' LIMIT 1")
     .bind(normalizedId, token).first();
 }
 
@@ -5299,7 +7630,7 @@ async function createRazorpayPayment(request, env, row) {
   const response = await razorpayRequest(env, "/orders", {
     method: "POST",
     body: JSON.stringify({
-      amount: Math.round(Number(row.total || 0) * 100),
+      amount: Math.round(Number(row.payable_total ?? row.total ?? 0) * 100),
       currency: "INR",
       receipt: String(row.order_number || row.id).slice(0, 40),
       notes: { glamia_order_id: row.id }
@@ -5307,12 +7638,15 @@ async function createRazorpayPayment(request, env, row) {
   });
   if (!response.ok) throw await providerError(response, "Razorpay");
   const paymentOrder = await response.json();
-  if (!paymentOrder?.id) throw httpError("Razorpay returned an invalid order", 502);
+  if (!paymentOrder?.id || paymentOrder.currency !== "INR"
+    || Number(paymentOrder.amount) !== Math.round(Number(row.payable_total ?? row.total) * 100)) {
+    throw httpError("Razorpay returned an invalid order", 502);
+  }
   await env.DB.prepare(`
     UPDATE orders
-    SET gateway_order_id = ?, payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).bind(paymentOrder.id, new Date().toISOString(), row.id).run();
+    SET gateway_order_id = ?, payment_creation_state = 'ready', payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND payment_creation_claim = ? AND (gateway_order_id IS NULL OR gateway_order_id = ?)
+  `).bind(paymentOrder.id, new Date().toISOString(), row.id, row.payment_creation_claim, paymentOrder.id).run();
   return {
     provider: "razorpay",
     key_id: String(env.RAZORPAY_KEY_ID),
@@ -5325,12 +7659,16 @@ async function createRazorpayPayment(request, env, row) {
 
 async function createPhonePePayment(request, env, row) {
   const merchantOrderId = `PP-${String(row.id).replace(/-/g, "").slice(0, 55)}`;
+  // Persist our deterministic merchant reference before contacting PhonePe so
+  // even a timeout/cancellation can be mapped by its authenticated callback.
+  await env.DB.prepare("UPDATE orders SET gateway_order_id = ? WHERE id = ? AND payment_creation_claim = ? AND gateway_order_id IS NULL")
+    .bind(merchantOrderId, row.id, row.payment_creation_claim).run();
   const redirectUrl = `${paymentSiteOrigin(request, env)}/checkout?phonepe_return=${encodeURIComponent(row.id)}&checkout_token=${encodeURIComponent(row.checkout_token || "")}`;
   const response = await phonePeRequest(env, "/checkout/v2/pay", {
     method: "POST",
     body: JSON.stringify({
       merchantOrderId,
-      amount: Math.round(Number(row.total || 0) * 100),
+      amount: Math.round(Number(row.payable_total ?? row.total ?? 0) * 100),
       expireAfter: 1800,
       paymentFlow: { type: "PG_CHECKOUT", merchantUrls: { redirectUrl } },
       metaInfo: { udf1: row.id, udf2: row.order_number || "" }
@@ -5339,13 +7677,15 @@ async function createPhonePePayment(request, env, row) {
   if (!response.ok) throw await providerError(response, "PhonePe");
   const paymentOrder = await response.json();
   const checkoutUrl = String(paymentOrder?.redirectUrl || "").trim();
-  if (!checkoutUrl) throw httpError("PhonePe did not return a checkout URL", 502);
+  if (!paymentOrder?.orderId || !/^https:\/\//i.test(checkoutUrl)) throw httpError("PhonePe did not return a valid checkout session", 502);
+  await env.DB.prepare("INSERT OR IGNORE INTO payment_reconciliation_events(id,provider,provider_order_id,internal_order_id,event_type,amount_paise,currency) VALUES (?,'phonepe',?,?,'session_created',?,'INR')")
+    .bind(`phonepe-session:${row.id}`, String(paymentOrder.orderId), row.id, Math.round(Number(row.payable_total ?? row.total) * 100)).run();
   await env.DB.prepare(`
     UPDATE orders
-    SET gateway_order_id = ?, gateway_payment_id = ?, gateway_checkout_url = ?,
+    SET gateway_order_id = ?, gateway_checkout_url = ?, payment_creation_state = 'ready',
       payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).bind(merchantOrderId, paymentOrder.orderId || null, checkoutUrl, new Date().toISOString(), row.id).run();
+    WHERE id = ? AND payment_creation_claim = ? AND gateway_order_id = ?
+  `).bind(merchantOrderId, checkoutUrl, new Date().toISOString(), row.id, row.payment_creation_claim, merchantOrderId).run();
   return {
     provider: "phonepe",
     merchant_order_id: merchantOrderId,
@@ -5356,35 +7696,63 @@ async function createPhonePePayment(request, env, row) {
 
 async function createGatewayPayment(request, env, user) {
   const body = await readJson(request);
+  if (!/^[A-Za-z0-9_-]{16,120}$/.test(String(body.checkout_token || "").trim())) {
+    throw httpError("A checkout session token is required. Refresh checkout and try again.", 400);
+  }
   const provider = String(body.payment_method || "").trim().toLowerCase();
-  if (!["razorpay", "phonepe"].includes(provider)) throw httpError("Choose Razorpay or PhonePe", 400);
+  if (!["razorpay", "phonepe", "store_credit"].includes(provider)) throw httpError("Choose a valid payment method", 400);
   const localResponse = await createOrder(null, env, user, { allowGateway: true, body });
   const localData = await localResponse.json().catch(() => ({}));
   if (!localResponse.ok) return json(localData, localResponse.status);
   const order = localData.order;
   const row = await env.DB.prepare("SELECT * FROM orders WHERE id = ? LIMIT 1").bind(order?.id).first();
-  if (!row || row.payment_gateway !== provider) throw httpError("The payment order could not be prepared", 500);
+  if (!row) throw httpError("The payment order could not be prepared", 500);
+  if (Number(row.payable_total ?? row.total) === 0) {
+    await notifyOrderPlaced(env, row);
+    const sent = await sendOrderEmail(env, row, "confirmation");
+    if (sent) await env.DB.prepare("UPDATE orders SET confirmation_email_sent_at = CURRENT_TIMESTAMP WHERE id = ?").bind(row.id).run();
+    return json({ order: await formatPaymentOrder(env, row), payment_status: "paid" }, localData.idempotent ? 200 : 201);
+  }
+  if (row.payment_gateway !== provider) throw httpError("The payment order could not be prepared", 409);
+  if (row.payment_status === "paid") return json({ order: await formatPaymentOrder(env, row), payment_status: "paid" });
+  if (row.status === "cancelled" || !["pending", "authorized"].includes(row.payment_status)) {
+    throw httpError("This payment attempt is closed. Start a new checkout attempt.", 409);
+  }
+  if (["creating", "uncertain"].includes(row.payment_creation_state)) {
+    throw httpError("Payment preparation is in progress or awaiting reconciliation. Do not start another payment; check this order with support.", 409);
+  }
 
   if (provider === "razorpay" && row.gateway_order_id) {
-    return json({ order: formatOrder(row), payment: { provider, key_id: String(env.RAZORPAY_KEY_ID), order_id: row.gateway_order_id, amount: Math.round(Number(row.total || 0) * 100), currency: "INR", checkout_script: RAZORPAY_CHECKOUT_SCRIPT } });
+    return json({ order: formatOrder(row), payment: { provider, key_id: String(env.RAZORPAY_KEY_ID), order_id: row.gateway_order_id, amount: Math.round(Number(row.payable_total ?? row.total ?? 0) * 100), currency: "INR", checkout_script: RAZORPAY_CHECKOUT_SCRIPT } });
   }
   if (provider === "phonepe" && row.gateway_checkout_url) {
     return json({ order: formatOrder(row), payment: { provider, merchant_order_id: row.gateway_order_id, checkout_url: row.gateway_checkout_url } });
   }
 
+  const claim = await claimPaymentCreation(env.DB, row.id, provider);
+  if (!claim) throw httpError("Payment preparation is already in progress. Check this order again shortly.", 409);
+  row.payment_creation_claim = claim;
   try {
     const payment = provider === "razorpay"
       ? await createRazorpayPayment(request, env, row)
       : await createPhonePePayment(request, env, row);
     const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(row.id).first();
+    if (updated.status === "cancelled") throw httpError("This order was cancelled during payment preparation. Contact support; do not pay.", 409);
+    if (updated.payment_status === "paid") return json({ order: await formatPaymentOrder(env, updated), payment_status: "paid" });
     return json({ order: formatOrder(updated), payment }, localData.idempotent ? 200 : 201);
   } catch (error) {
-    await failGatewayOrder(env, row.id).catch(() => null);
+    // A failed response does not prove the provider rejected its POST. Retain
+    // the claim and reservation; only verified reconciliation may release it.
+    await env.DB.prepare("UPDATE orders SET payment_creation_state = 'uncertain' WHERE id = ? AND payment_creation_claim = ? AND payment_creation_state = 'creating'")
+      .bind(row.id, claim).run();
+    await createAdminNotification(env, { type: "cancelled_order", priority: "urgent", title: "Payment session needs reconciliation",
+      message: `${row.order_number || row.id}: ${provider} session creation could not be safely confirmed. Check the provider before cancelling or retrying.`,
+      dedupeKey: `payment-creation:${row.id}`, orderId: row.id });
     throw error;
   }
 }
 
-async function verifyRazorpayPayment(request, env, user) {
+async function verifyRazorpayPayment(request, env, user, ctx = null) {
   const body = await readJson(request);
   const order = await paymentOrderForRequest(request, env, user, body.order_id, body.checkout_token);
   if (!order || order.payment_gateway !== "razorpay") return json({ error: "Payment order not found" }, 404);
@@ -5399,53 +7767,74 @@ async function verifyRazorpayPayment(request, env, user) {
   const response = await razorpayRequest(env, `/payments/${encodeURIComponent(paymentId)}`, { method: "GET" });
   if (!response.ok) return json({ error: "Razorpay payment status could not be checked. Your payment will be reconciled automatically." }, 502);
   const payment = await response.json().catch(() => ({}));
-  if (String(payment.order_id || "") !== String(order.gateway_order_id || "") || String(payment.currency || "INR") !== "INR") {
+  if (String(payment.id || "") !== paymentId || String(payment.order_id || "") !== String(order.gateway_order_id || "") || payment.currency !== "INR") {
     return json({ error: "Razorpay payment details did not match this order" }, 400);
   }
   const amount = Number(payment.amount);
   const paymentStatus = String(payment.status || "").toLowerCase();
   const nextStatus = paymentStatus === "captured" ? "paid" : paymentStatus === "authorized" ? "authorized" : paymentStatus === "failed" ? "failed" : "pending";
-  const updated = await settleGatewayPayment(env, order, { status: nextStatus, paymentId, amount });
+  const updated = await settleGatewayPayment(env, order, { status: nextStatus, paymentId, amount, ctx });
   if (nextStatus === "pending") return json({ order: updated, payment_status: "pending" }, 202);
-  return json({ order: updated, payment_status: nextStatus });
+  return json({ order: updated, payment_status: updated?.payment_status || "pending" });
 }
 
-async function getPhonePePaymentStatus(request, env, user, url) {
+async function getPhonePePaymentStatus(request, env, user, url, ctx = null) {
   const orderId = url.searchParams.get("order_id") || url.searchParams.get("local_order_id");
   const checkoutToken = url.searchParams.get("checkout_token") || "";
   const order = await paymentOrderForRequest(request, env, user, orderId, checkoutToken);
   if (!order || order.payment_gateway !== "phonepe") return json({ error: "Payment order not found" }, 404);
-  if (String(order.payment_status || "").toLowerCase() === "paid") return json({ order: formatOrder(order), payment_status: "paid" });
+  if (String(order.payment_status || "").toLowerCase() === "paid") return json({ order: await formatPaymentOrder(env, order), payment_status: "paid" });
   const merchantOrderId = String(order.gateway_order_id || "").trim();
   if (!merchantOrderId) return json({ error: "PhonePe payment session is not ready" }, 409);
   const response = await phonePeRequest(env, `/checkout/v2/order/${encodeURIComponent(merchantOrderId)}/status?details=false&errorContext=true`, { method: "GET" });
   if (!response.ok) return json({ error: "PhonePe payment status could not be checked. Please try again." }, 502);
   const status = await response.json().catch(() => ({}));
+  if (status.merchantOrderId && status.merchantOrderId !== merchantOrderId) throw httpError("PhonePe order mapping did not match", 422);
+  await verifyPhonePeSessionIdentity(env, order.id, status);
   const state = String(status.state || "PENDING").toUpperCase();
   const paymentDetail = Array.isArray(status.paymentDetails) ? status.paymentDetails.at(-1) : null;
-  const paymentId = String(paymentDetail?.transactionId || order.gateway_payment_id || "").trim();
+  const paymentId = String(paymentDetail?.transactionId || "").trim();
   const nextStatus = state === "COMPLETED" ? "paid" : state === "FAILED" ? "failed" : "pending";
-  const updated = await settleGatewayPayment(env, order, { status: nextStatus, paymentId, amount: status.amount == null ? null : Number(status.amount) });
+  if (nextStatus === "paid" && !paymentId) throw httpError("PhonePe payment reference is missing; reconcile this payment before fulfilment", 422);
+  const updated = await settleGatewayPayment(env, order, { status: nextStatus, paymentId, amount: status.amount == null ? null : Number(status.amount), ctx });
   if (nextStatus === "pending") return json({ order: updated, payment_status: "pending", provider_state: state }, 202);
-  return json({ order: updated, payment_status: nextStatus, provider_state: state });
+  return json({ order: updated, payment_status: updated?.payment_status || "pending", provider_state: state });
 }
 
 async function handleRazorpayWebhook(request, env) {
   const secret = String(env.RAZORPAY_WEBHOOK_SECRET || "").trim();
   if (!secret) return json({ error: "Webhook secret is not configured" }, 503);
-  const rawBody = await request.text();
+  const rawBody = new TextDecoder().decode(await readBoundedBody(request, 1024 * 1024));
   const signature = String(request.headers.get("X-Razorpay-Signature") || "").trim();
   const expected = await hmacHex(rawBody, secret);
   if (!signature || !safeEqualText(expected, signature)) return json({ error: "Invalid webhook signature" }, 401);
-  const payload = JSON.parse(rawBody || "{}");
+  const payload = parseWebhookJson(rawBody);
   const event = String(payload.event || "").trim().toLowerCase();
   const payment = payload.payload?.payment?.entity || {};
   const providerOrder = payload.payload?.order?.entity || {};
   const providerOrderId = String(payment.order_id || providerOrder.id || "").trim();
   if (!providerOrderId) return json({ ok: true });
-  const row = await env.DB.prepare("SELECT * FROM orders WHERE payment_gateway = 'razorpay' AND gateway_order_id = ? LIMIT 1").bind(providerOrderId).first();
-  if (!row) return json({ ok: true });
+  let row = await env.DB.prepare("SELECT * FROM orders WHERE payment_gateway = 'razorpay' AND gateway_order_id = ? LIMIT 1").bind(providerOrderId).first();
+  if (!row) {
+    // A provider may accept creation before our POST times out. Its signed notes
+    // can recover that mapping, but never replace an existing provider reference.
+    const internalId = String(payment.notes?.glamia_order_id || providerOrder.notes?.glamia_order_id || "");
+    const candidate = internalId ? await env.DB.prepare("SELECT * FROM orders WHERE id = ? AND payment_gateway = 'razorpay' AND payment_creation_state IN ('creating','uncertain') AND gateway_order_id IS NULL")
+      .bind(internalId).first() : null;
+    if (candidate && payment.currency === "INR" && Number(payment.amount) === Math.round(Number(candidate.payable_total ?? candidate.total) * 100)) {
+      await env.DB.prepare("UPDATE orders SET gateway_order_id = ?, payment_creation_state = 'ready' WHERE id = ? AND gateway_order_id IS NULL AND payment_creation_state IN ('creating','uncertain')")
+        .bind(providerOrderId, candidate.id).run();
+      row = await env.DB.prepare("SELECT * FROM orders WHERE id = ? AND gateway_order_id = ?").bind(candidate.id, providerOrderId).first();
+    }
+    if (!row) {
+      await recordUnmappedPayment(env, "razorpay", providerOrderId, payment.id, event, payment.amount ?? providerOrder.amount, payment.currency ?? providerOrder.currency);
+      return json({ ok: true, reconciliation_required: true });
+    }
+  }
   const status = event === "payment.captured" || event === "order.paid" ? "paid" : event === "payment.authorized" ? "authorized" : event === "payment.failed" ? "failed" : "pending";
+  if (["paid", "authorized"].includes(status) && String(payment.currency || providerOrder.currency || "") !== "INR") throw httpError("Webhook currency did not match this order", 422);
+  if (["paid", "authorized"].includes(status) && (!payment.id || payment.order_id !== providerOrderId
+    || payment.status !== (status === "paid" ? "captured" : "authorized"))) throw httpError("Webhook payment identity or state did not match", 422);
   await settleGatewayPayment(env, row, {
     status,
     paymentId: payment.id || row.gateway_payment_id || "",
@@ -5455,37 +7844,156 @@ async function handleRazorpayWebhook(request, env) {
   return json({ ok: true });
 }
 
-async function handlePhonePeWebhook(request, env) {
-  const rawBody = await request.text();
+async function handlePhonePeWebhook(request, env, ctx) {
+  const rawBody = new TextDecoder().decode(await readBoundedBody(request, 1024 * 1024));
   const hmacSecret = String(env.PHONEPE_WEBHOOK_SECRET || "").trim();
   const expectedKeyId = String(env.PHONEPE_WEBHOOK_ID || "").trim();
   const receivedKeyId = String(request.headers.get("x-phonepe-checksum-key-id") || "").trim();
   let valid = false;
   if (hmacSecret) {
-    const signature = String(request.headers.get("phonepe-checksum-signature") || "").trim();
+    const signature = String(request.headers.get("x-phonepe-checksum-signature") || request.headers.get("phonepe-checksum-signature") || "").trim();
     valid = Boolean(signature) && (!expectedKeyId || expectedKeyId === receivedKeyId) && safeEqualText(await hmacHex(rawBody, hmacSecret), signature);
   } else if (env.PHONEPE_WEBHOOK_USERNAME && env.PHONEPE_WEBHOOK_PASSWORD) {
     const authorization = String(request.headers.get("Authorization") || "").trim();
     valid = safeEqualText(await sha256Hex(`${env.PHONEPE_WEBHOOK_USERNAME}:${env.PHONEPE_WEBHOOK_PASSWORD}`), authorization);
   }
   if (!valid) return json({ error: "Invalid webhook authentication" }, 401);
-  const payload = JSON.parse(rawBody || "{}");
+  const payload = parseWebhookJson(rawBody);
   const event = String(payload.event || "").trim().toLowerCase();
+  // PhonePe documents both enveloped refund events and bare UPI/netbanking
+  // refund payloads. A callback only prompts an authenticated status GET.
+  if (["pg.refund.completed", "pg.refund.failed"].includes(event)
+    || (!event && payload.refundId && ["COMPLETED", "FAILED"].includes(payload.state))) {
+    const reconciliation = handlePhonePeRefundWebhook(env, payload.payload || payload);
+    if (ctx?.waitUntil) {
+      // Acknowledge within PhonePe's 3–5 second window even when its GET is slow.
+      // The existing durable pending case remains eligible for cron fallback.
+      ctx.waitUntil(reconciliation.catch(error => console.error("phonepe_refund_webhook_failed", { error_type: error.name || "Error" })));
+      return json({ ok: true });
+    }
+    return reconciliation;
+  }
   const providerPayload = payload.payload || {};
   const merchantOrderId = String(providerPayload.merchantOrderId || "").trim();
   if (!merchantOrderId) return json({ ok: true });
   const row = await env.DB.prepare("SELECT * FROM orders WHERE payment_gateway = 'phonepe' AND gateway_order_id = ? LIMIT 1").bind(merchantOrderId).first();
-  if (!row) return json({ ok: true });
+  if (!row) {
+    await recordUnmappedPayment(env, "phonepe", merchantOrderId, providerPayload.paymentDetails?.at(-1)?.transactionId, event, providerPayload.amount, "INR");
+    return json({ ok: true, reconciliation_required: true });
+  }
   const paymentDetail = Array.isArray(providerPayload.paymentDetails) ? providerPayload.paymentDetails.at(-1) : null;
   const state = String(providerPayload.state || "").toUpperCase();
-  const status = event === "checkout.order.completed" || state === "COMPLETED" ? "paid" : event === "checkout.order.failed" || state === "FAILED" ? "failed" : "pending";
+  const status = state === "COMPLETED" ? "paid" : state === "FAILED" ? "failed" : "pending";
+  await verifyPhonePeSessionIdentity(env, row.id, providerPayload);
+  if (status === "paid" && !paymentDetail?.transactionId) throw httpError("PhonePe payment reference is missing", 422);
   await settleGatewayPayment(env, row, {
     status,
-    paymentId: paymentDetail?.transactionId || row.gateway_payment_id || "",
+    paymentId: paymentDetail?.transactionId || "",
     amount: providerPayload.amount == null ? null : Number(providerPayload.amount),
     reference: merchantOrderId
   });
   return json({ ok: true });
+}
+
+async function handlePhonePeRefundWebhook(env, payload) {
+  const merchantId = typeof payload.merchantRefundId === "string" ? payload.merchantRefundId.trim() : "";
+  const providerId = typeof payload.refundId === "string" ? payload.refundId.trim() : "";
+  if ((!merchantId && !providerId) || merchantId.length > 63 || providerId.length > 160) return json({ ok: true });
+  // Never match by order alone: one order can have multiple partial refunds.
+  const column = merchantId ? "id" : "provider_refund_id";
+  const reference = merchantId || providerId;
+  let refund = await env.DB.prepare(`SELECT * FROM gateway_refunds WHERE provider='phonepe' AND ${column}=?`).bind(reference).first();
+  if (!refund) refund = await env.DB.prepare(`SELECT * FROM cancellation_refunds WHERE provider='phonepe' AND ${column}=?`).bind(reference).first();
+  if (!refund || !refund.create_attempted || !["pending", "submitting", "reconciliation_required"].includes(refund.state)) return json({ ok: true });
+  if ((providerId && refund.provider_refund_id && providerId !== refund.provider_refund_id)
+    || (payload.originalMerchantOrderId && payload.originalMerchantOrderId !== refund.provider_order_id)
+    || (payload.amount != null && payload.amount !== refund.gateway_paise)) return json({ ok: true });
+  // Wait for the submitting operation to save its response/reference first.
+  if (refund.state === "submitting" && !refund.provider_refund_id) return json({ ok: true });
+  const current = await reconcileGatewayRefund(env.DB, refund,
+    (provider, path, init) => gatewayRefundTransport(env, provider, path, init), "system:phonepe-refund-webhook");
+  if (current.kind === "cancellation") await notifyCancellationRefund(env, current);
+  else await notifyGatewayRefund(env, current);
+  return json({ ok: true });
+}
+
+async function recordUnmappedPayment(env, provider, providerOrderId, paymentId, event, amount, currency) {
+  if (!/captured|paid|completed|authorized/.test(event)) return;
+  const id = `${provider}:${providerOrderId}:${paymentId || "unknown"}:${event}`;
+  await env.DB.prepare("INSERT OR IGNORE INTO payment_reconciliation_events(id,provider,provider_order_id,provider_payment_id,event_type,amount_paise,currency) VALUES (?,?,?,?,?,?,?)")
+    .bind(id, provider, String(providerOrderId).slice(0,160), String(paymentId || "").slice(0,160), event.slice(0,80), Number.isSafeInteger(Number(amount)) ? Number(amount) : null, String(currency || "").slice(0,10)).run();
+  await createAdminNotification(env, { type: "cancelled_order", priority: "urgent", title: "Unmapped payment needs reconciliation",
+    message: `${provider} payment ${String(paymentId || providerOrderId).slice(0,160)} has no verified internal order mapping. Check the gateway; do not retry or assume a refund.`,
+    dedupeKey: `unmapped-payment:${id}` });
+}
+
+async function verifyPhonePeSessionIdentity(env, id, payload) {
+  const session = await env.DB.prepare("SELECT provider_order_id FROM payment_reconciliation_events WHERE id = ? AND event_type = 'session_created'")
+    .bind(`phonepe-session:${id}`).first();
+  if (session && payload.orderId !== session.provider_order_id) throw httpError("PhonePe provider session did not match this order", 422);
+  if (payload.currency && payload.currency !== "INR") throw httpError("PhonePe currency did not match this order", 422);
+}
+
+function parseWebhookJson(rawBody) {
+  try {
+    const payload = JSON.parse(rawBody);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error();
+    return payload;
+  } catch { throw httpError("Webhook body must be valid JSON", 400); }
+}
+
+async function notifyLateGatewayPayment(env, row, paymentId, verifiedCapture=false) {
+  if(row.payment_status==='refunded')return;
+  // Called only after settlement validated captured amount/provider evidence.
+  // Preserve cancellation and never re-reserve stock or overwrite another charge.
+  let recovery;
+  if(verifiedCapture&&paymentId&&row.payment_gateway===row.payment_method&&['razorpay','phonepe'].includes(row.payment_gateway)) {
+    await env.DB.prepare(`UPDATE orders SET gateway_payment_id=?,payment_status='paid',payment_updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='cancelled' AND payment_status!='refunded'
+        AND (gateway_payment_id IS NULL OR gateway_payment_id='' OR gateway_payment_id=?)`)
+      .bind(paymentId,row.id,paymentId).run();
+    await processCancellationRefund(env,row.id);
+    recovery=await env.DB.prepare('SELECT state FROM cancellation_refunds WHERE order_id=?').bind(row.id).first();
+  } else {
+    await env.DB.prepare("UPDATE orders SET gateway_payment_id=COALESCE(gateway_payment_id,?),payment_updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='cancelled' AND payment_status!='refunded'")
+      .bind(paymentId||'captured-unresolved',row.id).run();
+  }
+  await createAdminNotification(env, {
+    type: "cancelled_order", priority: recovery&&['approved','pending','processed'].includes(recovery.state)?'normal':'urgent',
+    title: recovery&&['approved','pending','processed'].includes(recovery.state)?'Late captured payment refund tracked':'Captured payment needs review',
+    message: `${row.order_number || row.id} was already cancelled when its payment was captured. ${recovery&&['approved','pending','processed'].includes(recovery.state)?`The existing cancellation refund is ${recovery.state}; follow that case, not a second payout.`:'Check the gateway and refund or reconcile this charge.'}`,
+    dedupeKey: `late-payment:${row.id}:${paymentId || "captured"}`, orderId: row.id
+  });
+}
+
+async function reconcileExpiringGatewayOrder(env, row) {
+  if (!row.gateway_order_id) return; // Creation may have timed out after provider acceptance.
+  if (row.payment_gateway === "razorpay") {
+    const response = await razorpayRequest(env, `/orders/${encodeURIComponent(row.gateway_order_id)}/payments`, { method: "GET" });
+    if (!response.ok) throw httpError("Gateway reconciliation is unavailable", 502);
+    const data = await response.json();
+    if (!Array.isArray(data.items)) throw httpError("Gateway reconciliation response is invalid", 502);
+    const captured = data.items.find(payment => payment.status === "captured");
+    const authorized = data.items.find(payment => payment.status === "authorized");
+    const payment = captured || authorized;
+    if (payment) {
+      if (payment.order_id !== row.gateway_order_id || payment.currency !== "INR") throw httpError("Gateway reconciliation details did not match", 422);
+      await settleGatewayPayment(env, row, { status: captured ? "paid" : "authorized", paymentId: payment.id, amount: payment.amount });
+      return;
+    }
+    // Preserve an in-flight attempt; expire only empty/all-failed attempts.
+    if (data.items.every(payment => payment.status === "failed")) await failGatewayOrder(env, row.id, "expired");
+    return;
+  }
+  if (row.payment_gateway === "phonepe") {
+    const response = await phonePeRequest(env, `/checkout/v2/order/${encodeURIComponent(row.gateway_order_id)}/status?details=false&errorContext=true`, { method: "GET" });
+    if (!response.ok) throw httpError("Gateway reconciliation is unavailable", 502);
+    const data = await response.json();
+    await verifyPhonePeSessionIdentity(env, row.id, data);
+    if (data.state === "COMPLETED" && !data.paymentDetails?.at(-1)?.transactionId) throw httpError("PhonePe payment reference is missing", 422);
+    if (data.state === "COMPLETED") await settleGatewayPayment(env, row, { status: "paid", paymentId: data.paymentDetails?.at(-1)?.transactionId || "", amount: data.amount });
+    else if (data.state === "FAILED") await failGatewayOrder(env, row.id, "expired");
+  }
 }
 
 async function expirePendingGatewayOrders(env) {
@@ -5496,16 +8004,55 @@ async function expirePendingGatewayOrders(env) {
         AND payment_status IN ('pending', 'authorized')
         AND status = 'pending'
         AND created_at <= datetime('now', '-45 minutes')
-      ORDER BY created_at ASC
-      LIMIT 50
+      ORDER BY COALESCE(payment_updated_at, created_at) ASC
+      LIMIT 10
     `).all();
-    for (const row of results || []) await settleGatewayPayment(env, row, { status: "failed", reference: "expired" });
+    for (const row of results || []) {
+      try { await reconcileExpiringGatewayOrder(env, row); }
+      catch { console.error("gateway_reconciliation_failed", { order_id: row.id, provider: row.payment_gateway }); }
+      // Rotate unresolved orders through the bounded cron batch; a temporary
+      // provider failure must not cancel a potentially paid order.
+      await env.DB.prepare("UPDATE orders SET payment_updated_at = ? WHERE id = ? AND status = 'pending' AND payment_status IN ('pending', 'authorized')")
+        .bind(new Date().toISOString(), row.id).run();
+    }
   } catch (error) {
     console.error("gateway_expiry_failed", String(error?.message || error || "Unknown gateway expiry error").slice(0, 300));
   }
 }
 
+async function purgeExpiredPaymentOrders(env) {
+  try {
+    const { results } = await env.DB.prepare(`
+      SELECT o.id
+      FROM orders o
+      WHERE ${paymentIncompleteOrderPredicate("o", true)}
+      ORDER BY o.updated_at ASC
+      LIMIT 100
+    `).all();
+    for (const row of results || []) {
+      const orderId = String(row.id || "").trim();
+      if (!orderId) continue;
+      // Recheck eligibility inside the transaction, not just in the earlier scan:
+      // a payment update between the scan and batch must preserve all order data.
+      const retentionEligibility = `${paymentIncompleteOrderPredicate("o", true)} AND NULLIF(o.gateway_payment_id, '') IS NULL AND NOT EXISTS (SELECT 1 FROM admin_notifications n WHERE n.order_id = o.id AND n.dedupe_key LIKE 'late-payment:%')`;
+      const eligibleOrder = `EXISTS (SELECT 1 FROM orders o WHERE o.id = ? AND ${retentionEligibility})`;
+      await env.DB.batch([
+        ...["customer_notifications", "admin_notifications", "email_delivery_log", "coupon_redemptions", "inventory_reservations", "order_stock_releases", "order_items", "return_requests", "employee_audit_log"]
+          .map(table => env.DB.prepare(`DELETE FROM ${table} WHERE order_id = ? AND ${eligibleOrder}`).bind(orderId, orderId)),
+        env.DB.prepare(`DELETE FROM admin_audit_log WHERE entity_type = 'order' AND entity_id = ? AND ${eligibleOrder}`).bind(orderId, orderId),
+        env.DB.prepare(`
+          DELETE FROM orders AS o
+          WHERE id = ? AND ${retentionEligibility}
+        `).bind(orderId)
+      ]);
+    }
+  } catch (error) {
+    console.error("payment_order_retention_failed", String(error?.message || error || "Unknown payment-order retention error").slice(0, 300));
+  }
+}
+
 async function createOrder(request, env, user, { allowGateway = false, body: providedBody = null } = {}) {
+  const requestStorefront = request?.url ? storefrontForRequest(new URL(request.url)) : "glamia";
   const body = providedBody || await readJson(request);
   const requested = normalizeOrderItems(body.items);
   if (!requested.length) throw httpError("Your cart is empty", 400);
@@ -5523,18 +8070,15 @@ async function createOrder(request, env, user, { allowGateway = false, body: pro
   };
 
   const requestedPaymentMethod = String(body.payment_method || "").trim().toLowerCase();
-  if (!["razorpay", "phonepe"].includes(requestedPaymentMethod)) {
+  if (!["razorpay", "phonepe", "store_credit"].includes(requestedPaymentMethod)) {
     throw httpError("Choose Razorpay or PhonePe", 400);
   }
   const gatewayPayment = ["razorpay", "phonepe"].includes(requestedPaymentMethod);
   if (gatewayPayment && !allowGateway) {
     throw httpError("Use the payment checkout to start a live payment", 400);
   }
-  const paymentMethod = requestedPaymentMethod;
+  let paymentMethod = requestedPaymentMethod;
   const storefront = await storefrontSettingsObject(env);
-  if (gatewayPayment && !storefront.payments.methods.some((method) => method.id === paymentMethod)) {
-    throw httpError(`${paymentMethod === "razorpay" ? "Razorpay" : "PhonePe"} payments are not configured yet`, 409);
-  }
   const customerEmail = user
     ? String(user.email || "").trim().toLowerCase()
     : String(body.email || "").trim().toLowerCase();
@@ -5542,10 +8086,9 @@ async function createOrder(request, env, user, { allowGateway = false, body: pro
     throw httpError("Enter a valid email for order confirmation and delivery updates", 400);
   }
   const checkoutTokenInput = String(body.checkout_token || "").trim();
-  if (checkoutTokenInput && !/^[A-Za-z0-9_-]{16,120}$/.test(checkoutTokenInput)) {
+  if (!/^[A-Za-z0-9_-]{16,120}$/.test(checkoutTokenInput)) {
     throw httpError("Checkout session token is invalid. Refresh the checkout page and try again.", 400);
   }
-  let existingCheckout = null;
   if (checkoutTokenInput) {
     const existing = await env.DB.prepare("SELECT * FROM orders WHERE checkout_token = ? LIMIT 1")
       .bind(checkoutTokenInput).first();
@@ -5556,17 +8099,15 @@ async function createOrder(request, env, user, { allowGateway = false, body: pro
       if (existing.status !== "cancelled" && String(existing.payment_status || "").toLowerCase() !== "failed") {
         return json({ order: formatOrder(existing), idempotent: true });
       }
-      existingCheckout = existing;
+      throw httpError("This checkout attempt is closed. Refresh checkout to start a new attempt.", 409);
     }
   }
-  const checkoutToken = existingCheckout
-    ? crypto.randomUUID().replace(/-/g, "")
-    : checkoutTokenInput || crypto.randomUUID().replace(/-/g, "");
-  const paymentStatus = "pending";
+  const checkoutToken = checkoutTokenInput;
+  let paymentStatus = "pending";
   const trackingToken = crypto.randomUUID().replace(/-/g, "");
 
   const [catalog, sizeRowsByProduct] = await Promise.all([
-    loadLiveProductsById(env, requested),
+    loadLiveProductsById(env, requested, requestStorefront),
     loadSizeRowsByProduct(env, requested)
   ]);
 
@@ -5604,7 +8145,11 @@ async function createOrder(request, env, user, { allowGateway = false, body: pro
       productQuantities.set(row.id, (productQuantities.get(row.id) || 0) + quantity);
     }
     const unitPrice = effectivePrice(row);
-    subtotal += unitPrice * quantity;
+    const lineTotal = unitPrice * quantity;
+    if (!Number.isSafeInteger(lineTotal * 100) || lineTotal < 0 || !Number.isSafeInteger((subtotal + lineTotal) * 100)) {
+      throw httpError("A product price exceeds the supported checkout amount. Please contact support.", 400);
+    }
+    subtotal += lineTotal;
     items.push({
       id: row.id,
       name: row.name,
@@ -5637,11 +8182,15 @@ async function createOrder(request, env, user, { allowGateway = false, body: pro
 
   let discount = 0;
   let couponCode = null;
+  let couponInstanceId = '';
+  const couponAdminExempt = isWhitelistedCouponAdmin(env, user);
+  let couponAllowsCredits = false;
   const code = String(body.coupon || "").trim().toUpperCase();
   if (code) {
     if (!user) throw httpError("Sign in to use a coupon", 401);
-    const coupon = await env.DB.prepare("SELECT * FROM coupons WHERE code = ? AND active = 1").bind(code).first();
-    if (!coupon) throw httpError("That coupon code is not valid", 400);
+    const storedCoupon = await env.DB.prepare("SELECT * FROM coupons WHERE code = ? AND (active = 1 OR ? = 1)").bind(code, couponAdminExempt ? 1 : 0).first();
+    if (!storedCoupon) throw httpError("That coupon code is not valid", 400);
+    const coupon = couponForCustomer(storedCoupon, env, user);
     const availabilityError = await couponAvailability(coupon, env, user);
     if (availabilityError) throw httpError(availabilityError, 400);
     const minimumCartError = couponMinimumCartError(coupon, subtotal);
@@ -5650,21 +8199,32 @@ async function createOrder(request, env, user, { allowGateway = false, body: pro
     if (eligible <= 0) throw httpError("This coupon does not apply to the items in your cart", 400);
     discount = couponDiscount(coupon, eligible);
     couponCode = coupon.code;
+    couponInstanceId = coupon.instance_id;
+    couponAllowsCredits = Boolean(coupon.allow_store_credits);
   }
 
   const total = subtotal - discount;
+  if (!Number.isSafeInteger(total * 100) || total < 0) throw httpError("The checkout total is invalid. Please contact support.", 400);
+  const creditsUsed = body.credits_used === undefined ? 0 : Number(body.credits_used);
+  if (!Number.isSafeInteger(creditsUsed) || creditsUsed < 0 || creditsUsed > total) throw httpError("Enter a valid store credit amount", 400);
+  if (creditsUsed && !user) throw httpError("Sign in to use store credits", 401);
+  if (creditsUsed && couponCode && !couponAllowsCredits) throw httpError("This coupon cannot be combined with store credits. Remove the coupon or turn off credits.", 409);
+  const payableTotal = total - creditsUsed;
+  if (payableTotal === 0) { paymentMethod = "store_credit"; paymentStatus = "paid"; }
+  else if (paymentMethod === "store_credit") throw httpError("Store credits do not cover this order. Choose a payment provider for the remaining amount.", 400);
+  else if (!storefront.payments.methods.some((method) => method.id === paymentMethod)) throw httpError("This payment provider is not configured yet", 409);
   const id = crypto.randomUUID();
   const sequence = await nextOrderSequence(env);
-  const orderNumber = buildOrderNumber(productNameInitials(items[0]?.name), sequence);
+  const orderNumber = buildOrderNumber(productNameInitials(items[0]?.name), sequence, requestStorefront);
   const customerName = user?.name || address.name;
   const orderType = hasPreorder ? "preorder" : "standard";
 
   const orderInsertStatement = env.DB.prepare(`
-      INSERT INTO orders (id, order_number, tracking_token, checkout_token, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_gateway, payment_status, shipping_json, order_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+      INSERT INTO orders (id, order_number, tracking_token, checkout_token, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_gateway, payment_status, shipping_json, order_type, credits_used, payable_total,delivery_estimate,coupon_instance_id,coupon_admin_exempt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?,?)
     `).bind(
     id, orderNumber, trackingToken, checkoutToken, customerEmail, customerName, JSON.stringify(items), subtotal, discount,
-    couponCode, total, paymentMethod, gatewayPayment ? paymentMethod : null, paymentStatus, JSON.stringify(address), orderType
+    couponCode, total, payableTotal === 0 ? "confirmed" : "pending", paymentMethod, payableTotal > 0 ? paymentMethod : null, paymentStatus, JSON.stringify(address), orderType, creditsUsed, payableTotal,deliveryPromise(address.state,storefront.customer_experience),couponInstanceId,couponCode && couponAdminExempt ? 1 : 0
   );
   // Insert first so the database stock trigger sees the available snapshot;
   // every following adjustment remains in the same atomic D1 batch.
@@ -5748,8 +8308,8 @@ async function createOrder(request, env, user, { allowGateway = false, body: pro
     `).bind(id, JSON.stringify(reservationRows)));
   }
   if (couponCode) {
-    checkoutStatements.push(env.DB.prepare("INSERT INTO coupon_redemptions (id, coupon_code, customer_email, order_id) VALUES (?, ?, ?, ?)")
-      .bind(crypto.randomUUID(), couponCode, customerEmail, id));
+    checkoutStatements.push(env.DB.prepare("INSERT INTO coupon_redemptions (id, coupon_code, customer_email, order_id,coupon_instance_id) VALUES (?, ?, ?, ?,?)")
+      .bind(crypto.randomUUID(), couponCode, customerEmail, id,couponInstanceId));
   }
 
   try {
@@ -5767,6 +8327,10 @@ async function createOrder(request, env, user, { allowGateway = false, body: pro
     if (/coupon redemption limit/i.test(detail)) {
       throw httpError("This coupon reached its usage limit while you were checking out.", 409);
     }
+    if (/Coupon instance changed|Coupon redemption identity mismatch/i.test(detail)) {
+      throw httpError("This coupon changed while you were checking out. Apply it again before paying.", 409);
+    }
+    if (/Insufficient store credits|Coupon cannot be combined|Invalid checkout credits/i.test(detail)) throw httpError("Store credits changed or cannot be combined with this coupon. Refresh checkout and try again.", 409);
     if (/pre-order limit/i.test(detail)) {
       throw httpError("This pre-order limit was reached while you were checking out. Please refresh and try again.", 409);
     }
@@ -5775,51 +8339,38 @@ async function createOrder(request, env, user, { allowGateway = false, body: pro
   invalidateProductEnrichment();
 
   const created = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(id).first();
-  await createAdminNotification(env, {
-    type: "new_order",
-    title: "New order received",
-    message: `${created.customer_name || created.customer_email} placed ${items.length} item${items.length === 1 ? "" : "s"} · ${orderNumber}`,
-    dedupeKey: `order:${id}`,
-    orderId: id
-  }).catch(() => null);
-  await createCustomerNotification(env, {
-    email: created.customer_email,
-    type: "order_placed",
-    title: "Order placed",
-    message: `We’ve received ${created.order_number || orderNumber}. We’ll keep you updated as it moves.`,
-    orderId: id,
-    dedupeKey: `customer-order:${id}:placed`
-  }).catch(() => null);
   return json({ order: formatOrder(created) }, 201);
 }
 
-async function cancelOwnOrder(request, env, user, id) {
+async function cancelOwnOrder(request, env, user, id, ctx = null) {
   const current = await env.DB.prepare("SELECT * FROM orders WHERE id = ? AND customer_email = ?")
     .bind(id, String(user.email || "").trim().toLowerCase()).first();
   if (!current) return json({ error: "Order not found" }, 404);
-  if (current.status === "cancelled") return json({ order: formatOrder(current) });
+  if (current.status === "cancelled") return json({ order: (await attachCancellationRefunds(env,[formatOrder(current)]))[0] });
   if (!["pending", "confirmed"].includes(current.status)) {
     return json({ error: "This order can no longer be cancelled. Please request a return instead." }, 409);
   }
+  if(String(current.tracking_number||'').trim())return json({error:'Dispatch has already been arranged. Contact care or request a return after delivery.'},409);
   const createdAt = Date.parse(current.created_at || "");
   if (Number.isFinite(createdAt) && Date.now() - createdAt > CANCELLATION_WINDOW_DAYS * 24 * 60 * 60 * 1000) {
     return json({ error: `This order is outside the ${CANCELLATION_WINDOW_DAYS}-day cancellation window. Please request a return instead.` }, 409);
   }
   const results = await env.DB.batch([
+    env.DB.prepare("UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('pending', 'confirmed') AND COALESCE(tracking_number, '') = ''")
+      .bind(id),
     env.DB.prepare(`
       INSERT OR IGNORE INTO order_stock_releases (order_id)
       SELECT id FROM orders
-      WHERE id = ? AND status IN ('pending', 'confirmed')
+      WHERE id = ? AND status = 'cancelled' AND changes() = 1
     `).bind(id),
-    env.DB.prepare("UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('pending', 'confirmed')")
-      .bind(id),
-    env.DB.prepare("DELETE FROM coupon_redemptions WHERE order_id = ?").bind(id)
+    env.DB.prepare("DELETE FROM coupon_redemptions WHERE order_id = ? AND EXISTS (SELECT 1 FROM orders WHERE id = ? AND status = 'cancelled')").bind(id,id)
   ]);
+  const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(id).first();
+  if(updated.status!=='cancelled')return json({error:'This order changed before cancellation. Refresh its dispatch status or contact care.'},409);
   invalidateProductEnrichment();
-  if (Number(results[0]?.meta?.changes || 0) === 1) {
+  if (Number(results[1]?.meta?.changes || 0) === 1) {
     await writeAuditLog(env, user.email, "cancel_order", "order", id, { stock_restored: true });
   }
-  const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(id).first();
   await createAdminNotification(env, {
     type: "cancelled_order",
     priority: "urgent",
@@ -5836,13 +8387,114 @@ async function cancelOwnOrder(request, env, user, id) {
     orderId: id,
     dedupeKey: `customer-order:${id}:cancelled`
   }).catch(() => null);
-  if (Number(results[1]?.meta?.changes || 0) === 1) {
+  if (Number(results[0]?.meta?.changes || 0) === 1) {
     await sendOrderEmail(env, updated, "cancelled");
   }
-  return json({ order: formatOrder(updated) });
+  const processing=processCancellationRefund(env,id);
+  if(ctx?.waitUntil)ctx.waitUntil(processing);else await processing;
+  const latest=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
+  return json({ order: (await attachCancellationRefunds(env,[formatOrder(latest)]))[0] });
 }
 
-async function createReturnRequest(request, env, user, orderId) {
+function requireReturnsAdmin(user) {
+  requireAdmin(user);
+  if (user.employee_id && !user.is_owner && user.employee_permissions?.returns !== true) throw httpError("Returns permission is required", 403);
+}
+
+function orderReturnWindow(order) {
+  const raw = String(order.delivered_at || "");
+  const timestamp = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw) ? raw.replace(" ", "T") + "Z" : raw;
+  const deliveredAt = new Date(timestamp).getTime();
+  return !Number.isFinite(deliveredAt) || Date.now() - deliveredAt > RETURN_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+}
+
+async function customerOrderReturnOptions(env, user, orderId) {
+  const order=await env.DB.prepare("SELECT * FROM orders WHERE id=? AND LOWER(customer_email)=?").bind(orderId,user.email.toLowerCase()).first();
+  if(!order) return json({error:"Order not found"},404);
+  const items=await purchasedReturnLines(env,orderId);
+  const {results:previousCases}=await env.DB.prepare('SELECT status,selected_items_json FROM return_requests WHERE order_id=?').bind(orderId).all();
+  const remaining=remainingReturnLines(items,previousCases);
+  const lines=[];
+  const allocations=Number(order.total)>0 ? returnAllocation(items,order.total) : [];
+  for(const item of remaining.filter(item=>item.remaining_quantity>0)) {
+    const {results:sizes}=await env.DB.prepare(`SELECT ps.size,ps.stock FROM product_sizes ps JOIN products p ON p.id=ps.product_id
+      WHERE ps.product_id=? AND p.status='live' AND p.stock>=1 AND ps.stock>=1 AND LOWER(ps.size)!=LOWER(?) ORDER BY ps.size`).bind(item.product_id,item.size||"").all();
+    lines.push({line_id:item.id,product_id:item.product_id,product_name:item.product_name,color:item.color,image_url:item.image_url,size:item.size,quantity:item.remaining_quantity,purchased_quantity:item.quantity,returned_quantity:item.returned_quantity,
+      returnable:Boolean(item.eligible_returnable),standard_returnable:item.returnable_snapshot===1,support_return_enabled:Boolean(item.support_return_enabled),policy_snapshot_known:item.returnable_snapshot!==null,available_sizes:sizes,
+      amount_paise:allocations.find(line=>line.id===item.id)?.amount_paise || 0});
+  }
+  const existing=await env.DB.prepare("SELECT id FROM return_requests WHERE order_id=? AND status NOT IN ('rejected','cancelled','refunded','completed') LIMIT 1").bind(orderId).first();
+  const paymentOptions=adminReturnPaymentOptions(order);
+  const eligible=lines.some(item=>item.returnable)&&order.status==='delivered'&&!orderReturnWindow(order)&&!existing&&(paymentOptions.refund_available||paymentOptions.exchange_available);
+  return json({items:lines,delivered_at:order.delivered_at,return_window_days:RETURN_WINDOW_DAYS,eligible,
+    eligibility_message:existing?'An after-sales case already exists. Contact care for any additional items.':order.status!=='delivered'?'Returns open after delivery.':!order.delivered_at?'Contact care to verify the delivery date for this older order.':orderReturnWindow(order)?'The return window has closed. Contact care for an exception.':!lines.length?'All purchased quantities already have a return or exchange request.':!lines.some(item=>item.returnable)?'These items are not eligible for standard returns. Contact care to ask for an order-specific exception.':!paymentOptions.refund_available&&!paymentOptions.exchange_available?'This order has no eligible settled payment. Contact care for help.':'',
+    ...paymentOptions});
+}
+
+async function createReturnDocumentAccess(request,env,user,id) {
+  const current=await env.DB.prepare('SELECT id,customer_email FROM return_requests WHERE id=?').bind(id).first();
+  if(!current || current.customer_email.toLowerCase()!==user.email.toLowerCase()) return json({error:'Not found'},404);
+  const {kind}=await readJson(request);
+  if(!['label','receipt'].includes(kind)) return json({error:'Choose a valid document'},400);
+  const account=await env.DB.prepare('SELECT session_version FROM users WHERE email=?').bind(user.email.toLowerCase()).first();
+  if(!account) return json({error:'Sign in again'},401);
+  const token=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
+  const hash=await returnDocumentHash(token);
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM return_document_tokens WHERE expires_at<CURRENT_TIMESTAMP'),
+    env.DB.prepare("INSERT INTO return_document_tokens(token_hash,return_id,kind,user_email,session_version,expires_at) VALUES(?,?,?,?,?,datetime('now','+2 minutes'))").bind(hash,id,kind,user.email.toLowerCase(),Number(account.session_version||0))
+  ]);
+  return json({path:`/api/returns/${encodeURIComponent(id)}/${kind}?access=${token}`});
+}
+
+async function returnDocumentHash(token) {
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token))),byte=>byte.toString(16).padStart(2,'0')).join('');
+}
+
+async function consumeReturnDocumentAccess(env,id,kind,token) {
+  if(!/^[a-f0-9]{64}$/.test(token||'')) return false;
+  const row=await env.DB.prepare(`DELETE FROM return_document_tokens WHERE token_hash=? AND return_id=? AND kind=? AND expires_at>CURRENT_TIMESTAMP
+    AND EXISTS(SELECT 1 FROM users u WHERE LOWER(u.email)=return_document_tokens.user_email AND COALESCE(u.session_version,0)=return_document_tokens.session_version) RETURNING return_id`)
+    .bind(await returnDocumentHash(token),id,kind).first();
+  return Boolean(row);
+}
+
+function adminReturnPaymentOptions(order) {
+  const refundAvailable = Number(order.total) >= 1 && ["paid", "demo"].includes(order.payment_status);
+  const exchangeAvailable = ["paid", "demo"].includes(order.payment_status) || (order.order_type === "replacement" && order.payment_status === "not_required");
+  const originalAvailable = refundAvailable && order.payment_status === "paid" && ["razorpay", "phonepe"].includes(order.payment_method)
+    && order.payment_gateway === order.payment_method && Boolean(order.gateway_order_id && order.gateway_payment_id);
+  return { refund_available: refundAvailable, exchange_available: exchangeAvailable, original_refund_available: originalAvailable };
+}
+
+async function adminOrderReturnOptions(request, env, user, orderId) {
+  requireReturnsAdmin(user);
+  const order = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(orderId).first();
+  if (!order) return json({ error: "Order not found" }, 404);
+  const existing = await env.DB.prepare("SELECT id FROM return_requests WHERE order_id = ? AND status NOT IN ('rejected', 'cancelled', 'refunded', 'completed') ORDER BY created_at DESC LIMIT 1").bind(orderId).first();
+  const purchased=await purchasedReturnLines(env,orderId);
+  const {results:previousCases}=await env.DB.prepare('SELECT status,selected_items_json FROM return_requests WHERE order_id=?').bind(orderId).all();
+  const remaining=remainingReturnLines(purchased,previousCases);
+  const purchasedItems=returnAllocation(remaining,order.total).filter(item=>item.remaining_quantity>0).map(item=>({line_id:item.id,product_id:item.product_id,product_name:item.product_name,size:item.size,quantity:item.remaining_quantity,purchased_quantity:item.quantity,returned_quantity:item.returned_quantity,returnable:Boolean(item.eligible_returnable),amount_paise:item.amount_paise}));
+  // Only the purchased products are exposed; Returns staff need no catalog-edit permission.
+  const { results } = await env.DB.prepare(`SELECT oi.id AS line_id, oi.product_id, oi.product_name, oi.size, oi.quantity,
+    ps.size AS replacement_size, ps.stock AS replacement_stock
+    FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id AND p.status='live'
+    LEFT JOIN product_sizes ps ON ps.product_id=p.id AND ps.stock >= 1 AND p.stock >= 1 AND LOWER(ps.size) != LOWER(oi.size)
+    WHERE oi.order_id=? ORDER BY oi.id,ps.size`).bind(orderId).all();
+  const lines = new Map();
+  for (const row of results) {
+    const key = row.line_id;
+    if (!lines.has(key)) lines.set(key, { line_id:row.line_id,product_id: row.product_id, product_name: row.product_name, size: row.size, quantity: row.quantity, available_sizes: [] });
+    if (row.replacement_size) lines.get(key).available_sizes.push({ size: row.replacement_size, stock: row.replacement_stock });
+  }
+  return json({ order: formatOrder(order), existing_request: existing ? await getReturnRequest(env, existing.id) : null,
+    exchange_items: [...lines.values()].filter(item=>remaining.find(line=>line.id===item.line_id)?.remaining_quantity>0).map(item=>({...item,quantity:remaining.find(line=>line.id===item.line_id).remaining_quantity})), purchased_items:purchasedItems,...adminReturnPaymentOptions(order), return_window_expired: orderReturnWindow(order),
+    return_window_days: RETURN_WINDOW_DAYS, can_override_return_window: Boolean(user.is_owner && adminEmails(env, request).includes(String(user.email || "").toLowerCase())) });
+}
+
+async function createReturnRequest(request, env, user, orderId, { adminInitiated = false } = {}) {
+  if (adminInitiated) requireReturnsAdmin(user);
   const body = await readJson(request);
   const requestedType = String(body.type || "return_refund").trim().toLowerCase();
   const type = ["return_refund", "return", "refund"].includes(requestedType) ? "refund" : requestedType;
@@ -5857,29 +8509,59 @@ async function createReturnRequest(request, env, user, orderId) {
   if (!["refund", "exchange"].includes(type)) return json({ error: "Choose Return/Refund or Exchange" }, 400);
   if (!["original", "store_credit"].includes(refundDestination)) return json({ error: "Choose a valid refund destination" }, 400);
   if (reason.length < 3) return json({ error: "Tell us why you need help with this order" }, 400);
-  const order = await env.DB.prepare("SELECT * FROM orders WHERE id = ? AND customer_email = ?")
-    .bind(orderId, String(user.email || "").trim().toLowerCase()).first();
+  const order = await (adminInitiated ? env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(orderId)
+    : env.DB.prepare("SELECT * FROM orders WHERE id = ? AND customer_email = ?").bind(orderId, String(user.email || "").trim().toLowerCase())).first();
   if (!order) return json({ error: "Order not found" }, 404);
   if (["cod", "demo"].includes(order.payment_method) && refundDestination === "original") {
     return json({ error: "Demo-payment refunds are available only as Glamia store credits" }, 400);
   }
   if (order.status !== "delivered") return json({ error: "Returns and refunds open after delivery" }, 409);
-  const deliveredAt = new Date(order.updated_at || order.created_at).getTime();
-  if (Number.isFinite(deliveredAt) && Date.now() - deliveredAt > RETURN_WINDOW_DAYS * 24 * 60 * 60 * 1000) {
+  const activeCase=await env.DB.prepare("SELECT id FROM return_requests WHERE order_id=? AND status NOT IN ('rejected','cancelled','refunded','completed') LIMIT 1").bind(orderId).first();
+  if(activeCase)return json({error:'An after-sales request is already being processed. Follow it in Your orders.'},409);
+  const purchasedLines=await purchasedReturnLines(env,orderId);
+  let selectedItems;
+  try {
+    const {results:previousCases}=await env.DB.prepare('SELECT status,selected_items_json FROM return_requests WHERE order_id=?').bind(orderId).all();
+    const remaining=remainingReturnLines(purchasedLines,previousCases);
+    const selection=body.items || remaining.filter(line=>line.remaining_quantity>0).map(line=>({line_id:line.id,quantity:line.remaining_quantity}));
+    selectedItems=selectReturnLines(remaining,selection,order.total);
+  } catch(error) { return json({error:error.message},400); }
+  const policyException=selectedItems.some(line=>purchasedLines.find(item=>item.id===line.line_id)?.returnable_snapshot!==1);
+  const ownerPolicyOverride=Boolean(adminInitiated && body.override_return_policy===true && user.is_owner && adminEmails(env,request).includes(user.email.toLowerCase()) && String(body.override_reason||'').trim().length>=10);
+  const needsPolicyOverride=selectedItems.some(line=>!purchasedLines.find(item=>item.id===line.line_id)?.eligible_returnable);
+  if(needsPolicyOverride && !ownerPolicyOverride) {
+    return json({error:"A selected item is not eligible for standard returns. Contact care to request an order-specific return exception for damaged or incorrect items."},409);
+  }
+  const windowExpired = orderReturnWindow(order);
+  const overrideWindow = adminInitiated && body.override_return_window === true;
+  const overrideReason = String(body.override_reason || "").trim().slice(0, 500);
+  if (overrideWindow && (!user.is_owner || !adminEmails(env, request).includes(String(user.email || "").toLowerCase()))) return json({ error: "Only a whitelisted owner can authorise a return-window exception" }, 403);
+  if (overrideWindow && overrideReason.length < 10) return json({ error: "Explain the return-window exception in at least 10 characters" }, 400);
+  if (windowExpired && !overrideWindow) {
     return json({ error: `This order is outside the ${RETURN_WINDOW_DAYS}-day return window` }, 409);
   }
-  const existing = await env.DB.prepare("SELECT id FROM return_requests WHERE order_id = ? AND status NOT IN ('rejected', 'cancelled') LIMIT 1")
+  {
+    const eligibility = adminReturnPaymentOptions(order);
+    if ((type === "refund" && !eligibility.refund_available) || (type === "exchange" && !eligibility.exchange_available)) return json({ error: "This order has no eligible settled payment for that request" }, 409);
+    if (type === "refund" && refundDestination === "original" && !eligibility.original_refund_available) return json({ error: "A verified Razorpay or PhonePe payment is required for an original-payment refund" }, 409);
+  }
+  const existing = await env.DB.prepare("SELECT id FROM return_requests WHERE order_id = ? AND status NOT IN ('rejected', 'cancelled', 'refunded', 'completed') LIMIT 1")
     .bind(orderId).first();
   if (existing) return json({ error: "An after-sales request already exists for this order" }, 409);
   if (type === "exchange") {
+    const chosenLine=body.exchange_line_id ? purchasedLines.find(line=>line.id===body.exchange_line_id) : null;
+    if(body.exchange_line_id && !chosenLine) return json({error:'Choose a purchased order line'},400);
     exchangeItem = await env.DB.prepare(`
       SELECT product_id AS id, size, quantity, product_name, unit_price, variant, color, image_url
       FROM order_items
-      WHERE order_id = ? AND product_id = ?
+      WHERE order_id = ? AND product_id = ? AND (?='' OR id=?)
         AND (? = '' OR LOWER(size) = LOWER(?))
       LIMIT 1
-    `).bind(orderId, exchangeProductId, requestedExchangeFromSize, requestedExchangeFromSize).first();
+    `).bind(orderId, chosenLine?.product_id || exchangeProductId,chosenLine?.id||'',chosenLine?.id||'', chosenLine?.size || requestedExchangeFromSize, chosenLine?.size || requestedExchangeFromSize).first();
     if (!exchangeItem) return json({ error: "Choose the same product from this order for exchange" }, 400);
+    const selection=selectedItems.find(item=>chosenLine ? item.line_id===chosenLine.id : item.product_id===exchangeItem.id && item.size===exchangeItem.size);
+    if(!selection || (body.items && selectedItems.length!==1)) return json({error:'Choose one purchased item for exchange'},400);
+    exchangeItem.quantity=selection.quantity;
     exchangeFromSize = String(exchangeItem.size || "").trim();
     const { results: sizeRows } = await env.DB.prepare(`
       SELECT ps.size, ps.stock
@@ -5887,7 +8569,7 @@ async function createReturnRequest(request, env, user, orderId) {
       JOIN products p ON p.id = ps.product_id
       WHERE ps.product_id = ? AND p.status = 'live'
       ORDER BY ps.size
-    `).bind(exchangeProductId).all();
+    `).bind(exchangeItem.id).all();
     const availableSizes = sizeRows
       .filter(row => Number(row.stock) >= Number(exchangeItem.quantity || 1) && String(row.size || "").trim().toLowerCase() !== exchangeFromSize.toLowerCase())
       .map(row => String(row.size || "").trim())
@@ -5900,44 +8582,62 @@ async function createReturnRequest(request, env, user, orderId) {
     exchangeToSize = matchingSize;
   }
   const id = crypto.randomUUID();
-  const refundAmount = Math.max(0, Math.floor(Number(order.total) || 0));
-  await env.DB.prepare(`INSERT INTO return_requests
-    (id, order_id, customer_email, type, reason, refund_amount, refund_destination, exchange_product_id, exchange_from_size, exchange_to_size)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(id, orderId, user.email.toLowerCase(), type, reason, refundAmount, refundDestination,
-      type === "exchange" ? exchangeProductId : null, type === "exchange" ? exchangeFromSize : null, type === "exchange" ? exchangeToSize : null).run();
-  let replacementOrder = null;
-  if (type === "exchange") {
+  const requestedPaise=selectedItems.reduce((sum,line)=>sum+line.amount_paise,0);
+  const refundAmount = refundDestination === "original" ? requestedPaise/100 : Math.floor(requestedPaise/100);
+  // Atomic duplicate guard also covers concurrent customer/admin requests, without a migration.
+  const claim = env.DB.prepare(`INSERT INTO return_requests
+    (id, order_id, customer_email, type, reason, refund_amount, refund_destination, exchange_product_id, exchange_from_size, exchange_to_size,selected_items_json,requested_amount_paise)
+    SELECT ?,o.id,LOWER(o.customer_email),?,?,?,?,?,?,?,?,? FROM orders o WHERE o.id=? AND o.status='delivered'
+      AND o.payment_status=? AND o.payment_method=? AND o.total=? AND LOWER(o.customer_email)=?
+      AND NOT EXISTS(SELECT 1 FROM return_requests r WHERE r.order_id=o.id AND r.status NOT IN ('rejected','cancelled','refunded','completed'))
+      AND (?=1 OR NOT EXISTS(SELECT 1 FROM json_each(?) s JOIN order_items i ON i.id=json_extract(s.value,'$.line_id') AND i.order_id=o.id
+        WHERE COALESCE(i.returnable_snapshot,0)!=1 AND NOT EXISTS(SELECT 1 FROM order_return_access a WHERE a.order_item_id=i.id AND a.order_id=o.id AND a.enabled=1)))`)
+    .bind(id, type, reason, refundAmount, refundDestination,
+      type === "exchange" ? exchangeItem.id : null, type === "exchange" ? exchangeFromSize : null, type === "exchange" ? exchangeToSize : null,JSON.stringify(selectedItems),requestedPaise,
+      orderId, order.payment_status, order.payment_method, order.total, String(order.customer_email || "").toLowerCase(),ownerPolicyOverride?1:0,JSON.stringify(selectedItems));
+  const auditDetails = { order_id: orderId, type: requestedType, refund_destination: refundDestination,
+    exchange_product_id: exchangeProductId || null, exchange_to_size: exchangeToSize || null,
+    source: adminInitiated ? "admin" : "customer", customer_email: order.customer_email,
+    selected_items:selectedItems,return_policy_exception:policyException,
+    support_authorized_lines:selectedItems.filter(line=>purchasedLines.find(item=>item.id===line.line_id)?.support_return_enabled).map(line=>line.line_id),
+    return_window_exception: overrideWindow && windowExpired, exception_reason: (overrideWindow||policyException) ? overrideReason : null };
+  // Claim, replacement, stock reservation and audit must succeed in one transaction.
+  const claimStatements=[claim, env.DB.prepare(`INSERT INTO admin_audit_log
+    (id,admin_email,action,entity_type,entity_id,details_json)
+    SELECT ?,?,?,'return_request',?,? WHERE EXISTS(SELECT 1 FROM return_requests WHERE id=?)`)
+    .bind(crypto.randomUUID(), String(user.email || "").toLowerCase(),adminInitiated?'admin_create_return_request':'create_return_request', id, JSON.stringify(auditDetails), id)];
+  let replacement=null;
+  if(type==='exchange') {
     try {
-      replacementOrder = await createReplacementOrder(env, order, exchangeItem, exchangeToSize, id);
-      await env.DB.prepare("UPDATE return_requests SET replacement_order_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .bind(replacementOrder.id, id).run();
-    } catch (error) {
-      await env.DB.prepare("DELETE FROM return_requests WHERE id = ?").bind(id).run();
-      if (/insufficient replacement stock/i.test(String(error?.message || error))) {
-        return json({ error: "That size just sold out. Please choose another available size or proceed with Return/Refund." }, 409);
-      }
+      replacement=await createReplacementOrder(env,order,exchangeItem,exchangeToSize,id,{notes:'',actor:user.email,immediate:true,claimStatements});
+    } catch(error) {
+      if(error.status===409 || /unclaimed eligible exchange|Purchased quantity already requested/i.test(String(error.message))) return json({error:'The replacement is no longer available, or these quantities have already been requested. Refresh the order and stock before trying again.'},409);
       throw error;
     }
+  } else {
+    let inserted;
+    try{inserted=(await env.DB.batch(claimStatements))[0];}catch(error){if(/Purchased quantity already requested/i.test(String(error.message)))return json({error:'These quantities have already been requested. Refresh the order before trying again.'},409);throw error;}
+    if(!inserted.meta?.changes)return json({error:'An after-sales request already exists, or this order changed. Refresh before trying again.'},409);
   }
+  const createdRequest=await prepareReturnLabel(env,id,user.email);
   await createAdminNotification(env, {
     type: type === "exchange" ? "exchange_request" : "return_request",
     priority: "urgent",
-    title: type === "exchange" ? "Exchange request needs attention" : "Return/Refund request needs attention",
-    message: `${order.customer_name || order.customer_email} requested ${type === "exchange" ? `a replacement size (${exchangeFromSize || "current"} → ${exchangeToSize})` : "a return/refund"} · ${order.order_number || order.id}`,
+    title: type === "exchange" ? "Arrange exchange return pickup" : "Arrange return pickup",
+    message: `${order.customer_name || order.customer_email} · ${order.order_number || order.id}. Arrange collection from the customer to the warehouse and save courier tracking to publish the return label.${replacement ? ` Replacement ${replacement.order_number} is already in the normal packing queue.` : ' Refund approval remains separate.'}`,
     dedupeKey: `after-sales:${id}`,
     orderId
   }).catch(() => null);
-  await writeAuditLog(env, user.email, "create_return_request", "return_request", id, {
-    order_id: orderId, type: requestedType, refund_destination: refundDestination,
-    exchange_product_id: exchangeProductId || null, exchange_to_size: exchangeToSize || null
-  });
-  const createdRequest = await getReturnRequest(env, id);
-  await sendReturnEmail(env, createdRequest, "requested");
-  return json({ request: createdRequest, replacement_order: replacementOrder }, 201);
+  if (type === "refund" && refundDestination === "store_credit") {
+    await createAdminNotification(env, { type: "return_request", priority: "urgent", ownerOnly: true,
+      title: "Store-credit refund needs your approval", message: `${order.order_number || order.id} · ${formatInr(refundAmount)} · ${order.customer_email}`,
+      dedupeKey: `credit-approval:${id}`, orderId }).catch(()=>null);
+  }
+  await sendReturnEmail(env, createdRequest, createdRequest.status).catch(()=>null);
+  return json({ request: adminInitiated ? createdRequest : customerReturnView(createdRequest), replacement_order: replacement }, 201);
 }
 
-async function createReplacementOrder(env, originalOrder, exchangeItem, replacementSize, requestId) {
+async function createReplacementOrder(env, originalOrder, exchangeItem, replacementSize, requestId,approval) {
   const quantity = Math.max(1, Math.floor(Number(exchangeItem.quantity) || 1));
   const product = await env.DB.prepare("SELECT id, name, stock, price, color, image_url FROM products WHERE id = ? AND status = 'live'")
     .bind(exchangeItem.id).first();
@@ -5954,18 +8654,21 @@ async function createReplacementOrder(env, originalOrder, exchangeItem, replacem
   };
   const id = crypto.randomUUID();
   const sequence = await nextOrderSequence(env);
-  const orderNumber = buildOrderNumber(productNameInitials(item.name), sequence);
+  const orderNumber = buildOrderNumber(productNameInitials(item.name), sequence, String(originalOrder.order_number || "").startsWith("VB-") ? "wibrawl" : "glamia");
   const trackingToken = crypto.randomUUID().replace(/-/g, "");
   const reservation = { id: crypto.randomUUID(), productId: product.id, size: replacementSize, quantity };
+  const replacementDelivery = deliveryPromise(parseSettingObject(originalOrder.shipping_json).state, (await storefrontSettingsObject(env)).customer_experience);
   const statements = [
+    ...(approval.claimStatements||[]),
+    env.DB.prepare("UPDATE return_requests SET status='approved',notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='requested'").bind(approval.notes,requestId),
     env.DB.prepare(`
       INSERT INTO orders
-        (id, order_number, tracking_token, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, status, payment_method, payment_status, shipping_json, order_type, replacement_for_order_id, replacement_request_id)
-      VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, 0, 'pending', 'replacement', 'not_required', ?, 'replacement', ?, ?)
+        (id, order_number, tracking_token, customer_email, customer_name, items_json, subtotal, discount, coupon_code, total, payable_total, credits_used, status, payment_method, payment_status, shipping_json, order_type, replacement_for_order_id, replacement_request_id,replacement_fulfilment_mode,delivery_estimate)
+      VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, 0, 0, 0, 'pending', 'replacement', 'not_required', ?, 'replacement', ?, ?, ?, ?)
     `).bind(
       id, orderNumber, trackingToken, originalOrder.customer_email, originalOrder.customer_name,
       JSON.stringify([item]), originalOrder.shipping_json || null,
-      originalOrder.id, requestId
+      originalOrder.id, requestId, approval.immediate ? 'immediate' : 'after_receipt', replacementDelivery
     ),
     env.DB.prepare(`
       INSERT INTO order_items
@@ -5979,7 +8682,10 @@ async function createReplacementOrder(env, originalOrder, exchangeItem, replacem
     env.DB.prepare("UPDATE products SET stock = stock - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND stock >= ?")
       .bind(quantity, product.id, quantity),
     env.DB.prepare("UPDATE product_sizes SET stock = stock - ? WHERE product_id = ? AND size = ? AND stock >= ?")
-      .bind(quantity, product.id, replacementSize, quantity)
+      .bind(quantity, product.id, replacementSize, quantity),
+    env.DB.prepare("UPDATE return_requests SET replacement_order_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND replacement_order_id IS NULL AND status='approved'").bind(id,requestId),
+    env.DB.prepare("INSERT INTO admin_audit_log(id,admin_email,action,entity_type,entity_id,details_json) VALUES(?,?,?,'return_request',?,?)")
+      .bind(crypto.randomUUID(),approval.actor,approval.immediate?'auto_create_exchange_replacement':'approve_exchange_replacement',requestId,JSON.stringify({from:'requested',to:'approved',automatic:Boolean(approval.immediate),replacement_fulfilment_mode:approval.immediate?'immediate':'after_receipt',replacement_order_id:id,original_order_id:originalOrder.id,is_replacement:true,order_type:'REPLACEMENT',subtotal:0,tax_total:0,shipping_total:0,total:0}))
   ];
   try {
     await env.DB.batch(statements);
@@ -5999,16 +8705,17 @@ async function createReplacementOrder(env, originalOrder, exchangeItem, replacem
     orderId: id,
     productId: item.id
   }).catch(() => null);
-  const confirmationSent = await sendOrderEmail(env, created, "confirmation");
-  if (confirmationSent) {
-    await env.DB.prepare("UPDATE orders SET confirmation_email_sent_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(id).run();
-  }
+  // Return email describes the two independent shipments; packing is not dispatch.
   return formatOrder(created);
 }
 
 const RETURN_WITH_ORDER_SELECT = `
   SELECT rr.*,
+    g.id AS gateway_refund_id, g.state AS gateway_refund_state, g.total_paise AS gateway_refund_total_paise,
+    g.gateway_paise AS gateway_refund_gateway_paise, g.credit_amount AS gateway_refund_credit_amount,
+    g.provider AS gateway_refund_provider, g.provider_refund_id AS gateway_refund_provider_id,
+    g.checked_at AS gateway_refund_checked_at, g.last_error AS gateway_refund_last_error,
+    g.created_at AS gateway_refund_created_at, g.create_attempted AS gateway_refund_create_attempted,
     o.id AS joined_order_id,
     o.order_number AS joined_order_number,
     o.customer_email AS joined_customer_email,
@@ -6025,9 +8732,14 @@ const RETURN_WITH_ORDER_SELECT = `
     o.shipping_json AS joined_shipping_json,
     o.created_at AS joined_created_at,
     o.updated_at AS joined_updated_at,
-    (SELECT ro.order_number FROM orders ro WHERE ro.id = rr.replacement_order_id) AS replacement_order_number
+    (SELECT ro.order_number FROM orders ro WHERE ro.id = rr.replacement_order_id) AS replacement_order_number,
+    (SELECT ro.status FROM orders ro WHERE ro.id = rr.replacement_order_id) AS replacement_status,
+    (SELECT ro.packing_status FROM orders ro WHERE ro.id = rr.replacement_order_id) AS replacement_packing_status,
+    (SELECT ro.tracking_number FROM orders ro WHERE ro.id = rr.replacement_order_id) AS replacement_tracking_number
+    ,(SELECT ro.replacement_fulfilment_mode FROM orders ro WHERE ro.id = rr.replacement_order_id) AS replacement_fulfilment_mode
   FROM return_requests rr
   LEFT JOIN orders o ON o.id = rr.order_id
+  LEFT JOIN gateway_refunds g ON g.return_request_id = rr.id
 `;
 
 function formatReturnWithOrder(row) {
@@ -6049,9 +8761,26 @@ function formatReturnWithOrder(row) {
     created_at: row.joined_created_at,
     updated_at: row.joined_updated_at
   }) : null;
-  const result = { ...row, order };
+  const refundState = row.type === "exchange" ? "not_applicable"
+    : row.status === "rejected" ? "refund_rejected" : row.status === "cancelled" ? "refund_cancelled"
+    : row.credit_approval_status === "credited" ? "store_credit_confirmed"
+    : row.refund_destination === "store_credit" ? "awaiting_credit_approval_and_return"
+    : row.gateway_refund_state ? `gateway_${row.gateway_refund_state}`
+    : ["received", "refunded", "completed"].includes(row.status) ? "awaiting_owner_refund_approval"
+    : row.status === "approved" ? "refund_pending" : "refund_requested";
+  const result = { ...row, order, label_available: Boolean(row.label_key), refund_state: refundState, gateway_refund: publicGatewayRefund({
+    id: row.gateway_refund_id, state: row.gateway_refund_state, total_paise: row.gateway_refund_total_paise,
+    gateway_paise: row.gateway_refund_gateway_paise, credit_amount: row.gateway_refund_credit_amount,
+    provider: row.gateway_refund_provider, provider_refund_id: row.gateway_refund_provider_id,
+    checked_at: row.gateway_refund_checked_at, last_error: row.gateway_refund_last_error,
+    created_at: row.gateway_refund_created_at, create_attempted: row.gateway_refund_create_attempted
+  }) };
+  result.pickup_confirmed_at=row.pickup_confirmed_at||null;
+  result.returnStatus=row.pickup_confirmed_at && row.status==='approved' ? 'PICKED_UP_BY_COURIER' : String(row.status).toUpperCase();
+  let logistics={};try{logistics=JSON.parse(row.logistics_json||'{}')||{};}catch{ /* Legacy record. */ }
+  result.trackingNumber=logistics.tracking_number||'';
   for (const key of Object.keys(result)) {
-    if (key.startsWith("joined_")) delete result[key];
+    if (key.startsWith("joined_") || key.startsWith("gateway_refund_")) delete result[key];
   }
   return result;
 }
@@ -6064,26 +8793,249 @@ async function getReturnRequest(env, id) {
 async function listReturns(env, user, scope) {
   if (scope === "admin") requireAdmin(user);
   const query = scope === "admin"
-    ? `${RETURN_WITH_ORDER_SELECT} ORDER BY rr.created_at DESC`
-    : `${RETURN_WITH_ORDER_SELECT} WHERE rr.customer_email = ? ORDER BY rr.created_at DESC`;
+    ? `${RETURN_WITH_ORDER_SELECT} ORDER BY rr.created_at DESC, rr.rowid DESC`
+    : `${RETURN_WITH_ORDER_SELECT} WHERE rr.customer_email = ? ORDER BY rr.created_at DESC, rr.rowid DESC`;
   const statement = scope === "admin" ? env.DB.prepare(query) : env.DB.prepare(query).bind(user.email.toLowerCase());
   const { results } = await statement.all();
-  return json({ requests: results.map(formatReturnWithOrder) });
+  return json({ requests: results.map(row=>scope === "admin" ? formatReturnWithOrder(row) : customerReturnView(formatReturnWithOrder(row))), ...(scope === "admin" ? {
+    gateway_refunds_enabled: String(env.GATEWAY_REFUNDS_ENABLED).toLowerCase() === "true",
+    automatic_gateway_refunds_enabled: String(env.AUTOMATIC_GATEWAY_REFUNDS_ENABLED).toLowerCase() === "true"
+  } : {}) });
 }
 
-async function updateReturnRequest(request, env, user, id) {
+async function notifyCancellationRefund(env, refund) {
+  const order=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(refund.order_id).first();
+  if(!order)return;
+  const review=['reconciliation_required','failed'].includes(refund.state);
+  const confirmed=refund.state==='processed';
+  if(review)await createAdminNotification(env,{type:'cancelled_order',ownerOnly:true,priority:'urgent',
+    title:'Cancellation refund needs review',message:`${order.order_number||order.id} · ${refund.last_error||'Check payment evidence before issuing funds'}`,
+    orderId:order.id,deepLink:`/admin/orders?order=${encodeURIComponent(order.id)}`,dedupeKey:`cancellation-review:${refund.id}:${refund.state}`}).catch(()=>null);
+  const title=confirmed?'Cancellation refund confirmed':review?'Cancellation refund needs review':'Cancellation refund in progress';
+  const message=confirmed
+    ? `${refund.gateway_paise>0?`${formatInr(refund.gateway_paise/100)} confirmed by ${refund.provider}. Bank posting may take additional time.`:'No bank transfer was needed.'}${refund.credit_amount?` ${formatInr(refund.credit_amount)} restored to store credits.`:''}`
+    : review?'Your order is cancelled. Glamia is checking its refund; do not retry a payment or share an OTP.'
+    : 'Your order is cancelled. Its original-payment refund is queued or processing; confirmation will follow.';
+  await createCustomerNotification(env,{email:order.customer_email,type:'cancellation_refund',title,message,orderId:order.id,
+    deepLink:'/orders',dedupeKey:`cancellation-refund:${refund.id}:${refund.state}`}).catch(()=>null);
+  // Durable email deduplication/retries are shared with order and return mail.
+  const sent=await deliverBrevoEmail(env,{eventType:'cancellation_refund',dedupeKey:`cancellation-refund-email:${refund.id}:${refund.state}`,
+    recipient:order.customer_email,userEmail:order.customer_email,orderId:order.id,payload:{
+      sender:{name:env.BREVO_FROM_NAME||'Glamia',email:String(env.BREVO_FROM_EMAIL||'')},
+      to:[{email:order.customer_email,name:order.customer_name||order.customer_email}],
+      subject:`${title} · ${order.order_number||order.id}`,
+      textContent:`${title}\nOrder: ${order.order_number||order.id}\n${message}\nTotal refund: ${formatInr(refund.total_paise/100)}\nTrack it in Your orders. Never share an OTP, PIN or password for a refund.`,
+      htmlContent:`<h1>${escapeHtml(title)}</h1><p>Order ${escapeHtml(order.order_number||order.id)}</p><p>${escapeHtml(message)}</p><p>Total refund: ${escapeHtml(formatInr(refund.total_paise/100))}</p><p>Track it in Your orders. Never share an OTP, PIN or password for a refund.</p>`
+    }}).catch(()=>false);
+  if(confirmed&&sent)await env.DB.prepare('UPDATE cancellation_refunds SET notified_at=CURRENT_TIMESTAMP WHERE id=? AND notified_at IS NULL').bind(refund.id).run();
+}
+
+async function processCancellationRefund(env, orderId) {
+  let refund=await env.DB.prepare('SELECT * FROM cancellation_refunds WHERE order_id=?').bind(orderId).first();
+  if(!refund)return; // Historical cancellations are not silently paid out.
+  try {
+    const transport=(provider,path,init)=>gatewayRefundTransport(env,provider,path,init);
+    if(refund.state==='approved' && String(env.GATEWAY_REFUNDS_ENABLED).toLowerCase()==='true') {
+      refund=await executeGatewayRefund(env.DB,refund,transport,'system:order-cancellation');
+    } else if(['submitting','pending','reconciliation_required'].includes(refund.state)) {
+      refund=await reconcileGatewayRefund(env.DB,refund,transport);
+    }
+  } catch {
+    // Cancellation succeeded even if the refund needs investigation. Keep a durable case.
+    await env.DB.prepare(`UPDATE cancellation_refunds SET state='reconciliation_required',last_error='Cancellation payment evidence needs owner review',
+      next_check_at=datetime('now','+15 minutes'),updated_at=CURRENT_TIMESTAMP WHERE id=? AND state='approved'`).bind(refund.id).run();
+    refund=await env.DB.prepare('SELECT * FROM cancellation_refunds WHERE id=?').bind(refund.id).first();
+  }
+  await notifyCancellationRefund(env,refund);
+}
+
+async function handleCancellationRefund(request,env,actor,orderId,action) {
+  requireAdmin(actor);
+  const order=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(orderId).first();
+  if(!order)throw httpError('Order not found',404);
+  let refund=await env.DB.prepare('SELECT * FROM cancellation_refunds WHERE order_id=?').bind(orderId).first();
+  if(request.method==='GET'&&!action) {
+    const events=refund?(await env.DB.prepare('SELECT state,actor,provider_refund_id,evidence_json,created_at FROM cancellation_refund_events WHERE refund_id=? ORDER BY id LIMIT 100').bind(refund.id).all()).results:[];
+    return json({refund:cancellationRefundView(refund,order),events});
+  }
+  if(request.method!=='POST'||!['process','reconcile','recover'].includes(action))throw httpError('Not found',404);
+  if(!actor.is_owner||!adminEmails(env,request).includes(String(actor.email||'').toLowerCase()))throw httpError('Only a whitelisted owner can manage cancellation refunds',403);
+  if(!refund)throw httpError('This earlier cancellation requires a manual payment investigation; no new automatic payout was created',409);
+  if(['process','recover'].includes(action)&&String(env.GATEWAY_REFUNDS_ENABLED).toLowerCase()!=='true')throw httpError('Gateway refund execution is disabled',503);
+  const transport=(provider,path,init)=>gatewayRefundTransport(env,provider,path,init);
+  if(action==='process'&&cancellationRefundView(refund,order).verification_retry_available) {
+    // Only a whitelisted owner may retry pre-submission verification. Never
+    // reset a claim after any provider POST might have happened.
+    await env.DB.prepare(`UPDATE cancellation_refunds SET state='approved',last_actor=?,last_error='',next_check_at=CURRENT_TIMESTAMP
+      WHERE id=? AND state='reconciliation_required' AND create_attempted=0 AND dispatch_eligible=1`).bind(actor.email,refund.id).run();
+    refund=await env.DB.prepare('SELECT * FROM cancellation_refunds WHERE id=?').bind(refund.id).first();
+  }
+  refund=action==='process'?await executeGatewayRefund(env.DB,refund,transport,actor.email)
+    :action==='recover'?await recoverRazorpayRefund(env.DB,refund,transport,actor.email)
+    :await reconcileGatewayRefund(env.DB,refund,transport,actor.email);
+  await notifyCancellationRefund(env,refund);
+  const latest=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(orderId).first();
+  return json({refund:cancellationRefundView(refund,latest),order:(await attachCancellationRefunds(env,[formatOrder(latest)]))[0]});
+}
+
+async function gatewayRefundTransport(env, provider, path, init = {}) {
+  if(!['razorpay','phonepe'].includes(provider))throw httpError('Unsupported refund provider',409);
+  let response = await (provider === "razorpay" ? razorpayRequest(env, path, init) : phonePeRequest(env, path, init));
+  if (provider === "phonepe" && response.status === 401 && (init.method || "GET").toUpperCase() === "GET") {
+    // Refresh revoked/expired credentials once for read-only status checks.
+    // Never retry a financial POST, even when the response is an auth error.
+    await response.body?.cancel();
+    phonePeTokenCache = { token: "", expiresAt: 0, environment: "" };
+    response = await phonePeRequest(env, path, init);
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const rawCode = body?.code || body?.errorCode || body?.error?.code || "";
+    const code = typeof rawCode === "string" && /^[A-Z0-9_]{1,80}$/i.test(rawCode) ? rawCode : "";
+    const stage = /\/refund(?:s)?\/[^/]+(?:\/status)?$/.test(path) ? "refund status" : /\/refund$/.test(path) ? "refund creation" : "original payment verification";
+    throw Object.assign(httpError("Gateway refund response was not successful", 502), {
+      gatewayHttpStatus: response.status, gatewayErrorCode: code, gatewayStage: stage
+    });
+  }
+  try {
+    const data = await response.json();
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error();
+    return data;
+  } catch { throw httpError("Gateway refund response was unreadable", 502); }
+}
+
+async function notifyGatewayRefund(env, refund) {
+  if (refund.state === "reconciliation_required" || refund.state === "failed") {
+    await createAdminNotification(env, { type: "return_request", ownerOnly: true, priority: "urgent",
+      title: "Gateway refund needs review", message: `${refund.order_id} · ${refund.provider} · ${refund.last_error || "Provider reported failure"}`,
+      orderId: refund.order_id, dedupeKey: `gateway-refund-review:${refund.id}` }).catch(() => null);
+    const returned=await getReturnRequest(env,refund.return_request_id);
+    if(returned) {
+      await createCustomerNotification(env,{email:returned.customer_email,type:"refund_review",title:"Your refund needs review",
+        message:"Glamia is checking your refund with the payment provider. Do not submit another refund or share payment passwords.",orderId:refund.order_id,deepLink:"/orders",dedupeKey:`refund-review:${refund.id}:${refund.state}`}).catch(()=>null);
+      await sendReturnEmail(env,returned,'review_required').catch(()=>false);
+    }
+  }
+  if (refund.state !== "processed" || refund.notified_at) return;
+  const returned = await getReturnRequest(env, refund.return_request_id);
+  const sent = await sendReturnEmail(env, returned, "refunded");
+  await createCustomerNotification(env, { email: returned.customer_email, type: "refund_confirmed", title: "Refund confirmed by payment provider",
+    message: `${formatInr(refund.gateway_paise / 100)} refunded via ${refund.provider}${refund.credit_amount ? `; ${formatInr(refund.credit_amount)} restored to store credits` : ""}. Your bank's posting time may vary.`,
+    orderId: refund.order_id, deepLink: "/orders", dedupeKey: `gateway-refund:${refund.id}` }).catch(() => null);
+  if (sent) await env.DB.prepare("UPDATE gateway_refunds SET notified_at=CURRENT_TIMESTAMP WHERE id=? AND notified_at IS NULL").bind(refund.id).run();
+}
+
+async function handleGatewayRefund(request, env, actor, returnId, action) {
+  if (request.method === "GET" && !action) {
+    const refund = await env.DB.prepare("SELECT * FROM gateway_refunds WHERE return_request_id=?").bind(returnId).first();
+    if (!await getReturnRequest(env, returnId)) throw httpError("Return request not found", 404);
+    const events = refund ? (await env.DB.prepare("SELECT state,actor,provider_refund_id,evidence_json,created_at FROM gateway_refund_events WHERE refund_id=? ORDER BY id ASC LIMIT 100").bind(refund.id).all()).results : [];
+    return json({ refund: publicGatewayRefund(refund), events });
+  }
+  if (request.method !== "POST" || !action) throw httpError("Not found", 404);
+  if (!actor.is_owner || !adminEmails(env, request).includes(String(actor.email || "").toLowerCase())) throw httpError("Only a whitelisted owner can approve or execute gateway refunds", 403);
+  if (["execute", "recover", "process"].includes(action) && String(env.GATEWAY_REFUNDS_ENABLED).toLowerCase() !== "true") throw httpError("Gateway refund execution is disabled until sandbox verification is complete", 503);
+  const transport = (provider, path, init) => gatewayRefundTransport(env, provider, path, init);
+  let refund;
+  if (action === 'process') {
+    const returned=await getReturnRequest(env,returnId);
+    if(!returned || (!returned.pickup_confirmed_at && returned.status!=='received')) throw httpError('Confirm courier pickup before processing this refund',409);
+    refund=await approveGatewayRefund(env.DB,returnId,actor.email);
+    refund=await executeGatewayRefund(env.DB,refund,transport,actor.email);
+  }
+  else if (action === "approve") refund = await approveGatewayRefund(env.DB, returnId, actor.email, (await readJson(request)).amount);
+  else {
+    refund = await env.DB.prepare("SELECT * FROM gateway_refunds WHERE return_request_id=?").bind(returnId).first();
+    if (!refund) throw httpError("Approve the refund first", 409);
+    refund = action === "execute" ? await executeGatewayRefund(env.DB, refund, transport, actor.email)
+      : action === "recover" ? await recoverRazorpayRefund(env.DB, refund, transport, actor.email)
+      : await reconcileGatewayRefund(env.DB, refund, transport, actor.email);
+  }
+  await notifyGatewayRefund(env, refund);
+  return json({ request: await getReturnRequest(env, returnId), refund: publicGatewayRefund(refund) });
+}
+
+async function processGatewayRefunds(env) {
+  const {results:cancellations}=await env.DB.prepare(`SELECT order_id FROM cancellation_refunds WHERE
+    (state IN ('approved','submitting','pending','reconciliation_required') AND next_check_at<=CURRENT_TIMESTAMP)
+    OR (state='processed' AND notified_at IS NULL) ORDER BY COALESCE(next_check_at,created_at) LIMIT 10`).all();
+  for(const refund of cancellations)await processCancellationRefund(env,refund.order_id);
+  if (String(env.AUTOMATIC_GATEWAY_REFUNDS_ENABLED).toLowerCase() === "true" && String(env.GATEWAY_REFUNDS_ENABLED).toLowerCase() === "true") {
+    const { results: automatic } = await env.DB.prepare(`SELECT r.id FROM return_requests r
+      LEFT JOIN gateway_refunds g ON g.return_request_id=r.id
+      WHERE r.status='received' AND r.automatic_refund_requested_at IS NOT NULL
+        AND r.automatic_refund_next_attempt_at <= CURRENT_TIMESTAMP AND (g.id IS NULL OR g.state='approved')
+      ORDER BY r.automatic_refund_next_attempt_at LIMIT 10`).all();
+    for (const returned of automatic) await processAutomaticReturnRefund(env, returned.id);
+  }
+  const { results } = await env.DB.prepare(`SELECT * FROM gateway_refunds WHERE
+    (state IN ('submitting','pending','reconciliation_required') AND next_check_at <= CURRENT_TIMESTAMP)
+    OR (state='processed' AND notified_at IS NULL) ORDER BY COALESCE(next_check_at,created_at) LIMIT 10`).all();
+  for (const refund of results || []) {
+    const current = await reconcileGatewayRefund(env.DB, refund, (provider, path, init) => gatewayRefundTransport(env, provider, path, init));
+    await notifyGatewayRefund(env, current);
+  }
+}
+
+async function processAutomaticReturnRefund(env, returnId) {
+  if (String(env.GATEWAY_REFUNDS_ENABLED).toLowerCase() !== "true" || String(env.AUTOMATIC_GATEWAY_REFUNDS_ENABLED).toLowerCase() !== "true") return;
+  const returned = await env.DB.prepare("SELECT * FROM return_requests WHERE id=?").bind(returnId).first();
+  if (!returned?.automatic_refund_requested_at || returned.status !== "received") return;
+  try {
+    if (!adminEmails(env).includes(String(returned.automatic_refund_requested_by || "").toLowerCase())) throw httpError("Receipt authorisation requires a current whitelisted owner", 403);
+    const amount = (returned.automatic_refund_amount_paise / 100).toFixed(2);
+    let refund = await approveGatewayRefund(env.DB, returnId, returned.automatic_refund_requested_by, amount);
+    await env.DB.prepare("UPDATE return_requests SET automatic_refund_error='' WHERE id=?").bind(returnId).run();
+    refund = await executeGatewayRefund(env.DB, refund, (provider, path, init) => gatewayRefundTransport(env, provider, path, init), returned.automatic_refund_requested_by);
+    await env.DB.prepare("UPDATE return_requests SET automatic_refund_next_attempt_at=NULL WHERE id=?").bind(returnId).run();
+    await notifyGatewayRefund(env, refund);
+  } catch {
+    // The immutable intent survives a Worker interruption; the cron only resumes
+    // an unclaimed approved case. Never retry an uncertain financial POST here.
+    await env.DB.prepare("UPDATE return_requests SET automatic_refund_error=?,automatic_refund_next_attempt_at=NULL WHERE id=?")
+      .bind("Automatic refund needs owner review. Check the order/payment and refund log; do not create another refund.", returnId).run();
+    await createAdminNotification(env, { type: "return_request", ownerOnly: true, priority: "urgent",
+      title: "Automatic refund needs review", message: returnId,
+      orderId: returned.order_id, dedupeKey: `automatic-refund-review:${returnId}` }).catch(() => null);
+    await createCustomerNotification(env,{email:returned.customer_email,type:'refund_review',title:'Your refund needs review',message:'Glamia is reviewing the payment checks for your refund. No new request is needed.',orderId:returned.order_id,deepLink:'/orders',dedupeKey:`automatic-refund-review:${returnId}`}).catch(()=>null);
+    await sendReturnEmail(env,returned,'review_required').catch(()=>false);
+  }
+}
+
+async function prepareReturnLabel(env,id,actor) {
+  const current=await getReturnRequest(env,id);
+  try {
+    const settings=await storefrontSettingsObject(env,true);
+    await saveReturnLogistics(new Request('https://internal/return-label',{method:'PATCH',body:JSON.stringify({prepare_label:true})}),env,current,actor,{
+      warehouse_address:settings.fulfillment?.warehouse_address,shipping:current.order?.shipping,customer_name:current.order?.customer_name
+    });
+  } catch {
+    // The request/order is durable even if private label storage or a concurrent update fails.
+    // The logistics form offers a safe retry; never repeat a replacement stock debit.
+  }
+  return getReturnRequest(env,id);
+}
+
+async function updateReturnRequest(request, env, user, id, ctx) {
+  requireReturnsAdmin(user);
   const body = await readJson(request);
-  const status = String(body.status || "").trim().toLowerCase();
+  const requestedStatus = String(body.status || "").trim().toLowerCase();
+  const status = requestedStatus === "returned" ? "received" : requestedStatus;
   const returnStatuses = ["requested", "approved", "rejected", "received", "refunded", "completed", "cancelled"];
   if (!returnStatuses.includes(status)) {
     return json({ error: "Invalid after-sales status" }, 400);
   }
   const current = await env.DB.prepare("SELECT * FROM return_requests WHERE id = ?").bind(id).first();
   if (!current) return json({ error: "After-sales request not found" }, 404);
+  const gatewayRefund = await env.DB.prepare("SELECT state,total_paise FROM gateway_refunds WHERE return_request_id=?").bind(id).first();
+  if (gatewayRefund && (status !== current.status && !(gatewayRefund.state === "processed" && status === "completed")
+    || (body.refund_amount != null && Math.round(Number(body.refund_amount)*100) !== gatewayRefund.total_paise))) {
+    return json({ error: "An approved gateway refund locks the amount and return status. Use refund reconciliation." }, 409);
+  }
   const allowedTransitions = {
     requested: new Set(["approved", "rejected", "cancelled"]),
     approved: new Set(["received", "refunded", "rejected", "cancelled"]),
-    received: new Set(["refunded", "rejected", "cancelled"]),
+    received: new Set(["refunded", "rejected", "cancelled", ...(current.type==='exchange' ? ['completed'] : [])]),
     refunded: new Set(["completed"]),
     rejected: new Set(),
     completed: new Set(),
@@ -6092,71 +9044,181 @@ async function updateReturnRequest(request, env, user, id) {
   if (status !== current.status && !allowedTransitions[current.status]?.has(status)) {
     return json({ error: `Cannot move an after-sales request from ${current.status} to ${status}` }, 409);
   }
-  if (status === current.status) return json({ request: await getReturnRequest(env, id) });
+  if (status === current.status) return json({ request: status==='approved' ? await prepareReturnLabel(env,id,user.email) : await getReturnRequest(env, id) });
+  if (status === "refunded" || (status === "completed" && current.type !== "exchange" && current.credit_approval_status !== "credited" && gatewayRefund?.state !== "processed")) {
+    return json({ error: "Record return receipt as Received; original-payment refunds are marked refunded only after verified provider execution. Use the approved Store credits workflow for credit refunds." }, 409);
+  }
   const notes = String(body.notes ?? current.notes ?? "").trim().slice(0, 1000);
-  const order = current.order_id ? await env.DB.prepare("SELECT total, payment_method FROM orders WHERE id = ?").bind(current.order_id).first() : null;
+  if(status==='rejected' && notes.length<10) return json({error:'Explain the decision to the customer in at least 10 characters'},400);
+  if(status==='completed' && current.type==='exchange') {
+    const replacement=await env.DB.prepare('SELECT status FROM orders WHERE id=?').bind(current.replacement_order_id).first();
+    if(replacement?.status!=='delivered') return json({error:'Complete the exchange after the replacement is delivered'},409);
+  }
+  if(status==='approved' && current.type==='exchange' && !current.replacement_order_id) {
+    const original=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(current.order_id).first();
+    const selected=JSON.parse(current.selected_items_json||'[]').find(item=>item.product_id===current.exchange_product_id && item.size===current.exchange_from_size);
+    const item=await env.DB.prepare('SELECT product_id AS id,product_name,quantity,variant,color,image_url FROM order_items WHERE order_id=? AND id=?')
+      .bind(current.order_id,selected?.line_id||'').first();
+    if(!original||!item) return json({error:'The purchased exchange item needs review'},409);
+    item.quantity=selected?.quantity||item.quantity;
+    let replacement;
+    try {replacement=await createReplacementOrder(env,original,item,current.exchange_to_size,id,{notes,actor:user.email});}
+    catch(error) {
+      const latest=await getReturnRequest(env,id);
+      if(latest?.status==='approved' && latest.replacement_order_id) return json({request:latest});
+      if(error.status===409||/insufficient replacement stock/i.test(error.message)) return json({error:'The replacement size is no longer available. Approval was not saved.'},409);
+      throw error;
+    }
+    const approved=await prepareReturnLabel(env,id,user.email);
+    await sendReturnEmail(env,approved,'approved');
+    return json({request:approved,replacement_order:replacement});
+  }
+  const order = current.order_id ? await env.DB.prepare("SELECT total, payment_method, credits_used, payment_status, status FROM orders WHERE id = ?").bind(current.order_id).first() : null;
   const orderTotal = Math.max(0, Math.floor(Number(order?.total) || 0));
   const refundDestination = ["cod", "demo"].includes(order?.payment_method) ? "store_credit" : (current.refund_destination || "original");
-  const refundAmount = body.refund_amount === "" || body.refund_amount === null || body.refund_amount === undefined
-    ? Math.max(0, Math.floor(Number(current.refund_amount) || orderTotal))
-    : Math.floor(Number(body.refund_amount));
-  if (!Number.isSafeInteger(refundAmount) || refundAmount < 0 || refundAmount > orderTotal) {
+  const automatic = status === "received" && current.type === "refund" && refundDestination === "original"
+    && String(env.AUTOMATIC_GATEWAY_REFUNDS_ENABLED).toLowerCase() === "true";
+  if (automatic && (!user.is_owner || !adminEmails(env, request).includes(String(user.email || "").toLowerCase()))) {
+    return json({ error: "A whitelisted owner must mark this original-payment return Received because it automatically sends the refund" }, 403);
+  }
+  if (automatic && (String(env.GATEWAY_REFUNDS_ENABLED).toLowerCase() !== "true" || order?.payment_status !== "paid" || order?.status !== "delivered" || !["razorpay", "phonepe"].includes(order?.payment_method))) {
+    return json({ error: "Automatic refund requires enabled execution and a paid, delivered gateway order" }, 409);
+  }
+  const automaticPaise = automatic ? (current.requested_amount_paise ?? refundPaise(order.total)) : null;
+  const refundAmount = automatic ? automaticPaise / 100 : gatewayRefund ? gatewayRefund.total_paise / 100 : body.refund_amount === "" || body.refund_amount === null || body.refund_amount === undefined
+    ? Math.max(0, Number(current.refund_amount) || orderTotal)
+    : Number(body.refund_amount);
+  if ((refundDestination==='store_credit' && !Number.isSafeInteger(refundAmount)) || !Number.isFinite(refundAmount) || !Number.isSafeInteger(Math.round(refundAmount*100)) || Math.abs(refundAmount*100-Math.round(refundAmount*100))>.000001 || refundAmount < 0 || refundAmount > Number(order?.total||0)) {
     return json({ error: `Refund amount must be between ₹0 and ${formatInr(orderTotal)}` }, 400);
   }
-  const processedAt = status === "refunded" ? (current.refund_processed_at || new Date().toISOString()) : current.refund_processed_at;
-  const statements = [env.DB.prepare("UPDATE return_requests SET status = ?, notes = ?, refund_amount = ?, refund_processed_at = ?, refund_destination = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-    .bind(status, notes, refundAmount, processedAt, refundDestination, id)];
-  if (status === "refunded" && current.status !== "refunded" && refundDestination === "store_credit") {
-    const customerEmail = String(current.customer_email || "").trim().toLowerCase();
-    statements.push(env.DB.prepare("INSERT OR IGNORE INTO store_credit_ledger (id, user_email, amount, kind, description, order_id, return_request_id) VALUES (?, ?, ?, 'refund', ?, ?, ?)")
-      .bind(crypto.randomUUID(), customerEmail, refundAmount, `Refund credit for ${current.order_id}`, current.order_id, id));
-    statements.push(env.DB.prepare(`INSERT INTO store_credit_accounts (user_email, balance, updated_at)
-      SELECT ?, COALESCE(SUM(amount), 0), CURRENT_TIMESTAMP FROM store_credit_ledger WHERE user_email = ?
-      ON CONFLICT(user_email) DO UPDATE SET balance = excluded.balance, updated_at = CURRENT_TIMESTAMP`)
-      .bind(customerEmail, customerEmail));
+  if (refundAmount !== Number(current.refund_amount) && ["approved", "credited"].includes(current.credit_approval_status)) return json({ error: "An approved credit refund amount cannot be changed" }, 409);
+  if(current.requested_amount_paise!==null && Math.round(refundAmount*100)>current.requested_amount_paise) return json({error:"Refund cannot exceed the selected purchased items"},409);
+  if(["rejected","cancelled"].includes(status)&&current.type==='exchange') {
+    const replacement=await env.DB.prepare("SELECT status FROM orders WHERE id=?").bind(current.replacement_order_id).first();
+    if(['shipped','delivered'].includes(replacement?.status)) return json({error:"The replacement was dispatched. Contact an owner to investigate before closing this case."},409);
   }
-  await env.DB.batch(statements);
+  if (status === "refunded" && refundDestination === "store_credit") return json({ error: "Mark the order Returned / received, then use Store credits for whitelisted-admin approval. Credits release automatically when both are recorded." }, 409);
+  const processedAt = status === "refunded" ? (current.refund_processed_at || new Date().toISOString()) : current.refund_processed_at;
+  const statements = [env.DB.prepare(`UPDATE return_requests SET status = ?, notes = ?, refund_amount = ?, refund_processed_at = ?, refund_destination = ?, returned_at = CASE WHEN ? = 'received' THEN COALESCE(returned_at,CURRENT_TIMESTAMP) ELSE returned_at END,
+    automatic_refund_requested_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE automatic_refund_requested_at END,
+    automatic_refund_requested_by=CASE WHEN ? THEN ? ELSE automatic_refund_requested_by END,
+    automatic_refund_amount_paise=CASE WHEN ? THEN ? ELSE automatic_refund_amount_paise END,
+    automatic_refund_next_attempt_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE automatic_refund_next_attempt_at END,
+    updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = ?`)
+    .bind(status, notes, refundAmount, processedAt, refundDestination, status, automatic ? 1 : 0,
+      automatic ? 1 : 0, String(user.email || "").toLowerCase(), automatic ? 1 : 0, automaticPaise, automatic ? 1 : 0, id, current.status)];
+  if (status === "refunded" && refundDestination === "original" && refundAmount > 0 && Number(order?.credits_used) > 0) {
+    const customerEmail = String(current.customer_email || "").trim().toLowerCase();
+    statements.push(env.DB.prepare("INSERT OR IGNORE INTO store_credit_ledger (id, user_email, amount, kind, description, order_id, return_request_id, idempotency_key) VALUES (?, ?, ?, 'refund', ?, ?, ?, ?)")
+      .bind(`original-credit:${id}`, customerEmail, Math.min(Number(order.credits_used), refundAmount), `Store-credit portion restored for ${current.order_id}`, current.order_id, id, `original-credit:${id}`));
+  }
+  const updatedResults=await env.DB.batch(statements);
+  if(!updatedResults[0]?.meta?.changes) return json({error:'This return changed. Refresh before trying again.'},409);
+  invalidateProductEnrichment();
   await writeAuditLog(env, user.email, "update_return_request", "return_request", id, { from: current.status, to: status });
-  const updatedRequest = await getReturnRequest(env, id);
-  await sendReturnEmail(env, updatedRequest, status);
+  if (automatic) {
+    const processing = processAutomaticReturnRefund(env, id);
+    if (ctx?.waitUntil) ctx.waitUntil(processing);
+    else await processing;
+  }
+  const updatedRequest = status==='approved' ? await prepareReturnLabel(env,id,user.email) : await getReturnRequest(env, id);
+  if (updatedRequest.credit_approval_status === "credited") await notifyCreditRefund(env, updatedRequest);
+  else await sendReturnEmail(env, updatedRequest, updatedRequest.status);
   return json({ request: updatedRequest });
 }
 
-async function getLoyalty(env, user) {
-  const email = String(user.email || "").trim().toLowerCase();
-  let codeRow = await env.DB.prepare("SELECT code FROM referral_codes WHERE user_email = ?").bind(email).first();
-  if (!codeRow) {
-    const code = `GLAMIA-${await shortHash(email)}`;
-    await env.DB.prepare("INSERT OR IGNORE INTO referral_codes (code, user_email) VALUES (?, ?)").bind(code, email).run();
-    codeRow = await env.DB.prepare("SELECT code FROM referral_codes WHERE user_email = ?").bind(email).first();
-  }
-  const account = await env.DB.prepare("SELECT balance FROM store_credit_accounts WHERE user_email = ?").bind(email).first();
-  const { results: ledger } = await env.DB.prepare("SELECT amount, kind, description, order_id, created_at FROM store_credit_ledger WHERE user_email = ? ORDER BY created_at DESC LIMIT 20").bind(email).all();
-  const { results: referrals } = await env.DB.prepare("SELECT referred_email, created_at FROM referral_rewards WHERE referrer_email = ? ORDER BY created_at DESC LIMIT 20").bind(email).all();
-  return json({ balance: Number(account?.balance || 0), referral_code: codeRow?.code || null, ledger, referrals });
-}
-
-async function applyReferral(env, referredEmail, rawCode) {
-  const code = String(rawCode || "").trim().toUpperCase();
-  if (!code) return false;
-  const referrer = await env.DB.prepare("SELECT user_email FROM referral_codes WHERE code = ?").bind(code).first();
-  const referred = String(referredEmail || "").trim().toLowerCase();
-  if (!referrer || !referred || referrer.user_email === referred) return false;
-  const existing = await env.DB.prepare("SELECT referred_email FROM referral_rewards WHERE referred_email = ?").bind(referred).first();
-  if (existing) return false;
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO referral_rewards (referred_email, referrer_email, referral_code) VALUES (?, ?, ?)").bind(referred, referrer.user_email, code),
-    env.DB.prepare(`INSERT INTO store_credit_accounts (user_email, balance) VALUES (?, 500) ON CONFLICT(user_email) DO UPDATE SET balance = store_credit_accounts.balance + 500, updated_at = CURRENT_TIMESTAMP`).bind(referred),
-    env.DB.prepare(`INSERT INTO store_credit_accounts (user_email, balance) VALUES (?, 1000) ON CONFLICT(user_email) DO UPDATE SET balance = store_credit_accounts.balance + 1000, updated_at = CURRENT_TIMESTAMP`).bind(referrer.user_email),
-    env.DB.prepare("INSERT INTO store_credit_ledger (id, user_email, amount, kind, description) VALUES (?, ?, 500, 'referral', 'Welcome credit for joining through a Glamia referral', ?)").bind(crypto.randomUUID(), referred, null),
-    env.DB.prepare("INSERT INTO store_credit_ledger (id, user_email, amount, kind, description) VALUES (?, ?, 1000, 'referral', 'Referral reward for welcoming a new Glamia member', ?)").bind(crypto.randomUUID(), referrer.user_email, null)
+async function confirmReturnPickup(request,env,user,id) {
+  requireReturnsAdmin(user);
+  const current=await getReturnRequest(env,id);
+  if(!current) return json({error:'Return request not found'},404);
+  if(current.pickup_confirmed_at) return json({request:current,idempotent:true});
+  const logistics=JSON.parse(current.logistics_json||'{}');
+  if(current.status!=='approved'||!logistics.carrier||!logistics.tracking_number) return json({error:'Approve the request and assign a courier and tracking number first'},409);
+  const results=await env.DB.batch([
+    env.DB.prepare("UPDATE return_requests SET pickup_confirmed_at=CURRENT_TIMESTAMP,pickup_confirmed_by=?,logistics_json=json_set(logistics_json,'$.pickup_status','collected'),updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='approved' AND pickup_confirmed_at IS NULL")
+      .bind(user.email,id),
+    env.DB.prepare("INSERT OR IGNORE INTO admin_audit_log(id,admin_email,action,entity_type,entity_id,details_json) SELECT ?,?,'return_courier_pickup','return_request',id,? FROM return_requests WHERE id=? AND pickup_confirmed_by=?")
+      .bind(`pickup:${id}`,user.email,JSON.stringify({status:'PICKED_UP_BY_COURIER',courier_name:logistics.carrier,tracking_number:logistics.tracking_number}),id,user.email)
   ]);
-  return true;
+  if(!results[0].meta?.changes) {
+    const latest=await getReturnRequest(env,id);
+    return latest?.pickup_confirmed_at ? json({request:latest,idempotent:true}) : json({error:'The return changed before pickup was recorded. Refresh first.'},409);
+  }
+  await createCustomerNotification(env,{email:current.customer_email,type:'return_update',title:'Your return has been collected',message:'Courier pickup is confirmed. Follow refund or exchange progress in Your orders.',orderId:current.order_id,deepLink:'/orders',dedupeKey:`return-pickup:${id}`}).catch(()=>null);
+  return json({request:await getReturnRequest(env,id)});
 }
 
-async function shortHash(value) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].slice(0, 5).map(byte => byte.toString(16).padStart(2, "0")).join("").toUpperCase();
+async function completeReturnComplaint(request,env,user,id) {
+  requireReturnsAdmin(user);
+  const body=await readJson(request);
+  const reason=typeof body.reason==='string' ? body.reason.trim() : '';
+  if(reason.length<10 || reason.length>1000 || body.acknowledge!==true) return json({error:'Provide a reason (10–1000 characters) and confirm that closing the complaint does not confirm or issue a refund.'},400);
+  const current=await getReturnRequest(env,id);
+  if(!current) return json({error:'Return request not found'},404);
+  if(current.case_completed_at) return json({request:current,idempotent:true});
+  // One atomic claim + audit. Never touch refund, order, credit, stock or custody
+  // fields; provider reconciliation continues even when the complaint is closed.
+  const results=await env.DB.batch([
+    env.DB.prepare('UPDATE return_requests SET case_completed_at=CURRENT_TIMESTAMP,case_completed_by=?,case_completion_reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND case_completed_at IS NULL').bind(user.email,reason,id),
+    env.DB.prepare("INSERT INTO admin_audit_log(id,admin_email,action,entity_type,entity_id,details_json) SELECT ?,?,'complete_return_complaint','return_request',id,? FROM return_requests WHERE id=? AND changes()>0")
+      .bind(crypto.randomUUID(),user.email,JSON.stringify({reason,workflow_status:current.status,refund_state:current.gateway_refund?.state||current.refund_state||null,financial_status_preserved:true}),id)
+  ]);
+  return json({request:await getReturnRequest(env,id),idempotent:!results[0]?.meta?.changes});
+}
+
+async function confirmWarehouseReceipt(request,env,user,id,ctx) {
+  requireReturnsAdmin(user);
+  const current=await getReturnRequest(env,id);
+  if(!current) return json({error:'Return request not found'},404);
+  if(current.returned_at) return json({request:current,idempotent:true});
+  if(!['approved','received','refunded','completed'].includes(current.status)) return json({error:'Approve the return before recording warehouse receipt'},409);
+  if(!current.gateway_refund && current.credit_approval_status!=='credited' && current.status==='approved') {
+    const change=new Request(request.url,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'received'})});
+    return updateReturnRequest(change,env,user,id,ctx);
+  }
+  const results=await env.DB.batch([
+    env.DB.prepare("UPDATE return_requests SET returned_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND returned_at IS NULL AND status IN ('approved','received','refunded','completed')").bind(id),
+    env.DB.prepare("INSERT INTO admin_audit_log(id,admin_email,action,entity_type,entity_id,details_json) SELECT ?,?,'return_warehouse_receipt','return_request',id,? FROM return_requests WHERE id=? AND changes()>0").bind(crypto.randomUUID(),user.email,JSON.stringify({financial_status_preserved:true}),id)
+  ]);
+  const latest=await getReturnRequest(env,id);
+  if(!results[0]?.meta?.changes && !latest?.returned_at) return json({error:'This return changed. Refresh first.'},409);
+  return json({request:latest});
+}
+
+async function handleCreditAdmin(request, env, actor, path, url) {
+  const authority = creditAuthority(actor, Boolean(actor.is_owner && adminEmails(env, request).includes(String(actor.email || "").toLowerCase())));
+  if (!authority.allowed) throw httpError("Store credits permission is required", 403);
+  if (request.method === "GET" && path === "/api/admin/credits") return json(await creditAdminData(env, actor, authority, url.searchParams.get("q") || ""));
+  if (request.method === "POST" && path === "/api/admin/credits/grants") {
+    const result = await grantStoreCredits(env, actor, authority, await readJson(request));
+    if (!result.idempotent) await writeAuditLog(env, actor.email, "grant_store_credits", "credit", result.entry.id, { email: result.entry.user_email, amount: result.entry.amount });
+    await createCustomerNotification(env, { email: result.entry.user_email, type: "store_credit", title: "Store credits added",
+      message: `${formatInr(result.entry.amount)} was added to your Glamia credits. ${result.entry.description}`, deepLink: "/credits", dedupeKey: `credit:${result.entry.id}` }).catch(() => null);
+    return json(result, result.idempotent ? 200 : 201);
+  }
+  if (request.method === "PATCH" && path === "/api/admin/credits/settings") {
+    const settings = await saveCreditSettings(env, actor, authority, await readJson(request));
+    await writeAuditLog(env, actor.email, "store_credit_settings", "credit_settings", "1", settings);
+    return json({ settings });
+  }
+  const refund = path.match(/^\/api\/admin\/credits\/refunds\/([^/]+)$/);
+  if (request.method === "POST" && refund) {
+    const body = await readJson(request);
+    const result = await decideCreditRefund(env, actor, authority, decodeURIComponent(refund[1]), body.decision);
+    await writeAuditLog(env, actor.email, "store_credit_refund_decision", "return_request", result.request.id, { decision: body.decision });
+    await notifyCreditRefund(env, result.request);
+    return json(result);
+  }
+  return json({ error: "Not found" }, 404);
+}
+
+async function notifyCreditRefund(env, refund) {
+  if (refund.credit_approval_status !== "credited") return;
+  await createCustomerNotification(env, { email: refund.customer_email, type: "store_credit_refund", title: "Refund added to store credits",
+    message: `${formatInr(refund.refund_amount)} is now available in your Glamia credits.`, orderId: refund.order_id, deepLink: "/credits", dedupeKey: `credit-refund:${refund.id}` }).catch(() => null);
+  await env.DB.prepare("UPDATE admin_notifications SET read_at = CURRENT_TIMESTAMP, dismissed_at = CURRENT_TIMESTAMP WHERE dedupe_key = ?")
+    .bind(`credit-approval:${refund.id}`).run();
+  await sendReturnEmail(env, refund, "refunded");
 }
 
 async function listRestockSubscriptions(env, user) {
@@ -6197,35 +9259,118 @@ async function healthCheck(env) {
   }
 }
 
-function supportTicketView(row) {
+function requireSupportStaff(user) {
+  requireAdmin(user);
+  if(user.employee_id && !user.is_owner && user.employee_permissions?.support!==true)throw httpError('Customer support permission is required',403);
+}
+
+async function supportOrderContextData(env,order,{internal=false,referenceLineIds=[]}={}) {
+  const [lines,cases]=await Promise.all([purchasedReturnLines(env,order.id),env.DB.prepare('SELECT status,selected_items_json FROM return_requests WHERE order_id=?').bind(order.id).all()]);
+  const remaining=remainingReturnLines(lines,cases.results);
+  const activeCase=cases.results.some(item=>!['rejected','cancelled','completed','refunded'].includes(item.status));
+  const payment=adminReturnPaymentOptions(order);
+  const windowOpen=!orderReturnWindow(order);
+  const canEnable=order.status==='delivered' && windowOpen && (payment.refund_available||payment.exchange_available) && !activeCase;
+  const context={
+    order:{id:order.id,order_number:order.order_number,status:order.status,payment_status:order.payment_status,payment_method:order.payment_method,
+      total:order.total,created_at:order.created_at,delivered_at:order.delivered_at,return_window_days:RETURN_WINDOW_DAYS,return_window_open:windowOpen},
+    referenced_line_ids:referenceLineIds,
+    items:remaining.map(line=>({line_id:line.id,product_id:line.product_id,product_name:line.product_name,image_url:line.image_url||'',color:line.color||'',size:line.size||'',
+      quantity:line.quantity,remaining_quantity:line.remaining_quantity,unit_price:line.unit_price,
+      standard_returnable:line.returnable_snapshot===1,policy_snapshot_known:line.returnable_snapshot!==null,
+      returnable:Boolean(line.eligible_returnable),support_return_enabled:Boolean(line.support_return_enabled),
+      referenced:referenceLineIds.includes(line.id),can_enable:internal&&canEnable&&line.remaining_quantity>0&&line.returnable_snapshot!==1})),
+    eligibility_message:activeCase?'An after-sales request is already in progress.':order.status!=='delivered'?'Returns open after delivery.':!windowOpen?'The return window is closed. An owner must handle any window exception.':!payment.refund_available&&!payment.exchange_available?'This order has no eligible settled payment.':'',
+  };
+  if(internal)context.access_history=(await env.DB.prepare('SELECT id,order_item_id,enabled,actor,reason,created_at FROM order_return_access_events WHERE order_id=? ORDER BY id DESC LIMIT 50').bind(order.id).all()).results;
+  return context;
+}
+
+async function supportTicketLinkedOrder(env,user,ticketId) {
+  requireSupportStaff(user);
+  const ticket=await env.DB.prepare('SELECT * FROM support_tickets WHERE id=?').bind(ticketId).first();
+  if(!ticket)throw httpError('Support ticket not found',404);
+  const order=ticket.order_id ? await env.DB.prepare('SELECT * FROM orders WHERE (id=? OR order_number=?) AND LOWER(TRIM(customer_email))=?')
+    .bind(ticket.order_id,ticket.order_id,String(ticket.customer_email).trim().toLowerCase()).first() : null;
+  return {ticket,order};
+}
+
+async function supportTicketOrderContext(env,user,ticketId) {
+  const {ticket,order}=await supportTicketLinkedOrder(env,user,ticketId);
+  if(!order)return json({order:null,items:[],access_history:[],eligibility_message:ticket.order_id?'The linked order could not be verified for this customer.':'This is a general enquiry; no order is linked.'});
+  return json(await supportOrderContextData(env,order,{internal:true,referenceLineIds:supportLineReferences(ticket.referenced_line_ids_json)}));
+}
+
+async function updateSupportReturnAccess(request,env,user,ticketId) {
+  const {ticket,order}=await supportTicketLinkedOrder(env,user,ticketId);
+  if(!order)return json({error:'A verified customer order must be linked to this ticket'},409);
+  const body=await readJson(request);
+  const reason=String(body.reason||'').trim();
+  if(typeof body.enabled!=='boolean')return json({error:'Choose whether to enable or disable return access'},400);
+  if(reason.length<10||reason.length>500)return json({error:'Explain this manual decision in 10–500 characters. It stays in the staff audit log.'},400);
+  if(!Array.isArray(body.line_ids)||!body.line_ids.length||body.line_ids.length>100||body.line_ids.some(id=>typeof id!=='string'))return json({error:'Choose the purchased items for this order'},400);
+  const context=await supportOrderContextData(env,order,{internal:true});
+  const ids=[...new Set(body.line_ids)];
+  if(ids.some(id=>!context.items.some(line=>line.line_id===id)))return json({error:'An item does not belong to this order'},400);
+  if(ids.some(id=>context.items.find(line=>line.line_id===id).standard_returnable))return json({error:'Standard returnable items do not need a policy exception'},400);
+  if(context.eligibility_message)return json({error:context.eligibility_message},409);
+  if(body.enabled && ids.some(id=>context.items.find(line=>line.line_id===id).remaining_quantity<1))return json({error:'These purchased quantities already have return requests'},409);
+  const changedIds=ids.filter(id=>context.items.find(line=>line.line_id===id).support_return_enabled!==body.enabled);
+  if(!changedIds.length)return supportTicketOrderContext(env,user,ticketId);
+  const statements=changedIds.map(id=>env.DB.prepare(`INSERT INTO order_return_access(order_item_id,order_id,ticket_id,enabled,actor,reason)
+    VALUES(?,?,?,?,?,?) ON CONFLICT(order_item_id) DO UPDATE SET ticket_id=excluded.ticket_id,enabled=excluded.enabled,actor=excluded.actor,reason=excluded.reason,updated_at=CURRENT_TIMESTAMP
+    WHERE order_return_access.enabled!=excluded.enabled`)
+    .bind(id,order.id,ticket.id,body.enabled?1:0,String(user.email).trim().toLowerCase(),reason));
+  statements.push(env.DB.prepare(`INSERT INTO admin_audit_log(id,admin_email,action,entity_type,entity_id,details_json) VALUES(?,?,'support_return_access','order',?,?)`)
+    .bind(crypto.randomUUID(),user.email,order.id,JSON.stringify({ticket_id:ticket.id,line_ids:changedIds,enabled:body.enabled,reason})));
+  try { await env.DB.batch(statements); }
+  catch(error){if(/return request already uses/i.test(String(error.message)))return json({error:'A return request was created while you were editing. Refresh the order; existing requests are not changed.'},409);throw error;}
+  // Enabling access does not submit a return, send chat, approve a refund or alter stock.
+  return supportTicketOrderContext(env,user,ticketId);
+}
+
+function supportTicketView(row, internal = false) {
   return {
     id: row.id, ticket_number: row.ticket_number, customer_email: row.customer_email,
     customer_name: row.customer_name, order_id: row.order_id || "", subject: row.subject,
     message: row.message, status: row.status, priority: row.priority,
-    admin_note: row.admin_note || "", created_at: row.created_at, updated_at: row.updated_at,
+    referenced_line_ids: supportLineReferences(row.referenced_line_ids_json),
+    ...(internal ? {admin_note: row.admin_note || ""} : {}), created_at: row.created_at, updated_at: row.updated_at,
     resolved_at: row.resolved_at || null
   };
 }
 
 async function createSupportTicket(request, env, user) {
   const body = await readJson(request);
-  const email = String(body.email || user?.email || "").trim().toLowerCase();
+  // Account identity is authoritative; optional contact fields cannot move a ticket
+  // (or the linked order) into another customer's support history.
+  const email = String(user?.email || body.email || "").trim().toLowerCase();
   const name = String(body.name || user?.name || "").trim().slice(0, 100);
   const subject = String(body.subject || "").trim().slice(0, 140);
   const message = String(body.message || "").trim().slice(0, 2000);
   const orderId = String(body.order_id || "").trim().slice(0, 100);
+  if (body.topic === "return_exchange" && !user) return json({ error: "Sign in to choose the order you need help with" }, 401);
+  if (body.topic === "return_exchange" && !orderId) return json({ error: "Choose the order you need help with first" }, 400);
   if (!isRealCustomerEmail(email)) return json({ error: "Enter a valid email address" }, 400);
   if (subject.length < 3) return json({ error: "Add a short subject" }, 400);
   if (message.length < 10) return json({ error: "Tell us a little more so we can help" }, 400);
+  let referenceLineIds=[];
+  if(body.item_line_ids!==undefined && (!Array.isArray(body.item_line_ids)||body.item_line_ids.length>100)) return json({error:'Choose valid purchased items'},400);
   if (orderId) {
+    if (!user) return json({ error: "Sign in to link an order to your support request" }, 401);
     const order = await env.DB.prepare("SELECT id, customer_email FROM orders WHERE id = ? OR order_number = ? LIMIT 1").bind(orderId, orderId).first();
     if (!order) return json({ error: "That order could not be found" }, 400);
     if (user && String(order.customer_email).toLowerCase() !== String(user.email).toLowerCase()) return json({ error: "That order does not belong to this account" }, 403);
+    const lines=await purchasedReturnLines(env,order.id);
+    referenceLineIds=[...new Set(body.item_line_ids||[])];
+    if(referenceLineIds.some(id=>typeof id!=='string'||!lines.some(line=>line.id===id)))return json({error:'Choose items purchased on this order'},400);
+    if(!referenceLineIds.length && lines.length===1)referenceLineIds=[lines[0].id];
   }
+  else if(body.item_line_ids?.length)return json({error:'Choose an order before choosing items'},400);
   const id = crypto.randomUUID();
   const ticketNumber = `GM-SUP-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${id.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
-  await env.DB.prepare("INSERT INTO support_tickets (id, ticket_number, customer_email, customer_name, order_id, subject, message) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, ticketNumber, email, name, orderId, subject, message).run();
+  await env.DB.prepare("INSERT INTO support_tickets (id, ticket_number, customer_email, customer_name, order_id, subject, message,referenced_line_ids_json) VALUES (?, ?, ?, ?, ?, ?, ?,?)")
+    .bind(id, ticketNumber, email, name, orderId, subject, message,JSON.stringify(referenceLineIds)).run();
   await env.DB.prepare("INSERT INTO support_messages (id, ticket_id, sender_role, sender_email, message) VALUES (?, ?, 'customer', ?, ?)")
     .bind(crypto.randomUUID(), id, email, message).run();
   const created = await env.DB.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(id).first();
@@ -6246,7 +9391,7 @@ async function listSupportTickets(env, user, scope) {
     ? env.DB.prepare("SELECT * FROM support_tickets ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, updated_at DESC LIMIT 300")
     : env.DB.prepare("SELECT * FROM support_tickets WHERE customer_email = ? ORDER BY created_at DESC").bind(String(user.email).toLowerCase());
   const { results } = await statement.all();
-  return json({ tickets: results.map(supportTicketView) });
+  return json({ tickets: results.map(row=>supportTicketView(row,scope==='admin')) });
 }
 
 async function supportTicketForUser(env, user, ticketId) {
@@ -6272,7 +9417,26 @@ async function listSupportMessages(env, user, ticketId) {
       created_at: ticket.created_at
     });
   }
-  return json({ messages: results });
+  return json({ messages: user.role==='admin'?results:results.map(row=>Object.fromEntries(['id','ticket_id','sender_role','message','created_at'].map(key=>[key,row[key]]))) });
+}
+
+async function escalateOwnSupportTicket(env,user,ticketId){
+  const ticket=await env.DB.prepare('SELECT * FROM support_tickets WHERE id=? AND LOWER(customer_email)=?').bind(ticketId,user.email.toLowerCase()).first();
+  if(!ticket)return json({error:'Support ticket not found'},404);
+  if(['closed','resolved'].includes(ticket.status))return json({error:'Reply to reopen this conversation first'},409);
+  const latest=await env.DB.prepare('SELECT id,sender_role,created_at FROM support_messages WHERE ticket_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1').bind(ticketId).first();
+  const hours=(await storefrontSettingsObject(env)).customer_experience.support_hours;
+  const raw=String(latest?.created_at||ticket.created_at);
+  const since=Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)?raw.replace(' ','T')+'Z':raw);
+  if(latest?.sender_role==='admin'||!Number.isFinite(since)||Date.now()-since<hours*3600000)return json({error:'The reply target has not passed, or care has already replied'},409);
+  // Claim only the same still-unanswered message. A concurrent care reply wins.
+  const changed=await env.DB.prepare(`UPDATE support_tickets SET priority='urgent',updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND LOWER(customer_email)=? AND status NOT IN ('closed','resolved') AND priority!='urgent'
+      AND COALESCE((SELECT id FROM support_messages WHERE ticket_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1),'')=?`)
+    .bind(ticketId,user.email.toLowerCase(),ticketId,latest?.id||'').run();
+  if(!changed.meta.changes)return json({error:'This request was already escalated or the conversation has changed. Refresh to see the latest reply.'},409);
+  await createAdminNotification(env,{type:'support_ticket',priority:'urgent',title:'Overdue care request',message:`${ticket.ticket_number}: customer requested priority review.`,dedupeKey:`support-escalate:${ticket.id}:${latest?.created_at||ticket.created_at}`,ticketId:ticket.id});
+  return json({ok:true});
 }
 
 async function createSupportMessage(request, env, user, ticketId) {
@@ -6294,7 +9458,7 @@ async function createSupportMessage(request, env, user, ticketId) {
     await writeAuditLog(env, user.email, "reply_support_ticket", "support_ticket", ticketId, { message_id: id });
   }
   const created = await env.DB.prepare("SELECT id, ticket_id, sender_role, sender_email, message, created_at FROM support_messages WHERE id = ?").bind(id).first();
-  return json({ message: created, ticket: supportTicketView(await env.DB.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(ticketId).first()) }, 201);
+  return json({ message: senderRole==='admin'?created:Object.fromEntries(['id','ticket_id','sender_role','message','created_at'].map(key=>[key,created[key]])), ticket: supportTicketView(await env.DB.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(ticketId).first(), senderRole==='admin') }, 201);
 }
 
 async function updateSupportTicket(request, env, user, id) {
@@ -6309,7 +9473,7 @@ async function updateSupportTicket(request, env, user, id) {
   await env.DB.prepare("UPDATE support_tickets SET status = ?, priority = ?, admin_note = ?, resolved_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
     .bind(status, priority, note, ["resolved", "closed"].includes(status) ? (current.resolved_at || new Date().toISOString()) : null, id).run();
   await writeAuditLog(env, user.email, "update_support_ticket", "support_ticket", id, { status, priority });
-  return json({ ticket: supportTicketView(await env.DB.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(id).first()) });
+  return json({ ticket: supportTicketView(await env.DB.prepare("SELECT * FROM support_tickets WHERE id = ?").bind(id).first(),true) });
 }
 
 async function exportBackup(env, adminUser) {
@@ -6317,8 +9481,8 @@ async function exportBackup(env, adminUser) {
     "users", "products", "product_sizes", "reviews", "hero_slides", "categories", "subcategories",
     "storefront_settings", "orders", "order_items", "inventory_reservations", "order_stock_releases",
     "coupons", "coupon_email_targets", "coupon_redemptions", "user_addresses", "profile_phones",
-    "return_requests", "store_credit_accounts", "store_credit_ledger", "referral_codes", "referral_rewards",
-    "support_tickets", "support_messages", "product_questions", "restock_subscriptions", "email_delivery_log",
+    "return_requests", "gateway_refunds", "gateway_refund_events", "cancellation_refunds", "cancellation_refund_events", "store_credit_accounts", "store_credit_ledger", "referral_codes", "referral_rewards",
+    "support_tickets", "support_messages", "order_return_access", "order_return_access_events", "product_questions", "restock_subscriptions", "email_delivery_log",
     "admin_notifications", "admin_audit_log", "employee_audit_log", "employees", "employee_sessions", "cart_adds", "wishlist_adds", "upload_usage", "page_views", "counters"
   ];
   const backup = { generated_at: new Date().toISOString(), tables: {} };
@@ -6366,6 +9530,11 @@ async function updateOrderStatus(request, env, id, adminUser = null) {
     : assigningTracking && current.status !== "cancelled"
       ? "shipped"
       : requestedStatus;
+  if(nextStatus==='cancelled'&&current.status!=='cancelled'&&current.payment_status==='paid'
+    && (!['pending','confirmed'].includes(current.status)||String(current.tracking_number||'').trim())) {
+    return json({error:'A paid dispatched order cannot use an unshipped cancellation refund. Use the return/refund workflow instead.'},409);
+  }
+  if(current.order_type==='replacement' && ['confirmed','shipped','delivered'].includes(nextStatus) && !await replacementReleased(env,current)) return json({error:"Receive the original return before dispatching the replacement"},409);
   const paymentStatus = hasPaymentStatus
     ? String(body.payment_status || "").trim().toLowerCase()
     : String(current.payment_status || "pending").trim().toLowerCase();
@@ -6374,29 +9543,39 @@ async function updateOrderStatus(request, env, id, adminUser = null) {
     : String(current.payment_reference || "").trim();
   const paymentChanged = paymentStatus !== String(current.payment_status || "pending").trim().toLowerCase()
     || paymentReference !== String(current.payment_reference || "").trim();
-  if (requestedStatus === "cancelled" && current.status !== "cancelled") {
-    statements.push(env.DB.prepare(`
-      INSERT OR IGNORE INTO order_stock_releases (order_id)
-      SELECT id FROM orders WHERE id = ? AND status != 'cancelled'
-    `).bind(id));
-    statements.push(env.DB.prepare("DELETE FROM coupon_redemptions WHERE order_id = ?").bind(id));
+  if (paymentChanged) return json({ error: "Payment state and references are read-only. They must come from verified provider events, not manual edits." }, 403);
+  if (["confirmed", "shipped", "delivered"].includes(nextStatus) && nextStatus !== current.status
+    && !["paid", "not_required"].includes(current.payment_status)) {
+    return json({ error: "Confirm payment with the provider before fulfilling this order." }, 409);
   }
   statements.push(env.DB.prepare(`
     UPDATE orders SET
       status = ?, tracking_number = ?, payment_status = ?, payment_reference = ?,
       payment_updated_at = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
+    WHERE id = ? AND status = ? AND payment_status = ?
+      AND COALESCE(tracking_number, '') = ? AND COALESCE(payment_reference, '') = ?
   `).bind(
     nextStatus, trackingNumber || null, paymentStatus, paymentReference || null,
-    paymentChanged ? new Date().toISOString() : (current.payment_updated_at || null), id
+    paymentChanged ? new Date().toISOString() : (current.payment_updated_at || null), id,
+    current.status, current.payment_status, String(current.tracking_number || ""), String(current.payment_reference || "")
   ));
-  await env.DB.batch(statements);
+  if (requestedStatus === "cancelled" && current.status !== "cancelled") {
+    // changes() refers to the immediately preceding guarded UPDATE, not its
+    // triggers. A stale edit must neither restore stock nor erase payment state.
+    statements.push(env.DB.prepare(`INSERT OR IGNORE INTO order_stock_releases (order_id)
+      SELECT id FROM orders WHERE id = ? AND status = 'cancelled' AND changes() = 1`).bind(id));
+    statements.push(env.DB.prepare(`DELETE FROM coupon_redemptions WHERE order_id = ?
+      AND EXISTS (SELECT 1 FROM orders WHERE id = ? AND status = 'cancelled')`).bind(id, id));
+  }
+  const results = await env.DB.batch(statements);
+  if (Number(results[0]?.meta?.changes || 0) < 1) return json({ error: "This order changed while you were editing it. Refresh the order and try again." }, 409);
   invalidateProductEnrichment();
   const updated = await env.DB.prepare("SELECT * FROM orders WHERE id = ?").bind(id).first();
   if (adminUser) await writeAuditLog(env, adminUser.email, "update_order_status", "order", id, {
     from: current.status, to: nextStatus, tracking_number: trackingNumber || null,
     payment_status: paymentStatus, payment_reference_changed: paymentReference !== String(current.payment_reference || "").trim()
   });
+  await qualifyCreditReferral(env, updated);
   if (nextStatus === "cancelled" && current.status !== "cancelled") {
     await createAdminNotification(env, {
       type: "cancelled_order",
@@ -6415,6 +9594,7 @@ async function updateOrderStatus(request, env, id, adminUser = null) {
       dedupeKey: `customer-order:${id}:cancelled`
     }).catch(() => null);
     await sendOrderEmail(env, updated, "cancelled");
+    await processCancellationRefund(env,id);
   }
   if (nextStatus === "shipped" && current.status !== "shipped") {
     await createCustomerNotification(env, {
@@ -6445,16 +9625,17 @@ async function updateOrderStatus(request, env, id, adminUser = null) {
   if (paymentChanged && paymentStatus !== "demo") {
     await sendOrderEmail(env, updated, "payment");
   }
-  return json({ order: formatOrder(updated) });
+  const latest=await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
+  return json({ order: (await attachCancellationRefunds(env,[formatOrder(latest)]))[0] });
 }
 
-async function sendOrderEmail(env, row, type) {
+async function sendOrderEmail(env, row, type, { ctx = null } = {}) {
   const fromEmail = String(env.BREVO_FROM_EMAIL || "").trim();
   const recipient = String(row?.customer_email || "").trim();
   if (!isRealCustomerEmail(recipient)) return false;
 
   const emailType = ["confirmation", "shipped", "delivery", "cancelled", "payment"].includes(type) ? type : "confirmation";
-  const order = formatOrder(row);
+  const [order] = await attachCancellationRefunds(env,[formatOrder(row)]);
   const isReplacement = order.order_type === "replacement";
   const isPreorder = order.order_type === "preorder" || order.items.some(item => item.preorder);
   const paymentMethod = formatPaymentMethod(order.payment_method);
@@ -6487,18 +9668,22 @@ async function sendOrderEmail(env, row, type) {
   const trackingLine = order.tracking_number ? `Tracking number: ${order.tracking_number}` : "";
   const preorderLine = isPreorder ? "This order includes a pre-order item. We’ll keep you updated as it moves toward dispatch." : "";
   const statusLine = emailType === "cancelled"
-    ? "If you did not request this cancellation, please contact Glamia support."
+    ? order.cancellation_refund
+      ? `Your order is cancelled. ${order.cancellation_refund.state==='processed'?'Its refund is confirmed.':order.cancellation_refund.state==='approved'?'Its original-payment refund is queued.':'Follow its refund progress in Your orders; cancellation alone does not confirm a bank refund.'} If you did not request this cancellation, contact Glamia support.`
+      : "If you did not request this cancellation, please contact Glamia support."
     : emailType === "shipped" && !trackingLine
       ? "Your tracking details will be shared as soon as they are available."
       : emailType === "payment"
         ? `Payment status: ${paymentStatus}${order.payment_reference ? ` · Reference: ${order.payment_reference}` : ""}.`
       : "";
-  const invoiceUrl = `${String(env.PUBLIC_SITE_URL || "https://glamiastore.com").replace(/\/$/, "")}/api/orders/${encodeURIComponent(order.id)}/invoice?token=${encodeURIComponent(order.tracking_token || "")}`;
+  const billReady = ["paid", "refunded"].includes(order.payment_status) && ["razorpay", "phonepe", "store_credit"].includes(order.payment_method);
+  const documentLabel = billReady ? "Download bill (PDF)" : "View / print invoice preview";
+  const invoiceUrl = `${String(env.PUBLIC_SITE_URL || "https://glamiastore.com").replace(/\/$/, "")}/api/orders/${encodeURIComponent(order.id)}/${billReady ? "bill" : "invoice"}?token=${encodeURIComponent(order.tracking_token || "")}`;
   const htmlItems = order.items.map(item => {
     const selection = [item.size, item.variant, item.color].filter(Boolean).join(" · ");
     return `<li><strong>${escapeHtml(item.name)}</strong>${selection ? ` · ${escapeHtml(selection)}` : ""} · Qty ${Number(item.quantity) || 0} · ${formatInr(item.price * item.quantity)}</li>`;
   }).join("");
-  const htmlContent = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#241f18;line-height:1.6"><h1 style="letter-spacing:.18em">GLAMIA</h1><p>Hi ${escapeHtml(firstName)},</p><h2>${escapeHtml(eventLabel)}</h2><p>Order <strong>${escapeHtml(order.order_number)}</strong> · ${escapeHtml(formatOrderDate(eventTime))}</p>${statusLine ? `<p>${escapeHtml(statusLine)}</p>` : ""}${trackingLine ? `<p>${escapeHtml(trackingLine)}</p>` : ""}${preorderLine ? `<p>${escapeHtml(preorderLine)}</p>` : ""}<ul>${htmlItems}</ul><p>Subtotal: ${formatInr(order.subtotal)}<br>Discount: ${formatInr(order.discount)}<br><strong>Total: ${formatInr(order.total)}</strong></p><p><strong>Payment method:</strong> ${escapeHtml(paymentMethod.toUpperCase())}<br><strong>Payment status:</strong> ${escapeHtml(paymentStatus)}</p>${shippingLine ? `<p>Delivery address: ${escapeHtml(shippingLine)}</p>` : ""}<p><a href="${escapeHtml(invoiceUrl)}">View / print invoice preview</a></p><p>Warmly,<br>Team Glamia</p></body></html>`;
+  const htmlContent = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#241f18;line-height:1.6"><h1 style="letter-spacing:.18em">GLAMIA</h1><p>Hi ${escapeHtml(firstName)},</p><h2>${escapeHtml(eventLabel)}</h2><p>Order <strong>${escapeHtml(order.order_number)}</strong> · ${escapeHtml(formatOrderDate(eventTime))}</p>${statusLine ? `<p>${escapeHtml(statusLine)}</p>` : ""}${trackingLine ? `<p>${escapeHtml(trackingLine)}</p>` : ""}${preorderLine ? `<p>${escapeHtml(preorderLine)}</p>` : ""}<ul>${htmlItems}</ul><p>Subtotal: ${formatInr(order.subtotal)}<br>Discount: ${formatInr(order.discount)}<br><strong>Total: ${formatInr(order.total)}</strong>${order.credits_used ? `<br>Store credits applied: −${formatInr(order.credits_used)}<br>Remaining paid: ${formatInr(order.payable_total)}` : ""}</p><p><strong>Payment method:</strong> ${escapeHtml(order.credits_used && paymentMethod !== "store_credit" ? `STORE CREDITS + ${paymentMethod.toUpperCase()}` : paymentMethod.toUpperCase())}<br><strong>Payment status:</strong> ${escapeHtml(paymentStatus)}</p>${shippingLine ? `<p>Delivery address: ${escapeHtml(shippingLine)}</p>` : ""}${emailType==='confirmation'&&order.delivery_estimate?`<p>${escapeHtml(order.delivery_estimate)}</p>`:''}<p><a href="${escapeHtml(invoiceUrl)}">${documentLabel}</a></p><p>Warmly,<br>Team Glamia</p></body></html>`;
   const textContent = [
     `Hi ${firstName},`,
     "",
@@ -6513,9 +9698,12 @@ async function sendOrderEmail(env, row, type) {
     `Subtotal: ${formatInr(order.subtotal)}`,
     `Discount: ${formatInr(order.discount)}`,
     `Total: ${formatInr(order.total)}`,
-    `Payment method: ${paymentMethod.toUpperCase()}`,
+    order.credits_used ? `Store credits applied: −${formatInr(order.credits_used)}` : "",
+    order.credits_used ? `Remaining paid: ${formatInr(order.payable_total)}` : "",
+    `Payment method: ${order.credits_used && paymentMethod !== "store_credit" ? `STORE CREDITS + ${paymentMethod.toUpperCase()}` : paymentMethod.toUpperCase()}`,
     `Payment status: ${paymentStatus}`,
-    `Invoice preview: ${invoiceUrl}`,
+    emailType==='confirmation'?order.delivery_estimate:'',
+    `${documentLabel}: ${invoiceUrl}`,
     shippingLine ? `Delivery address: ${shippingLine}` : "",
     "",
     "Warmly,",
@@ -6523,7 +9711,7 @@ async function sendOrderEmail(env, row, type) {
   ].filter(Boolean).join("\n");
 
   return deliverBrevoEmail(env, {
-    eventType: `order-${emailType}`,
+    eventType: `order-${emailType}`, ctx,
     dedupeKey: emailType === "payment"
       ? `order:${order.id}:payment:${order.payment_status || "pending"}:${order.payment_reference || ""}`
       : `order:${order.id}:${emailType}`,
@@ -6548,15 +9736,20 @@ async function sendReturnEmail(env, returnRequest, status) {
   const requestType = returnRequest.type === "exchange" ? "exchange" : "return/refund";
   const orderNumber = returnRequest.order?.order_number || returnRequest.order_id || "your order";
   const statusCopy = {
-    requested: "We’ve received your request and our team will review it shortly.",
-    approved: "Your request has been approved. We’ll share the next steps shortly.",
+    requested: "We’ve received your request. Care will arrange collection from your address to our warehouse. Your printable return label becomes available in Your orders once courier tracking is saved. Refund approval is separate; this does not send money.",
+    approved: returnRequest.type==='exchange' && returnRequest.replacement_fulfilment_mode==='immediate'
+      ? `Your zero-value replacement ${returnRequest.replacement_order_number||''} has been placed for normal packing and delivery. No admin approval or return-receipt wait is required. Care will arrange the original item’s pickup separately; print its return label from Your orders once tracking is saved.`
+      : "Your request has been approved. Follow the return instructions in Your orders; the printable label becomes available once courier tracking is saved.",
     rejected: "We’re unable to approve this request. Please contact Glamia support if you need help.",
     received: "We’ve received the returned item and will complete the next step shortly.",
     refunded: returnRequest.refund_destination === "store_credit"
       ? `A store credit of ${formatInr(returnRequest.refund_amount)} has been added to your Glamia account.`
-      : `Your refund of ${formatInr(returnRequest.refund_amount)} has been marked for processing.`,
+      : returnRequest.gateway_refund?.state === "processed"
+        ? `Your payment provider confirmed a refund of ${formatInr(returnRequest.gateway_refund.gateway_amount)}${returnRequest.gateway_refund.credit_amount ? `; ${formatInr(returnRequest.gateway_refund.credit_amount)} was restored to your store credits` : ""}. Your bank's posting time may vary.`
+        : `Your refund of ${formatInr(returnRequest.refund_amount)} requires payment-provider reconciliation.`,
     completed: "Your after-sales request is now complete.",
-    cancelled: "Your after-sales request has been cancelled."
+    cancelled: "Your after-sales request has been cancelled.",
+    review_required: "Your refund needs a payment review. Glamia is checking the existing request; please do not submit another refund. Track the next update in Your orders or contact care using your request reference."
   }[status] || "Your after-sales request has been updated.";
   const firstName = String(returnRequest.order?.customer_name || recipient).trim().split(/\s+/)[0] || "there";
   const subject = `Glamia ${requestType} update for ${orderNumber} · ${status}`;
@@ -6593,7 +9786,7 @@ async function sendReturnEmail(env, returnRequest, status) {
   });
 }
 
-async function deliverBrevoEmail(env, { eventType, dedupeKey = null, recipient, userEmail = null, orderId = null, payload, existingId = null }) {
+async function deliverBrevoEmail(env, { eventType, dedupeKey = null, recipient, userEmail = null, orderId = null, payload, existingId = null, ctx = null }) {
   let id = existingId;
   let current = existingId
     ? await env.DB.prepare("SELECT * FROM email_delivery_log WHERE id = ?").bind(existingId).first().catch(() => null)
@@ -6614,6 +9807,15 @@ async function deliverBrevoEmail(env, { eventType, dedupeKey = null, recipient, 
   }
   if (!current) current = await env.DB.prepare("SELECT * FROM email_delivery_log WHERE id = ?").bind(id).first().catch(() => null);
   if (current?.status === "sent") return true;
+  if (!current) return false; // Fail closed: never send without a durable log.
+  if (ctx?.waitUntil) {
+    // Queue durably before responding. The existing scheduler recovers queued
+    // deliveries; the compare-and-set delivery claim prevents duplicate sends.
+    if (!current.delivery_claim) ctx.waitUntil(deliverBrevoEmail(env, {
+      eventType, dedupeKey, recipient, userEmail, orderId, payload, existingId: id
+    }).catch(() => null));
+    return false; // Queued is not the same as delivered.
+  }
   const attempts = Number(current?.attempts || 0) + 1;
   const apiKey = String(env.BREVO_API_KEY || "").trim();
   const fromEmail = String(env.BREVO_FROM_EMAIL || "").trim();
@@ -6622,39 +9824,57 @@ async function deliverBrevoEmail(env, { eventType, dedupeKey = null, recipient, 
       .bind(attempts, "Brevo is not configured", id).run().catch(() => null);
     return false;
   }
+  const deliveryClaim = crypto.randomUUID();
+  const claimed = await env.DB.prepare("UPDATE email_delivery_log SET delivery_claim = ? WHERE id = ? AND status != 'sent' AND delivery_claim IS NULL")
+    .bind(deliveryClaim, id).run();
+  if (Number(claimed.meta?.changes || 0) !== 1) return false;
   try {
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
+      signal: AbortSignal.timeout(10000),
       headers: { accept: "application/json", "api-key": apiKey, "content-type": "application/json" },
       body: JSON.stringify(payload)
     });
     const responseText = await response.text();
     if (!response.ok) {
       const retryAt = attempts < 5 ? new Date(Date.now() + Math.min(60 * 60_000, 2 ** attempts * 60_000)).toISOString() : null;
-      await env.DB.prepare("UPDATE email_delivery_log SET status = 'failed', attempts = ?, last_error = ?, next_attempt_at = ? WHERE id = ?")
-        .bind(attempts, `Brevo ${response.status}: ${responseText.slice(0, 500)}`, retryAt, id).run().catch(() => null);
+      // Only an explicit client rejection is safe to retry. A 5xx/timeout can
+      // occur after acceptance; keep its claim for operator reconciliation.
+      const rejected = response.status >= 400 && response.status < 500;
+      await env.DB.prepare("UPDATE email_delivery_log SET status = 'failed', attempts = ?, last_error = ?, next_attempt_at = ?, delivery_claim = ? WHERE id = ? AND delivery_claim = ?")
+        .bind(attempts, `Brevo ${response.status}: ${responseText.slice(0, 500)}`, rejected ? retryAt : null, rejected ? null : deliveryClaim, id, deliveryClaim).run().catch(() => null);
       return false;
     }
     let providerId = "";
     try { providerId = JSON.parse(responseText)?.messageId || ""; } catch {}
     await env.DB.prepare("UPDATE email_delivery_log SET status = 'sent', attempts = ?, provider_id = ?, last_error = NULL, next_attempt_at = NULL, sent_at = CURRENT_TIMESTAMP WHERE id = ?")
       .bind(attempts, providerId, id).run().catch(() => null);
+    if (eventType === "order-confirmation" && orderId) {
+      await env.DB.prepare("UPDATE orders SET confirmation_email_sent_at = COALESCE(confirmation_email_sent_at, CURRENT_TIMESTAMP) WHERE id = ?")
+        .bind(orderId).run();
+    }
     return true;
   } catch (error) {
-    const retryAt = attempts < 5 ? new Date(Date.now() + Math.min(60 * 60_000, 2 ** attempts * 60_000)).toISOString() : null;
     await env.DB.prepare("UPDATE email_delivery_log SET status = 'failed', attempts = ?, last_error = ?, next_attempt_at = ? WHERE id = ?")
-      .bind(attempts, String(error?.message || error).slice(0, 500), retryAt, id).run().catch(() => null);
+      .bind(attempts, `Delivery uncertain; reconcile before retry: ${String(error?.message || error).slice(0, 400)}`, null, id).run().catch(() => null);
     return false;
   }
 }
 
 async function processDueEmailEvents(env) {
   const { results } = await env.DB.prepare(`
-    SELECT * FROM email_delivery_log
-    WHERE status IN ('pending', 'failed')
-      AND attempts < 5
-      AND (next_attempt_at IS NULL OR datetime(next_attempt_at) <= CURRENT_TIMESTAMP)
-    ORDER BY created_at ASC
+    SELECT e.*
+    FROM email_delivery_log e
+    LEFT JOIN orders o ON o.id = e.order_id
+    WHERE e.status IN ('pending', 'failed')
+      AND e.delivery_claim IS NULL
+      AND e.attempts < 5
+      AND (e.next_attempt_at IS NULL OR datetime(e.next_attempt_at) <= CURRENT_TIMESTAMP)
+      AND NOT (
+        o.id IS NOT NULL
+        AND ${paymentIncompleteOrderPredicate("o", false)}
+      )
+    ORDER BY e.created_at ASC
     LIMIT 20
   `).all().catch(() => ({ results: [] }));
   for (const row of results || []) {
@@ -6676,8 +9896,11 @@ function addR2References(value, references) {
   if (value === null || value === undefined) return;
   if (typeof value === "string") {
     const text = value.trim();
-    if (text.startsWith("/api/assets/")) {
-      try { references.add(decodeURIComponent(text.replace("/api/assets/", ""))); } catch {}
+    if (text.startsWith("/api/assets/") || /^https?:\/\//i.test(text)) {
+      try {
+        const url = new URL(text, CANONICAL_ORIGIN);
+        if (url.pathname.startsWith("/api/assets/") && (PRODUCTION_HOSTNAMES.has(url.hostname) || ["localhost", "127.0.0.1"].includes(url.hostname))) references.add(decodeURIComponent(url.pathname.slice("/api/assets/".length)));
+      } catch {}
     } else if (/^(products|reviews)\//.test(text)) {
       references.add(text);
     }
@@ -6695,11 +9918,10 @@ function addR2References(value, references) {
 
 async function referencedR2Keys(env) {
   const references = new Set();
-  // These are the tables that can currently store product/review media. Scan
-  // every column, including JSON and legacy key columns, so future media
-  // fields do not silently turn into cleanup candidates.
-  for (const table of ["products", "reviews", "product_questions", "hero_slides", "storefront_settings"]) {
-    const result = await env.DB.prepare(`SELECT * FROM ${table}`).all().catch(() => ({ results: [] }));
+  // Historical orders and issued bills also reference images. A failed read
+  // must abort cleanup: an unavailable table is not evidence of unused media.
+  for (const table of ["products", "reviews", "product_questions", "hero_slides", "storefront_settings", "events", "orders", "order_items", "order_bills"]) {
+    const result = await env.DB.prepare(`SELECT * FROM ${table}`).all();
     for (const row of result.results || []) addR2References(row, references);
   }
   return references;
@@ -6767,6 +9989,7 @@ async function retryEmailEvent(env, id, user) {
   const row = await env.DB.prepare("SELECT * FROM email_delivery_log WHERE id = ?").bind(id).first();
   if (!row) return json({ error: "Email event not found" }, 404);
   if (row.status === "sent") return json({ ok: true, status: "sent" });
+  if (row.delivery_claim) return json({ error: "Delivery is in progress or uncertain. Reconcile with Brevo before retrying; this claim is not automatically released." }, 409);
   if (Number(row.attempts || 0) >= 5) return json({ error: "This email has reached its retry limit" }, 409);
   let payload;
   try { payload = JSON.parse(row.payload_json); } catch { return json({ error: "Email payload is invalid" }, 500); }
@@ -6789,15 +10012,16 @@ function formatOrderDate(value) {
   return Number.isNaN(date.getTime()) ? String(value || "") : date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
 }
 
-async function listEmployees(env) {
+async function listEmployees(env, actor) {
   const { results } = await env.DB.prepare(`
-    SELECT id, employee_code, name, active, failed_login_count, locked_until,
-      last_login_at, created_at, updated_at
+    SELECT id, employee_code, name, employee_email, position, permissions_json, active, failed_login_count, locked_until,
+      last_login_at, created_at, updated_at, created_by_email, created_by_employee_id, created_by_owner, owner_approved
     FROM employees
     ORDER BY active DESC, name COLLATE NOCASE ASC
   `).all();
-  return json({ employees: results.map(employeePublicProfile).map((employee, index) => ({
+  return json({ management: { can_create_admin: actor?.is_owner === true, positions: EMPLOYEE_POSITION_OPTIONS.filter(({ id }) => canManageEmployee(actor, null, {}, id)), permissions: actor?.employee_permissions || Object.fromEntries(EMPLOYEE_PERMISSION_OPTIONS.map(({ id }) => [id, true])) }, employees: results.map((row) => employeePublicProfile(row, env)).map((employee, index) => ({
     ...employee,
+    can_manage: canManageEmployee(actor, employee),
     ...(results[index] ? {
       failed_login_count: Number(results[index].failed_login_count || 0),
       locked_until: results[index].locked_until || null,
@@ -6808,32 +10032,55 @@ async function listEmployees(env) {
   })) });
 }
 
+// Prevent employee managers from taking over or granting access beyond their own scope.
+function assertEmployeeManagementScope(actor, target, permissions, position) {
+  if (!canManageEmployee(actor, target, permissions, position)) {
+    throw httpError("Only owners can manage admins. Employees can manage only equal or lower positions within their own permissions", 403);
+  }
+}
+
 async function createEmployee(request, env, adminUser) {
   const body = await readJson(request);
   const employeeCode = String(body.employee_id || body.employee_code || "").trim().toUpperCase();
   const name = String(body.name || "").trim();
+  const employeeEmail = String(body.employee_email || body.email || "").trim().toLowerCase();
+  const position = normalizeEmployeePosition(body.position);
   const password = String(body.password || "");
   if (!/^[A-Z0-9][A-Z0-9_-]{2,30}$/.test(employeeCode)) {
     return json({ error: "Employee ID must be 3–31 characters using letters, numbers, hyphens, or underscores" }, 400);
   }
   if (name.length < 2 || name.length > 80) return json({ error: "Enter an employee name from 2 to 80 characters" }, 400);
+  if (employeeEmail && !isRealCustomerEmail(employeeEmail)) return json({ error: "Enter a valid employee email address" }, 400);
+  if (employeeEmail && adminEmails(env).includes(employeeEmail) && !adminUser.is_owner) return json({ error: "Only owners can assign an owner email address" }, 403);
   if (password.length < 8 || password.length > 200) return json({ error: "Employee password must be 8–200 characters" }, 400);
   const existing = await env.DB.prepare("SELECT id FROM employees WHERE employee_code = ?").bind(employeeCode).first();
   if (existing) return json({ error: "That employee ID is already in use" }, 409);
+  if (employeeEmail) {
+    const existingEmail = await env.DB.prepare("SELECT id FROM employees WHERE LOWER(employee_email) = ?").bind(employeeEmail).first();
+    if (existingEmail) return json({ error: "That employee email is already assigned" }, 409);
+  }
+  const permissions = normalizeEmployeePermissions(body.permissions, position);
+  assertEmployeeManagementScope(adminUser, null, permissions, position);
   const passwordRecord = await generateEmployeePasswordRecord(password);
   const id = crypto.randomUUID();
   await env.DB.prepare(`
-    INSERT INTO employees (id, employee_code, name, password_hash, password_salt, password_iterations)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(id, employeeCode, name, passwordRecord.password_hash, passwordRecord.password_salt, passwordRecord.password_iterations).run();
-  await writeAuditLog(env, adminUser.email, "create_employee", "employee", id, { employee_code: employeeCode, name });
-  return json({ employee: employeePublicProfile({ id, employee_code: employeeCode, name, active: 1 }) }, 201);
+    INSERT INTO employees (id, employee_code, name, employee_email, position, permissions_json, password_hash, password_salt, password_iterations, created_by_email, created_by_employee_id, created_by_owner, owner_approved)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(id, employeeCode, name, employeeEmail || null, position, JSON.stringify(permissions), passwordRecord.password_hash, passwordRecord.password_salt, passwordRecord.password_iterations, adminUser.email, adminUser.employee_id || null, adminUser.is_owner ? 1 : 0, adminUser.is_owner && adminEmails(env).includes(employeeEmail) ? 1 : 0).run();
+  await writeAuditLog(env, adminUser.email, "create_employee", "employee", id, { employee_code: employeeCode, name, employee_email: employeeEmail, position, permissions });
+  const profile = employeePublicProfile({ id, employee_code: employeeCode, name, employee_email: employeeEmail, position, permissions, active: 1, created_by_email: adminUser.email, created_by_employee_id: adminUser.employee_id, created_by_owner: adminUser.is_owner, owner_approved: adminUser.is_owner && adminEmails(env).includes(employeeEmail) ? 1 : 0 }, env);
+  return json({ employee: { ...profile, can_manage: canManageEmployee(adminUser, profile) } }, 201);
 }
 
 async function updateEmployee(request, env, id, adminUser) {
   const current = await env.DB.prepare("SELECT * FROM employees WHERE id = ?").bind(id).first();
   if (!current) return json({ error: "Employee not found" }, 404);
   const body = await readJson(request);
+  const nextPosition = body.position === undefined ? current.position : normalizeEmployeePosition(body.position);
+  const promotedToAdmin = nextPosition === "admin" && current.position !== "admin";
+  assertEmployeeManagementScope(adminUser, employeePublicProfile(current, env), body.permissions === undefined
+    ? promotedToAdmin ? normalizeEmployeePermissions(undefined, "admin") : employeePermissionsObject(current.permissions_json, nextPosition)
+    : normalizeEmployeePermissions(body.permissions, nextPosition), nextPosition);
   const updates = [];
   const bindings = [];
   const audit = {};
@@ -6841,6 +10088,26 @@ async function updateEmployee(request, env, id, adminUser) {
     const name = String(body.name || "").trim();
     if (name.length < 2 || name.length > 80) return json({ error: "Enter an employee name from 2 to 80 characters" }, 400);
     updates.push("name = ?"); bindings.push(name); audit.name_changed = name !== current.name;
+  }
+  if (body.employee_email !== undefined || body.email !== undefined) {
+    const employeeEmail = String(body.employee_email ?? body.email ?? "").trim().toLowerCase();
+    if (employeeEmail && !isRealCustomerEmail(employeeEmail)) return json({ error: "Enter a valid employee email address" }, 400);
+    if (employeeEmail && adminEmails(env).includes(employeeEmail) && !adminUser.is_owner) return json({ error: "Only owners can assign an owner email address" }, 403);
+    if (employeeEmail) {
+      const existingEmail = await env.DB.prepare("SELECT id FROM employees WHERE LOWER(employee_email) = ? AND id != ?").bind(employeeEmail, id).first();
+      if (existingEmail) return json({ error: "That employee email is already assigned" }, 409);
+    }
+    updates.push("employee_email = ?"); bindings.push(employeeEmail || null); audit.employee_email_changed = employeeEmail !== String(current.employee_email || "");
+    if (adminUser.is_owner) { updates.push("owner_approved = ?"); bindings.push(adminEmails(env).includes(employeeEmail) ? 1 : 0); }
+  }
+  if (body.position !== undefined) {
+    const position = normalizeEmployeePosition(body.position);
+    updates.push("position = ?"); bindings.push(position); audit.position = position;
+  }
+  if (body.permissions !== undefined || promotedToAdmin) {
+    const position = normalizeEmployeePosition(body.position === undefined ? current.position : body.position);
+    const permissions = normalizeEmployeePermissions(body.permissions, position);
+    updates.push("permissions_json = ?"); bindings.push(JSON.stringify(permissions)); audit.permissions = permissions;
   }
   if (body.active !== undefined) {
     const active = body.active === true || body.active === 1 || body.active === "true" ? 1 : 0;
@@ -6859,9 +10126,24 @@ async function updateEmployee(request, env, id, adminUser) {
   if (!updates.length) return json({ error: "No employee changes supplied" }, 400);
   updates.push("updated_at = CURRENT_TIMESTAMP");
   await env.DB.prepare(`UPDATE employees SET ${updates.join(", ")} WHERE id = ?`).bind(...bindings, id).run();
-  const updated = await env.DB.prepare("SELECT id, employee_code, name, active FROM employees WHERE id = ?").bind(id).first();
+  const updated = await env.DB.prepare("SELECT * FROM employees WHERE id = ?").bind(id).first();
   await writeAuditLog(env, adminUser.email, "update_employee", "employee", id, audit);
-  return json({ employee: employeePublicProfile(updated) });
+  const profile = employeePublicProfile(updated, env);
+  return json({ employee: { ...profile, can_manage: canManageEmployee(adminUser, profile) } });
+}
+
+async function deleteEmployee(env, id, adminUser) {
+  const current = await env.DB.prepare("SELECT id, employee_code, name, employee_email, position, permissions_json, owner_approved FROM employees WHERE id = ?").bind(id).first();
+  if (!current) return json({ error: "Employee not found" }, 404);
+  assertEmployeeManagementScope(adminUser, employeePublicProfile(current, env));
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM employee_sessions WHERE employee_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM employee_audit_log WHERE employee_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM employee_notification_states WHERE employee_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM employees WHERE id = ?").bind(id)
+  ]);
+  await writeAuditLog(env, adminUser.email, "delete_employee", "employee", id, { employee_code: current.employee_code, name: current.name, employee_email: current.employee_email || "" });
+  return json({ ok: true, id });
 }
 
 async function listCustomers(env) {
@@ -6874,6 +10156,75 @@ async function listCustomers(env) {
     ORDER BY u.created_at DESC
   `).all();
   return json({ customers: results });
+}
+
+// Fetch one customer's history only on demand; never expose shipping or tracking credentials.
+async function listAdminCustomerOrders(env, actor, email, searchParams = new URLSearchParams()) {
+  requireAdmin(actor);
+  if (actor.employee_id && !actor.is_owner &&
+      (actor.employee_permissions?.customers !== true || actor.employee_permissions?.orders !== true)) {
+    throw httpError("Customers and Orders access are required to view purchase history", 403);
+  }
+  const customerEmail = String(email || "").trim().toLowerCase();
+  if (!isRealCustomerEmail(customerEmail)) throw httpError("Invalid customer email", 400);
+  const customer = await env.DB.prepare("SELECT email, name, phone FROM users WHERE email = ? LIMIT 1").bind(customerEmail).first();
+  if (!customer) throw httpError("Customer not found", 404);
+  const page = Number(searchParams.get("page") || 1);
+  const requestedLimit = Number(searchParams.get("limit") || 25);
+  if (!Number.isSafeInteger(page) || page < 1 || page > 100000 || !Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+    throw httpError("Invalid order history page", 400);
+  }
+  const limit = Math.min(requestedLimit, 50);
+  const offset = (page - 1) * limit;
+  const query = String(searchParams.get("q") || "").trim().slice(0, 100);
+  const filters = ["o.customer_email = ?", `NOT ${paymentIncompleteOrderPredicate("o", true)}`];
+  const args = [customerEmail];
+  if (query) {
+    const pattern = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
+    filters.push("(o.order_number LIKE ? ESCAPE '\\' OR o.id LIKE ? ESCAPE '\\' OR o.items_json LIKE ? ESCAPE '\\')");
+    args.push(pattern, pattern, pattern);
+  }
+  const where = filters.join(" AND ");
+  const { results } = await env.DB.prepare(`SELECT o.id, o.order_number, o.items_json, o.total, o.status,
+    o.payment_method, o.payment_status, o.packing_status, o.created_at, o.credits_used, o.payable_total, o.payment_gateway FROM orders o
+    WHERE ${where} ORDER BY o.created_at DESC, o.id DESC LIMIT ? OFFSET ?`).bind(...args, limit, offset).all();
+  const total = Number((await env.DB.prepare(`SELECT COUNT(*) AS count FROM orders o WHERE ${where}`).bind(...args).first())?.count || 0);
+  const enriched=await attachCancellationRefunds(env,results.map(formatOrder));
+  const orders = enriched.map(order => {
+    return {
+      id: order.id, order_number: order.order_number, created_at: order.created_at,
+      total: order.total, status: order.status, payment_method: order.payment_method,
+      payment_status: order.payment_status, packing_status: order.packing_status,
+      cancellation_refund: order.cancellation_refund || null,
+      items: (Array.isArray(order.items) ? order.items : []).filter(item => item && typeof item === "object").map(item => ({ name: item.name || item.product_name || "Product", size: item.size || "", color: item.color || item.variant || "", quantity: item.quantity || 0 }))
+    };
+  });
+  return json({ customer, orders, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + orders.length < total } }, 200, { "Cache-Control": "private, no-store" });
+}
+
+async function listCouponRecipients(env) {
+  const { results } = await env.DB.prepare(`
+    SELECT u.email, u.name, u.phone, u.created_at,
+      CASE WHEN e.id IS NULL THEN 0 ELSE 1 END AS is_employee,
+      e.employee_code, e.position, e.active AS employee_active
+    FROM users u
+    LEFT JOIN employees e ON LOWER(TRIM(e.employee_email)) = LOWER(TRIM(u.email))
+    WHERE u.role != 'admin'
+    UNION ALL
+    SELECT e.employee_email AS email, e.name, NULL AS phone, e.created_at,
+      1 AS is_employee, e.employee_code, e.position, e.active AS employee_active
+    FROM employees e
+    WHERE TRIM(COALESCE(e.employee_email, '')) != ''
+      AND NOT EXISTS (
+        SELECT 1 FROM users u WHERE LOWER(TRIM(u.email)) = LOWER(TRIM(e.employee_email))
+      )
+    ORDER BY email COLLATE NOCASE ASC
+  `).all();
+  return json({ recipients: (results || []).map(row => ({
+    ...row,
+    is_employee: Boolean(row.is_employee),
+    employee_active: row.employee_active === null || row.employee_active === undefined ? null : Boolean(row.employee_active)
+  })) });
 }
 
 function taxStateKey(value) {
@@ -7154,36 +10505,61 @@ function isValidCouponEmail(value) {
   return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function isWhitelistedCouponAdmin(env, user) {
+  // Only the authenticated account and the server whitelist confer this benefit.
+  // A client-supplied email, admin role or employee permission is not sufficient.
+  const email = normalizeCouponEmail(user?.email);
+  return Boolean(email && adminEmails(env).includes(email));
+}
+
+function couponForCustomer(coupon, env, user) {
+  if (!isWhitelistedCouponAdmin(env, user)) return { ...coupon, admin_exempt: false };
+  return { ...coupon, admin_exempt: true, active: 1, employee_only: 0,
+    starts_at: null, ends_at: null, usage_limit: null, per_user_limit: null,
+    min_cart_value: null, max_discount: null, scope: 'all', scope_value: '', target_rules: '[]', allow_store_credits: 1 };
+}
+
 async function couponAvailability(coupon, env, user) {
+  if (isWhitelistedCouponAdmin(env, user)) return null;
   const now = Date.now();
   const startsAt = coupon.starts_at ? new Date(coupon.starts_at).getTime() : null;
   const endsAt = coupon.ends_at ? new Date(coupon.ends_at).getTime() : null;
   if (startsAt && now < startsAt) return "This coupon is not active yet";
   if (endsAt && now > endsAt) return "This coupon has expired";
 
-  const emailTargetCount = await env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM coupon_email_targets WHERE coupon_code = ?"
-  ).bind(coupon.code).first();
-  if (Number(emailTargetCount?.count || 0) > 0) {
-    const email = normalizeCouponEmail(user?.email);
-    if (!email) return "This coupon is reserved for selected customer accounts";
-    const allowed = await env.DB.prepare(
-      "SELECT 1 AS allowed FROM coupon_email_targets WHERE coupon_code = ? AND email = ? LIMIT 1"
-    ).bind(coupon.code, email).first();
-    if (!allowed) return "This coupon is not available for this account";
+  const email = normalizeCouponEmail(user?.email);
+  if (Number(coupon.employee_only || 0)) {
+    if (!email) return "Sign in with an employee email to use this coupon";
+    const employee = await env.DB.prepare(`
+      SELECT 1 AS allowed FROM employees
+      WHERE LOWER(TRIM(employee_email)) = ?
+      LIMIT 1
+    `).bind(email).first();
+    if (!employee) return "This coupon is reserved for Glamia employees";
+  } else {
+    const emailTargetCount = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM coupon_email_targets WHERE coupon_code = ?"
+    ).bind(coupon.code).first();
+    if (Number(emailTargetCount?.count || 0) > 0) {
+      if (!email) return "This coupon is reserved for selected customer accounts";
+      const allowed = await env.DB.prepare(
+        "SELECT 1 AS allowed FROM coupon_email_targets WHERE coupon_code = ? AND email = ? LIMIT 1"
+      ).bind(coupon.code, email).first();
+      if (!allowed) return "This coupon is not available for this account";
+    }
   }
 
   if (coupon.usage_limit !== null && coupon.usage_limit !== undefined) {
     const usage = await env.DB.prepare(
-      "SELECT COUNT(*) AS count FROM coupon_redemptions WHERE coupon_code = ?"
-    ).bind(coupon.code).first();
+      "SELECT COUNT(*) AS count FROM coupon_redemptions WHERE coupon_instance_id = ? AND admin_exempt = 0"
+    ).bind(coupon.instance_id).first();
     if (Number(usage?.count || 0) >= Number(coupon.usage_limit)) return "This coupon has reached its usage limit";
   }
 
   if (user?.email && coupon.per_user_limit !== null && coupon.per_user_limit !== undefined) {
     const personalUsage = await env.DB.prepare(
-      "SELECT COUNT(*) AS count FROM coupon_redemptions WHERE coupon_code = ? AND customer_email = ?"
-    ).bind(coupon.code, normalizeCouponEmail(user.email)).first();
+      "SELECT COUNT(*) AS count FROM coupon_redemptions WHERE coupon_instance_id = ? AND admin_exempt = 0 AND LOWER(TRIM(customer_email)) = ?"
+    ).bind(coupon.instance_id, normalizeCouponEmail(user.email)).first();
     if (Number(personalUsage?.count || 0) >= Number(coupon.per_user_limit)) {
       return "You have already used this coupon the maximum number of times";
     }
@@ -7222,8 +10598,9 @@ async function validateCoupon(request, env, user) {
   const code = String(body.code || "").trim().toUpperCase();
   const requested = normalizeOrderItems(body.items);
   if (!requested.length) return json({ error: "Your cart is empty" }, 400);
-  const coupon = await env.DB.prepare("SELECT * FROM coupons WHERE code = ? AND active = 1").bind(code).first();
-  if (!coupon) return json({ error: "That coupon code is not valid" }, 400);
+  const storedCoupon = await env.DB.prepare("SELECT * FROM coupons WHERE code = ? AND (active = 1 OR ? = 1)").bind(code, isWhitelistedCouponAdmin(env,user) ? 1 : 0).first();
+  if (!storedCoupon) return json({ error: "That coupon code is not valid" }, 400);
+  const coupon = couponForCustomer(storedCoupon, env, user);
   const availabilityError = await couponAvailability(coupon, env, user);
   if (availabilityError) return json({ error: availabilityError }, 400);
   const catalog = await loadLiveProductsById(env, requested);
@@ -7249,9 +10626,12 @@ async function validateCoupon(request, env, user) {
     starts_at: coupon.starts_at || null,
     ends_at: coupon.ends_at || null,
     usage_limit: coupon.usage_limit ?? null,
-    per_user_limit: coupon.per_user_limit ?? 1,
+    per_user_limit: coupon.admin_exempt ? null : coupon.per_user_limit ?? 1,
     max_discount: coupon.max_discount ?? null,
     min_cart_value: coupon.min_cart_value ?? null,
+    allow_store_credits: Boolean(coupon.allow_store_credits),
+    admin_exempt: coupon.admin_exempt,
+    coupon_instance_id: coupon.instance_id,
     discount
   });
 }
@@ -7262,8 +10642,8 @@ async function listAvailableCoupons(request, env, user) {
   if (!requested.length) return json({ coupons: [] });
 
   const { results } = await env.DB.prepare(
-    "SELECT * FROM coupons WHERE active = 1 ORDER BY created_at DESC LIMIT 25"
-  ).all();
+    "SELECT * FROM coupons WHERE active = 1 OR ? = 1 ORDER BY created_at DESC LIMIT 25"
+  ).bind(isWhitelistedCouponAdmin(env,user) ? 1 : 0).all();
   const catalog = await loadLiveProductsById(env, requested);
   const cartSubtotal = requested.reduce((sum, entry) => {
     const row = catalog.get(entry.id);
@@ -7271,7 +10651,8 @@ async function listAvailableCoupons(request, env, user) {
   }, 0);
   const coupons = [];
 
-  for (const coupon of results || []) {
+  for (const storedCoupon of results || []) {
+    const coupon = couponForCustomer(storedCoupon, env, user);
     if (await couponAvailability(coupon, env, user)) continue;
     if (couponMinimumCartError(coupon, cartSubtotal)) continue;
     const eligibleSubtotal = couponEligibleSubtotal(coupon, requested, catalog);
@@ -7286,7 +10667,10 @@ async function listAvailableCoupons(request, env, user) {
       ends_at: coupon.ends_at || null,
       scope: coupon.scope || "all",
       scope_value: coupon.scope_value || "",
-      targets: couponTargetRules(coupon)
+      targets: couponTargetRules(coupon),
+      allow_store_credits: Boolean(coupon.allow_store_credits),
+      admin_exempt: coupon.admin_exempt,
+      coupon_instance_id: coupon.instance_id
     });
   }
 
@@ -7296,9 +10680,10 @@ async function listAvailableCoupons(request, env, user) {
 async function listCoupons(env) {
   const [couponRows, emailTargetRows] = await env.DB.batch([
     env.DB.prepare(`
-      SELECT c.*, COUNT(r.id) AS usage_count
+      SELECT c.*, COUNT(CASE WHEN r.admin_exempt=0 THEN r.id END) AS usage_count,
+        COUNT(CASE WHEN r.admin_exempt=1 THEN r.id END) AS admin_usage_count
       FROM coupons c
-      LEFT JOIN coupon_redemptions r ON r.coupon_code = c.code
+      LEFT JOIN coupon_redemptions r ON r.coupon_instance_id = c.instance_id
       GROUP BY c.code
       ORDER BY c.created_at DESC
     `),
@@ -7312,6 +10697,8 @@ async function listCoupons(env) {
   return json({ coupons: (couponRows.results || []).map(row => ({
     ...row,
     active: Boolean(row.active),
+    employee_only: Boolean(row.employee_only),
+    allow_store_credits: Boolean(row.allow_store_credits),
     targets: couponTargetRules(row),
     email_targets: emailsByCoupon.get(row.code) || [],
     usage_count: Number(row.usage_count || 0)
@@ -7319,8 +10706,33 @@ async function listCoupons(env) {
 }
 
 async function createCoupon(request, env) {
-  const body = await readJson(request);
+  return saveCoupon(request, env);
+}
+
+async function updateCoupon(request, env, code) {
+  return saveCoupon(request, env, String(code || "").trim().toUpperCase());
+}
+
+async function saveCoupon(request, env, existingCode = "") {
+  const input = await readJson(request);
+  let current = null;
+  let currentEmails = [];
+  if (existingCode) {
+    const [couponRows, emailRows] = await env.DB.batch([
+      env.DB.prepare(`SELECT c.*, (SELECT COUNT(*) FROM coupon_redemptions r WHERE r.coupon_instance_id = c.instance_id AND r.admin_exempt=0) AS usage_count
+        FROM coupons c WHERE c.code = ?`).bind(existingCode),
+      env.DB.prepare("SELECT email FROM coupon_email_targets WHERE coupon_code = ? ORDER BY email").bind(existingCode)
+    ]);
+    current = couponRows.results?.[0];
+    if (!current) return json({ error: "Coupon not found" }, 404);
+    currentEmails = (emailRows.results || []).map(row => row.email);
+    if (input.code !== undefined && String(input.code).trim().toUpperCase() !== existingCode) {
+      return json({ error: "Coupon codes cannot be renamed. Create a new code to preserve redemption history." }, 400);
+    }
+  }
+  const body = current ? { ...current, targets: couponTargetRules(current), email_targets: currentEmails, ...input, code: existingCode } : input;
   const code = String(body.code || "").trim().toUpperCase();
+  const active = body.active === undefined ? true : body.active === true || body.active === 1 || body.active === "true";
   const type = body.type === "flat" ? "flat" : "percent";
   const value = Math.floor(Number(body.value));
   const scope = ["all", "category", "product", "targeted"].includes(body.scope) ? body.scope : "all";
@@ -7331,6 +10743,9 @@ async function createCoupon(request, env) {
     value: String(target?.value ?? target?.id ?? "").trim()
   })).filter(target => ["category", "subcategory", "subsubcategory", "product"].includes(target.type) && target.value);
   const rawEmailTargets = Array.isArray(body.email_targets) ? body.email_targets : [];
+  const employeeOnly = body.employee_only === true || body.employee_only === 1 || body.employee_only === "true";
+  const allowStoreCredits = body.allow_store_credits === true || body.allow_store_credits === 1 || body.allow_store_credits === "true";
+  if (employeeOnly && rawEmailTargets.length) return json({ error: "Choose Employee only or selected email addresses, not both" }, 400);
   if (rawEmailTargets.length > 500) return json({ error: "Select no more than 500 eligible email addresses" }, 400);
   const emailTargets = [...new Set(rawEmailTargets.map(normalizeCouponEmail).filter(Boolean))];
   if (emailTargets.some(email => !isValidCouponEmail(email))) {
@@ -7342,7 +10757,7 @@ async function createCoupon(request, env) {
     ? null
     : Math.floor(Number(body.usage_limit));
   const perUserLimit = body.per_user_limit === "" || body.per_user_limit === null || body.per_user_limit === undefined
-    ? 1
+    ? current && body.per_user_limit !== undefined ? null : 1
     : Math.floor(Number(body.per_user_limit));
   const maxDiscount = body.max_discount === "" || body.max_discount === null || body.max_discount === undefined
     ? null
@@ -7357,7 +10772,7 @@ async function createCoupon(request, env) {
   if (body.ends_at && Number.isNaN(endsAt.getTime())) throw httpError("Coupon end time is invalid", 400);
   if (startsAt && endsAt && startsAt >= endsAt) throw httpError("Coupon end time must be after its start time", 400);
   if (usageLimit !== null && (!Number.isSafeInteger(usageLimit) || usageLimit < 1)) throw httpError("Usage limit must be a positive whole number", 400);
-  if (!Number.isSafeInteger(perUserLimit) || perUserLimit < 1) throw httpError("Per-account limit must be a positive whole number", 400);
+  if (perUserLimit !== null && (!Number.isSafeInteger(perUserLimit) || perUserLimit < 1)) throw httpError("Per-account limit must be a positive whole number", 400);
   if (maxDiscount !== null && (!Number.isSafeInteger(maxDiscount) || maxDiscount < 0)) throw httpError("Maximum discount must be zero or a positive whole number", 400);
   if (minCartValue !== null && (!Number.isSafeInteger(minCartValue) || minCartValue < 0)) throw httpError("Minimum cart value must be zero or a positive whole number", 400);
   if (scope === "targeted" && !targets.length) return json({ error: "Select at least one category, subcategory, or product" }, 400);
@@ -7427,14 +10842,10 @@ async function createCoupon(request, env) {
       if (!existing.has(t)) return json({ error: `Pick a product that exists (${t})` }, 400);
     }
   }
-  try {
-    const statements = [env.DB.prepare(`
-      INSERT INTO coupons (code, type, value, active, scope, scope_value, target_rules, starts_at, ends_at, usage_limit, per_user_limit, max_discount, min_cart_value)
-      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      code,
+  const fields = [
       type,
       value,
+      active ? 1 : 0,
       scope,
       scope === "all" ? "" : scopeValue,
       JSON.stringify(scope === "targeted" ? targets : []),
@@ -7443,20 +10854,36 @@ async function createCoupon(request, env) {
       usageLimit,
       perUserLimit,
       maxDiscount,
-      minCartValue
-    )];
+      minCartValue,
+      employeeOnly ? 1 : 0,
+      allowStoreCredits ? 1 : 0
+  ];
+  const instanceId = current?.instance_id || `gmc_${crypto.randomUUID().replaceAll('-', '')}`;
+  const statements = [current ? env.DB.prepare(`
+    UPDATE coupons SET type = ?, value = ?, active = ?, scope = ?, scope_value = ?, target_rules = ?,
+      starts_at = ?, ends_at = ?, usage_limit = ?, per_user_limit = ?, max_discount = ?, min_cart_value = ?, employee_only = ?, allow_store_credits = ?
+    WHERE code = ? AND instance_id = ?
+  `).bind(...fields, code, current.instance_id) : env.DB.prepare(`
+    INSERT INTO coupons (code, type, value, active, scope, scope_value, target_rules, starts_at, ends_at, usage_limit, per_user_limit, max_discount, min_cart_value, employee_only, allow_store_credits,instance_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)
+  `).bind(code, ...fields,instanceId)];
+  if (current) statements.push(env.DB.prepare("DELETE FROM coupon_email_targets WHERE coupon_code = ? AND EXISTS(SELECT 1 FROM coupons WHERE code=? AND instance_id=?)").bind(code,code,instanceId));
+  try {
     if (emailTargets.length) {
       statements.push(env.DB.prepare(`
         INSERT INTO coupon_email_targets (coupon_code, email)
         SELECT ?, CAST(value AS TEXT) FROM json_each(?)
-      `).bind(code, JSON.stringify(emailTargets)));
+        WHERE EXISTS(SELECT 1 FROM coupons WHERE code=? AND instance_id=?)
+      `).bind(code, JSON.stringify(emailTargets),code,instanceId));
     }
-    await env.DB.batch(statements);
-  } catch {
+    const saved = await env.DB.batch(statements);
+    if (current && !Number(saved[0]?.meta?.changes)) return json({error:'This coupon was deleted or recreated while you were editing. Reload before saving.'},409);
+  } catch (error) {
+    if (current) throw error;
     throw httpError("A coupon with that code already exists", 400);
   }
   return json({ coupon: {
-    code, type, value, scope, scope_value: scope === "all" ? "" : scopeValue,
+    code, instance_id: instanceId, type, value, scope, scope_value: scope === "all" ? "" : scopeValue,
     targets: scope === "targeted" ? targets : [],
     starts_at: startsAt ? startsAt.toISOString() : null,
     ends_at: endsAt ? endsAt.toISOString() : null,
@@ -7464,12 +10891,17 @@ async function createCoupon(request, env) {
     per_user_limit: perUserLimit,
     max_discount: maxDiscount,
     min_cart_value: minCartValue,
+    employee_only: employeeOnly,
+    allow_store_credits: allowStoreCredits,
     email_targets: emailTargets,
-    active: true
-  } }, 201);
+    active,
+    usage_count: Number(current?.usage_count || 0),
+    ...(current ? { created_at: current.created_at } : {})
+  } }, current ? 200 : 201);
 }
 
 async function deleteCoupon(env, code) {
+  code = String(code || '').trim().toUpperCase();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM coupon_email_targets WHERE coupon_code = ?").bind(code),
     env.DB.prepare("DELETE FROM coupons WHERE code = ?").bind(code)
@@ -7521,6 +10953,7 @@ async function resetProducts(env) {
 function validateMoney(value, label) {
   const number = Number(value);
   if (!Number.isSafeInteger(number) || number <= 0) throw httpError(`${label} must be a positive whole number`, 400);
+  if (!Number.isSafeInteger(number * 100)) throw httpError(`${label} exceeds the supported amount`, 400);
   return number;
 }
 
@@ -7564,11 +10997,11 @@ function validateSizeStockObject(sizeStock) {
 }
 
 function validateProduct(product, { requireImages = true } = {}) {
-  const required = ["name", "category", "brand", "price", "mrp", "stock", "color", "material", "description"];
+  const required = ["name", "category", "brand", "price", "mrp", "stock", "color", "material", "description", "what_in_box"];
   for (const key of required) {
     if (product[key] === undefined || product[key] === "") throw httpError(`Missing ${key}`, 400);
   }
-  for (const key of ["name", "category", "brand", "color", "material", "description"]) {
+  for (const key of ["name", "category", "brand", "color", "material", "description", "what_in_box"]) {
     if (String(product[key]).trim().length === 0 || String(product[key]).length > 500) throw httpError(`${key} is invalid`, 400);
   }
   const price = validateMoney(product.price, "Price");
@@ -7616,9 +11049,9 @@ function validateProduct(product, { requireImages = true } = {}) {
 
 function productPublicationIssues(product) {
   const issues = [];
-  const required = ["name", "category", "brand", "color", "material", "description"];
+  const required = ["name", "category", "brand", "color", "material", "description", "what_in_box"];
   for (const key of required) {
-    if (String(product?.[key] || "").trim().length === 0) issues.push(`Add ${key.replace("color", "colour")}`);
+    if (String(product?.[key] || "").trim().length === 0) issues.push(key === "what_in_box" ? "Add what's in the box" : `Add ${key.replace("color", "colour")}`);
   }
   if (!Number.isSafeInteger(Number(product?.price)) || Number(product.price) <= 0) issues.push("Add a valid selling price");
   if (!Number.isSafeInteger(Number(product?.mrp)) || Number(product.mrp) <= 0) issues.push("Add a valid MRP");
@@ -7649,6 +11082,7 @@ function formatProduct(row) {
   const reviewCount = Number(row.review_count) || 0;
   return {
     id: row.id,
+    product_code: row.product_code || null,
     seller_email: row.seller_email,
     name: row.name,
     category: row.category,
@@ -7656,9 +11090,10 @@ function formatProduct(row) {
     price: row.price,
     mrp: row.mrp,
     stock: row.stock,
-    rating: reviewCount ? Math.round(Number(row.review_avg) * 10) / 10 : row.rating,
+    rating: reviewCount ? Math.round(Number(row.review_avg) * 10) / 10 : 0,
     review_count: reviewCount,
     status: row.status,
+    storefront_visibility: row.storefront_visibility || "glamia",
     featured: Boolean(row.featured),
     color: row.color,
     color_hex: row.color_hex || "",
@@ -7675,6 +11110,7 @@ function formatProduct(row) {
     subcategory: row.subcategory || "",
     material: row.material || "",
     specifications: row.specifications || "",
+    what_in_box: row.what_in_box || "",
     sizes: jsonArray(row.sizes_json),
     image: row.image_url,
     image_url: row.image_url,
@@ -7704,6 +11140,7 @@ function formatProductCard(row) {
   if (!thumbnails.length && row.image_url) thumbnails = [row.image_url];
   return {
     id: row.id,
+    product_code: row.product_code || null,
     name: row.name,
     category: row.category,
     subcategory: row.subcategory || "",
@@ -7711,14 +11148,16 @@ function formatProductCard(row) {
     price: row.price,
     mrp: row.mrp,
     stock: row.stock,
-    rating: reviewCount ? Math.round(Number(row.review_avg) * 10) / 10 : row.rating,
+    rating: reviewCount ? Math.round(Number(row.review_avg) * 10) / 10 : 0,
     review_count: reviewCount,
     status: row.status,
+    storefront_visibility: row.storefront_visibility || "glamia",
     featured: Boolean(row.featured),
     color: row.color,
     color_hex: row.color_hex || "",
     returnable: row.returnable === undefined || row.returnable === null ? true : Boolean(row.returnable),
     material: row.material || "",
+    what_in_box: row.what_in_box || "",
     sizes: jsonArray(row.sizes_json),
     image: thumbnails[0] || row.image_url || "",
     image_url: thumbnails[0] || row.image_url || "",
@@ -7744,10 +11183,52 @@ async function currentUser(request, env) {
   const session = mobileBearerToken(request) || cookies[HOST_SESSION_COOKIE] || cookies[SESSION_COOKIE];
   if (!session) return null;
   try {
-    return await verifySession(session, env, request);
+    return await resolveWebsiteWorkspaceIdentity(await verifySession(session, env, request), env, request);
   } catch {
     return null;
   }
+}
+
+// Employee-admin access is resolved live; it never changes the configured owner whitelist.
+async function resolveWebsiteWorkspaceIdentity(user, env, request) {
+  if (adminEmails(env, request).includes(String(user.email || "").toLowerCase())) return { ...user, is_owner: true, access_level: "owner" };
+  const employee = await env.DB.prepare("SELECT id, employee_code, name, employee_email, position, permissions_json, owner_approved FROM employees WHERE LOWER(employee_email) = ? AND active = 1 AND position = 'admin' LIMIT 1")
+    .bind(String(user.email || "").toLowerCase()).first();
+  if (!employee) return { ...user, role: "seller", is_owner: false };
+  return { ...user, ...employeeAdminActor(employee, env), access_level: "top_employee" };
+}
+
+// Fail closed for new admin endpoints until an explicit employee capability is assigned.
+async function authorizeEmployeeWebsiteRequest(request, url, actor) {
+  const path = url.pathname;
+  const read = request.method === "GET";
+  const access = actor.employee_permissions || {};
+  const required = (ids) => { if (!ids.some((id) => access[id] === true)) throw httpError("Your employee permissions do not allow this action", 403); };
+  if (path.startsWith("/api/admin/")) {
+    const area = path.slice("/api/admin/".length).split("/")[0];
+    const areas = { dashboard: ["dashboard"], notifications: ["notifications"], employees: ["employees"], hero: ["hero"], events: ["events"], "cinematic-reel": ["cinematic_reel"], "storefront-settings": ["storefront"], about: ["storefront"], categories: ["categories"], subcategories: ["categories"], coupons: ["coupons"], "coupon-recipients": ["coupons"], credits: ["credits"], customers: ["customers"], reviews: ["reviews"], questions: ["questions"], orders: ["orders"], returns: ["returns"], support: ["support"], "tax-settings": ["tax"], "tax-compliance": ["tax"], "google-analytics": ["google_analytics"], "google-merchant": ["system"], "email-events": ["system"], "audit-log": ["system"], backup: ["system"], products: ["products", "inventory", "deals", "tax"], search: ["products"] };
+    if (!areas[area]) throw httpError("This action is reserved for an owner", 403);
+    required(areas[area]);
+    if (area === "products" && !read) {
+      const body = await readJson(request.clone());
+      const allowed = allowedEmployeeProductFields({ permissions: access });
+      if (Object.keys(body).some((field) => !allowed.has(field))) throw httpError("This account cannot change those listing fields", 403);
+    }
+    if (area === "storefront-settings" && !read && access.cinematic_reel !== true) {
+      const body = await readJson(request.clone());
+      if (Object.prototype.hasOwnProperty.call(body, "cinematic_reel")) throw httpError("Cinematic reel permission is required", 403);
+    }
+  }
+  if (path === "/api/products" && url.searchParams.get("scope") === "admin") required(["products", "add_product", "inventory", "deals", "tax", "coupons", "bulk_listing", "hero"]);
+  if (path === "/api/products" && url.searchParams.get("scope") === "seller") required(["products", "add_product", "inventory", "deals", "tax", "coupons", "bulk_listing", "hero"]);
+  if (/^\/api\/products\/[^/]+$/.test(path) && read) required(["products", "add_product", "inventory", "deals", "tax", "coupons", "bulk_listing", "hero"]);
+  if (path === "/api/orders" && url.searchParams.get("scope") === "admin") required(["orders", "labels", "dashboard"]);
+  if (/^\/api\/orders\/[^/]+\/(invoice|bill)$/.test(path)) required(["orders", "labels", "packing"]);
+  if (path === "/api/returns" && url.searchParams.get("scope") === "admin") required(["returns"]);
+  if (/^\/api\/support\/tickets\/[^/]+\/messages$/.test(path)) required(["support"]);
+  if (path === "/api/products" && !read) required(["add_product", "bulk_listing"]);
+  if (/^\/api\/products\/[^/]+$/.test(path) && !read) required(["products"]);
+  if (path.startsWith("/api/uploads/") && !read) required(["products", "add_product", "hero", "storefront"]);
 }
 
 function mobileBearerToken(request) {
@@ -7778,6 +11259,7 @@ async function signSession(user, env) {
 
 async function verifySession(session, env, request) {
   if (!env.SESSION_SECRET) throw new Error("Missing SESSION_SECRET");
+  if (session.length > 8192 || session.split(".").length !== 2) throw new Error("Invalid session format");
   const [encodedPayload, signature] = session.split(".");
   const expected = await hmac(encodedPayload, env.SESSION_SECRET);
   let valid = false;
@@ -7792,11 +11274,9 @@ async function verifySession(session, env, request) {
   }
   if (!valid) throw new Error("Bad session signature");
   const payload = JSON.parse(base64UrlDecodeToString(encodedPayload));
-  const now = Math.floor(Date.now() / 1000);
-  if (!payload || typeof payload !== "object" || !payload.email || !payload.iat || payload.iat > now + 300 || (payload.nbf && payload.nbf > now + 300)) {
+  if (!validSessionClaims(payload, SESSION_MAX_AGE, isLocalDemoRequest(request, env))) {
     throw new Error("Invalid session claims");
   }
-  if (payload.exp <= now || payload.exp - payload.iat > SESSION_MAX_AGE) throw new Error("Session expired");
   if (payload.sv !== undefined) {
     const account = await env.DB.prepare("SELECT session_version FROM users WHERE email = ?").bind(String(payload.email).toLowerCase()).first();
     if (!account || Number(account.session_version || 0) !== Number(payload.sv)) throw new Error("Session revoked");
@@ -7840,8 +11320,9 @@ function requireAdmin(user) {
 }
 
 function assertSameOrigin(request, url) {
-  if (request.headers.get("X-Glamia-Mobile") === "1") return;
   if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return;
+  // Only cookieless native requests may use the mobile marker instead of browser CSRF checks.
+  if (request.headers.get("X-Glamia-Mobile") === "1" && !request.headers.get("Cookie") && !request.headers.get("Origin") && !request.headers.get("Referer") && !request.headers.get("Sec-Fetch-Site")) return;
   const origin = request.headers.get("Origin");
   if (origin && origin !== url.origin) throw httpError("Cross-origin requests are not allowed", 403);
   const referer = request.headers.get("Referer");
@@ -7887,15 +11368,17 @@ async function enforceRateLimit(request, url, env, ctx) {
       RETURNING window_started_at, request_count
     `).bind(key, now, RATE_LIMIT_WINDOW_MS, RATE_LIMIT_WINDOW_MS).first();
     if (Number(bucket?.request_count || 0) > limit) throw httpError("Too many requests. Please try again shortly.", 429);
-    if (Number(bucket?.request_count) === 1 && ctx?.waitUntil) {
-      ctx.waitUntil(env.DB.prepare("DELETE FROM request_rate_limits WHERE window_started_at < ?")
-        .bind(now - RATE_LIMIT_WINDOW_MS * 2).run().catch(() => {}));
+    if (now >= rateLimitCleanupAt && ctx?.waitUntil) {
+      // Use the existing timestamp index and throttle housekeeping independently of visitor count.
+      rateLimitCleanupAt = now + RATE_LIMIT_WINDOW_MS;
+      ctx.waitUntil(env.DB.prepare("DELETE FROM request_rate_limits WHERE updated_at < datetime('now', '-2 minutes')")
+        .run().catch(() => {}));
     }
     return;
   } catch (error) {
     if (error?.status === 429) throw error;
-    // Keep local development usable before migrations are applied. The
-    // deployed Worker should always have the D1 table from the migration.
+    // Production must not silently weaken shared limits when its database is unavailable.
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw httpError("Please try again shortly", 503);
   }
 
   enforceRateLimitInMemory(request, url, limit);
@@ -7929,18 +11412,21 @@ function parseCookies(header) {
 
 async function readJson(request) {
   try {
-    const body = await request.json();
+    const body = JSON.parse(new TextDecoder().decode(await readBoundedBody(request, 1024 * 1024)));
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error();
     return body;
-  } catch {
+  } catch (error) {
+    if (error.status === 413) throw error;
     throw httpError("Request body must be valid JSON", 400);
   }
 }
 
 async function readFormData(request) {
   try {
-    return await request.formData();
-  } catch {
+    const bytes = await readBoundedBody(request, 6 * 1024 * 1024);
+    return await new Response(bytes, { headers: { "Content-Type": request.headers.get("Content-Type") || "" } }).formData();
+  } catch (error) {
+    if (error.status === 413) throw error;
     throw httpError("Request body must be valid form data", 400);
   }
 }
@@ -7977,7 +11463,7 @@ function json(data, status = 200, headers = {}) {
 function withSecurityHeaders(response) {
   const headers = new Headers(response.headers);
   headers.set("X-Content-Type-Options", "nosniff");
-  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  if (!headers.has("Referrer-Policy")) headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   headers.set("X-Permitted-Cross-Domain-Policies", "none");
   headers.set("X-Frame-Options", "DENY");
@@ -7987,7 +11473,10 @@ function withSecurityHeaders(response) {
   headers.set("Access-Control-Allow-Origin", "*");
   headers.set("Access-Control-Allow-Headers", "Accept, Content-Type, Authorization, X-Glamia-Mobile, X-Requested-With");
   headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
-  headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'sha256-On1TqejLHzYPtlgCG4EQtHKn2f1u8Plk+C210XpYbec=' https://accounts.google.com https://www.googletagmanager.com https://checkout.razorpay.com; style-src 'self' 'sha256-RU4sU0AaS8IBGZx8XrGt/pa9A5SLA3dQszGeqT5L3Kw=' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://api.razorpay.com; frame-src https://accounts.google.com https://api.razorpay.com https://*.razorpay.com; form-action 'self'");
+  headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'sha256-QDL1JU0g6O+naM0GHg1SrXz5jfV62Pk3CmUPnu1n1kY=' 'sha256-On1TqejLHzYPtlgCG4EQtHKn2f1u8Plk+C210XpYbec=' https://accounts.google.com https://www.googletagmanager.com https://checkout.razorpay.com https://static.cloudflareinsights.com; style-src 'self' 'sha256-RU4sU0AaS8IBGZx8XrGt/pa9A5SLA3dQszGeqT5L3Kw=' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://accounts.google.com https://www.googleapis.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://api.razorpay.com https://cloudflareinsights.com; frame-src https://accounts.google.com https://api.razorpay.com https://*.razorpay.com; form-action 'self'");
+  headers.set("Content-Security-Policy", headers.get("Content-Security-Policy").replace("style-src 'self'", `style-src 'self' 'sha256-${storefrontStyleHash}'`));
+  headers.set("Content-Security-Policy", headers.get("Content-Security-Policy").replace("font-src 'self'", "font-src 'self' data:"));
+  for (const style of Object.values(storefrontRouteCriticalStyles)) headers.set('Content-Security-Policy', headers.get('Content-Security-Policy').replace("style-src 'self'", `style-src 'self' 'sha256-${style.hash}'`));
   headers.set("Strict-Transport-Security", "max-age=31536000");
   if (headers.get("Content-Type")?.includes("application/json")) {
     headers.set("X-Robots-Tag", "noindex, nofollow");

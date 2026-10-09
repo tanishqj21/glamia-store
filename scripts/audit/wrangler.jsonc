@@ -1,0 +1,10 @@
+// Isolated local-only fixtures; do not deploy this configuration.
+{
+  "name": "glamia-isolated-audit",
+  "main": "../../src/index.js",
+  "compatibility_date": "2026-08-26",
+  "assets": { "directory": "../../public", "binding": "ASSETS", "run_worker_first": true, "not_found_handling": "single-page-application" },
+  "d1_databases": [{ "binding": "DB", "database_name": "glamia-audit-db", "database_id": "00000000-0000-0000-0000-000000000001", "migrations_dir": "../../migrations" }],
+  "r2_buckets": [{ "binding": "PRODUCT_IMAGES", "bucket_name": "glamia-audit-images" }],
+  "vars": { "SESSION_SECRET": "isolated-local-audit-not-a-production-secret", "ADMIN_EMAILS": ["admin@example.com"], "DEMO_ADMIN_ENABLED": "true", "GA4_MEASUREMENT_ID": "G-LOCALTEST", "DISABLE_OUTBOUND_PUSH": "true" }
+}

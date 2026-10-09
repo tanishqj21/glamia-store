@@ -1,10 +1,17 @@
-import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../lib/api";
+import { canUseAdminArea } from "../lib/workspaceAccess";
 import { money, formatIST } from "../lib/commerce";
 import { Icon } from "./Icon";
 import { ImageManager } from "./ImageManager";
 import { TaxCodePicker } from "./TaxCodePicker";
 import { colourHexForName, isColourHex } from "../lib/colours";
+import { AdminOrderAfterSales } from "./AdminOrderAfterSales";
+import { OrderDetails, ReplacementOrderBadge } from './OrderDetails';
+import { CancellationRefundCard } from './CancellationRefundCard';
+import "../admin-ui.css";
+import { reportAdminError } from "../lib/adminFeedback";
+import { linkedSpecificationCopy } from '../../../src/product-trust.js';
 
 const BulkListingView = lazy(() => import("./BulkListingView").then((module) => ({ default: module.BulkListingView })));
 const CustomersView = lazy(() => import("./AdminOperations").then((module) => ({ default: module.CustomersView })));
@@ -17,12 +24,16 @@ const ReturnsView = lazy(() => import("./AdminCare").then((module) => ({ default
 const SupportView = lazy(() => import("./AdminCare").then((module) => ({ default: module.SupportView })));
 const HeroStudioView = lazy(() => import("./AdminMerchandising").then((module) => ({ default: module.HeroStudioView })));
 const StorefrontSettingsView = lazy(() => import("./AdminMerchandising").then((module) => ({ default: module.StorefrontSettingsView })));
+const EventsView = lazy(() => import("./AdminEvents").then((module) => ({ default: module.EventsView })));
 const LabelsView = lazy(() => import("./AdminSystemViews").then((module) => ({ default: module.LabelsView })));
 const SystemView = lazy(() => import("./AdminSystemViews").then((module) => ({ default: module.SystemView })));
 const ManageStoreView = lazy(() => import("./AdminSystemViews").then((module) => ({ default: module.ManageStoreView })));
 const TaxComplianceView = lazy(() => import("./TaxComplianceView").then((module) => ({ default: module.TaxComplianceView })));
 const GoogleAnalyticsView = lazy(() => import("./GoogleAnalyticsView").then((module) => ({ default: module.GoogleAnalyticsView })));
 const EmployeesView = lazy(() => import("./AdminEmployees").then((module) => ({ default: module.EmployeesView })));
+const AdminCreditsView = lazy(() => import("./AdminCredits").then((module) => ({ default: module.AdminCreditsView })));
+const CompletedOrdersView = lazy(() => import("./CompletedOrders").then((module) => ({ default: module.CompletedOrdersView })));
+const AdminAboutView = lazy(() => import("./AdminAbout").then((module) => ({ default: module.AdminAboutView })));
 
 
 async function compactThumbnailFile(file) {
@@ -90,7 +101,18 @@ function ColourPickerField({ color, colorHex, onColorChange, onHexChange, compac
 }
 
 const adminLinks = [
-  ["/admin", "Dashboard"], ["/admin/storefront", "Storefront"], ["/admin/hero", "Hero studio"], ["/admin/tax", "GST & HSN"], ["/admin/coupons", "Coupons"], ["/admin/labels", "Labels"], ["/admin/employees", "Employees"], ["/admin/manage-store", "Manage store"],
+  ["/admin", "Dashboard"], ["/admin/storefront", "Storefront"], ["/admin/about", "About us"], ["/admin/events", "Events"], ["/admin/hero", "Hero studio"], ["/admin/tax", "GST & HSN"], ["/admin/coupons", "Coupons"], ["/admin/credits", "Store credits"], ["/admin/labels", "Labels"], ["/admin/employees", "Employees"], ["/admin/manage-store", "Manage store"],
+  ["/admin/add-product", "Add listing"], ["/admin/products", "Products"], ["/admin/bulk-listing", "Bulk listing"], ["/admin/inventory", "Inventory"],
+  ["/admin/orders", "Orders"], ["/admin/completed-orders", "Completed orders"], ["/admin/categories", "Categories"], ["/admin/customers", "Customers"], ["/admin/reviews", "Reviews"],
+  ["/admin/questions", "Questions"], ["/admin/deals", "Deals"], ["/admin/returns", "Returns"], ["/admin/support", "Support"], ["/admin/system", "System"],
+];
+
+const adminQuickLinks = ["/admin", "/admin/orders", "/admin/products", "/admin/inventory", "/admin/storefront"];
+const adminLinkGroups = [
+  { label: "Catalog", routes: ["/admin/add-product", "/admin/bulk-listing", "/admin/categories", "/admin/deals"] },
+  { label: "Campaigns & content", routes: ["/admin/about", "/admin/events", "/admin/hero", "/admin/coupons", "/admin/labels"] },
+  { label: "People & care", routes: ["/admin/customers", "/admin/employees", "/admin/credits", "/admin/reviews", "/admin/questions", "/admin/returns", "/admin/support"] },
+  { label: "Operations", routes: ["/admin/completed-orders", "/admin/tax", "/admin/manage-store", "/admin/system"] },
 ];
 
 // Keep the admin shell light: each section asks the Worker only for the data
@@ -107,8 +129,9 @@ const ADMIN_SECTION_DATA = {
   "/admin/bulk-listing": { categories: true },
   "/admin/products": { products: true, categories: true },
   "/admin/inventory": { products: true },
-  "/admin/coupons": { products: true, categories: true },
+  "/admin/coupons": { products: true, categories: true, couponRecipients: true },
   "/admin/deals": { products: true },
+  "/admin/events": { categories: true },
   "/admin/categories": { categories: true },
 };
 
@@ -128,6 +151,7 @@ const ADMIN_CACHE_TTLS = {
   orders: 15000,
   products: 30000,
   categories: 300000,
+  customers: 300000,
 };
 
 const ADMIN_PAGE_SIZES = { orders: 50, products: 40 };
@@ -136,14 +160,59 @@ const ADMIN_PAGINATED_ROUTES = {
   products: new Set(["/admin/products", "/admin/inventory"]),
 };
 
+const SHARED_PRODUCT_FIELDS = [
+  "category", "subcategory", "brand", "price", "mrp", "cost_price", "material",
+  "description", "specifications", "size_chart_url", "reorder_point", "returnable",
+  "preorder_enabled", "preorder_release_at", "preorder_limit", "hsn_sac_code", "hsn_sac_type",
+  "gst_rate", "gst_tax_inclusive", "featured", "deal_starts_at", "deal_ends_at", "deal_price", "status"
+];
+
 const MIN_LISTING_IMAGES = 4;
 const MAX_LISTING_IMAGES = 15;
 
-function AdminShell({ route, onNavigate, notifications = [], unreadCount = null, children }) {
+function AdminShell({ route, onNavigate, user, notifications = [], unreadCount = null, children }) {
+  const menuRef = useRef(null);
+  const [sectionSearch, setSectionSearch] = useState("");
+  const [actionError, setActionError] = useState(null);
+  useEffect(() => {
+    const showError = event => setActionError({ route, message: event.detail?.message });
+    window.addEventListener("glamia-admin-error", showError);
+    return () => window.removeEventListener("glamia-admin-error", showError);
+  }, [route]);
+  useEffect(() => {
+    const closeOutside = (event) => { if (menuRef.current && !menuRef.current.contains(event.target)) menuRef.current.open = false; };
+    const closeOnEscape = (event) => { if (event.key === "Escape" && menuRef.current?.open) { menuRef.current.open = false; menuRef.current.querySelector("summary")?.focus(); } };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeOnEscape, true); };
+  }, []);
   const unread = unreadCount === null || unreadCount === undefined
     ? notifications.filter((item) => !item.read_at && !item.dismissed_at).length
     : Number(unreadCount || 0);
-  return <main className="page-main"><section className="admin-page admin-react-page"><div className="admin-heading"><div><p className="eyebrow">Glamia console</p><h1 className="page-title">Manage the marketplace.</h1></div><div className="admin-heading-actions"><button className="admin-notification-button" type="button" onClick={() => onNavigate("/admin/notifications")} aria-label={`Open notifications${unread ? `, ${unread} unread` : ""}`} title="Open notifications"><Icon name="bell" size={20} />{unread > 0 && <span>{unread > 99 ? "99+" : unread}</span>}</button><button className="text-link" type="button" onClick={() => onNavigate("/admin/manage-store")}>Open store map</button></div></div><nav className="admin-nav" aria-label="Admin workspace" tabIndex={0}>{adminLinks.map(([href, label]) => <button key={href} type="button" className={route === href ? "active" : ""} onClick={() => onNavigate(href)}>{label}</button>)}</nav>{children}</section></main>;
+  const visibleLinks = adminLinks.filter(([href]) => canUseAdminArea(user, href));
+  const currentLabel = visibleLinks.find(([href]) => href === route)?.[1] || (route === "/admin/notifications" ? "Notifications" : "Workspace");
+  const quickLinks = visibleLinks.filter(([href]) => adminQuickLinks.includes(href));
+  const menuGroups = adminLinkGroups.map(({ label, routes }) => ({ label, links: visibleLinks.filter(([href, linkLabel]) => routes.includes(href) && `${label} ${linkLabel}`.toLowerCase().includes(sectionSearch.trim().toLowerCase())) })).filter(({ links }) => links.length);
+  const currentInMenu = !adminQuickLinks.includes(route);
+  const navigateFromMenu = (href) => { if (menuRef.current) menuRef.current.open = false; setSectionSearch(""); onNavigate(href); };
+  return <main className="page-main"><section className="admin-page admin-react-page">
+    <div className="admin-heading"><div><p className="eyebrow">Glamia console</p><h1 className="page-title">{currentLabel}</h1></div>
+      <div className="admin-heading-actions">{canUseAdminArea(user, "/admin/notifications") && <button className="admin-notification-button" type="button" onClick={() => onNavigate("/admin/notifications")} aria-label={`Open notifications${unread ? `, ${unread} unread` : ""}`} title="Open notifications"><Icon name="bell" size={20} />{unread > 0 && <span>{unread > 99 ? "99+" : unread}</span>}</button>}</div>
+    </div>
+    <nav className="admin-nav admin-workspace-nav" aria-label="Admin workspace">
+      {quickLinks.map(([href, label]) => <button key={href} type="button" className={route === href ? "active" : ""} aria-current={route === href ? "page" : undefined} onClick={() => onNavigate(href)}>{label}</button>)}
+      {visibleLinks.some(([href]) => !adminQuickLinks.includes(href)) && <details name="glamia-account-navigation" className={`admin-nav-more ${currentInMenu ? "active" : ""}`} ref={menuRef}>
+        <summary aria-label="Browse more admin sections">More sections {currentInMenu && <small>· {currentLabel}</small>}<Icon name="chevronDown" size={16} /></summary>
+        <div className="admin-nav-menu">
+          <label className="admin-section-search">Find a section<input type="search" value={sectionSearch} onChange={event => setSectionSearch(event.target.value)} placeholder="Returns, employees, coupons…" /></label>
+          {menuGroups.map(({ label, links }) => <div className="admin-nav-group" key={label}><h2>{label}</h2>{links.map(([href, linkLabel]) => <button key={href} type="button" className={route === href ? "active" : ""} aria-current={route === href ? "page" : undefined} onClick={() => navigateFromMenu(href)}>{linkLabel}</button>)}</div>)}
+          {!menuGroups.length && <p className="admin-menu-empty" role="status">No matching sections. Try another search.</p>}
+        </div>
+      </details>}
+    </nav>
+    {actionError?.route === route && <div className="inline-error admin-action-error" role="alert"><span>{actionError.message}</span><button type="button" className="secondary-action" onClick={() => setActionError(null)}>Dismiss error</button></div>}
+    {children}
+  </section></main>;
 }
 
 function Metric({ label, value, detail }) { return <article className="admin-metric"><span>{label}</span><strong>{value}</strong>{detail && <small>{detail}</small>}</article>; }
@@ -204,7 +273,8 @@ function PerformanceTable({ title, hint, items, metric, metricLabel, formatter =
   return <section className="admin-panel dashboard-performance-panel"><div className="admin-panel-heading"><div><p className="eyebrow">{title}</p><span className="muted">{hint}</span></div><span>{items.length} shown</span></div>{items.length ? <div className="dashboard-performance-list">{items.map((product) => <article className="dashboard-performance-row" key={product.id}><img src={product.thumbnail || product.image || ""} alt="" loading="lazy" decoding="async" width="42" height="42" /><div><strong>{product.name}</strong><span>{product.category || "Uncategorized"}{product.color ? ` · ${product.color}` : ""}</span></div><b>{formatter(product[metric])} <small>{metricLabel}</small></b></article>)}</div> : <div className="empty-state">No product activity yet.</div>}</section>;
 }
 
-function DashboardView({ dashboard, orders, notifications, onNavigate }) {
+function DashboardView({ dashboard, orders, notifications, onNavigate, user }) {
+  const [activePanel, setActivePanel] = useState("overview");
   const [mode, setMode] = useState("basic");
   const [category, setCategory] = useState("");
   const [subcategory, setSubcategory] = useState("");
@@ -256,9 +326,13 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
         <div className="dashboard-control-copy">
           <p className="eyebrow">Workspace view</p>
           <h2>Store pulse</h2>
-          <span>Start with the headline numbers, then drill into the signal that needs attention.</span>
+          <span>Choose the part of the store you want to inspect.</span>
         </div>
         <div className="dashboard-control-main">
+          <div className="dashboard-panel-tabs" role="group" aria-label="Dashboard sections">
+            {[["overview", "Overview"], ["traffic", "Traffic"], ["commerce", "Commerce"], ["products", "Products"]].map(([panel, label]) => <button key={panel} type="button" className={activePanel === panel ? "active" : ""} aria-pressed={activePanel === panel} onClick={() => setActivePanel(panel)}>{label}</button>)}
+          </div>
+          {activePanel === "products" && <>
           <div
             className="dashboard-mode-toggle"
             role="group"
@@ -333,43 +407,37 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
             </label>
             </div>
           )}
+          </>}
         </div>
       </section>
+      {activePanel === "overview" && <>
       <section className="dashboard-section dashboard-summary-section" aria-labelledby="dashboard-summary-heading">
         <div className="dashboard-section-heading">
           <div>
             <p className="eyebrow">At a glance</p>
             <h2 id="dashboard-summary-heading">Today’s business snapshot</h2>
           </div>
-          <span className="dashboard-section-note">{mode === "advanced" ? "Filtered product view" : "All live catalog activity"}</span>
+          <span className="dashboard-section-note">All catalog activity</span>
         </div>
       <div className="admin-metric-grid dashboard-kpi-grid">
         <Metric
           label="Revenue"
-          value={money(viewTotals.revenue)}
-          detail={`${viewTotals.units || 0} units sold`}
+          value={money(totals.revenue)}
+          detail={`${totals.units || 0} units sold`}
         />
         <Metric
           label="Orders"
-          value={viewTotals.orders || 0}
-          detail={
-            mode === "advanced"
-              ? "Filtered product view"
-              : `${totals.repeat_customers || 0} repeat customers`
-          }
+          value={totals.orders || 0}
+          detail={`${totals.repeat_customers || 0} repeat customers`}
         />
         <Metric
           label="Profit"
-          value={money(viewTotals.profit)}
-          detail={
-            mode === "advanced"
-              ? "Filtered product view"
-              : `${totals.return_rate || 0}% return rate`
-          }
+          value={money(totals.profit)}
+          detail={`${totals.return_rate || 0}% return rate`}
         />
         <Metric
           label="Wishlist saves"
-          value={viewTotals.wishlists || 0}
+          value={totals.wishlists || 0}
           detail={`${notifications.filter((item) => !item.read_at).length} unread alerts`}
         />
       </div>
@@ -380,7 +448,7 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
             <p className="eyebrow">Warehouse handoff</p>
             <h2 id="dashboard-fulfilment-heading">Packing activity</h2>
           </div>
-          <button type="button" className="secondary-action" onClick={() => onNavigate("/admin/employees")}>Manage employees ↗</button>
+          {canUseAdminArea(user, "/admin/employees") && <button type="button" className="secondary-action" onClick={() => onNavigate("/admin/employees")}>Manage employees </button>}
         </div>
         <div className="admin-metric-grid dashboard-kpi-grid">
           <Metric label="Packing queue" value={packingQueue.length} detail="orders awaiting a pack confirmation" />
@@ -388,6 +456,8 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
         </div>
         {packedAlerts.length ? <div className="admin-notification-list dashboard-packed-alerts">{packedAlerts.map((item) => <button type="button" className="admin-notification-row" key={item.id} onClick={() => onNavigate("/admin/orders")}><strong>{item.title || "Order packed"}</strong><span>{item.message}</span></button>)}</div> : <div className="empty-state">No employee packing alerts yet. Create an employee ID to start the workflow.</div>}
       </section>
+      </>}
+      {activePanel === "traffic" && <>
       <section className="dashboard-section dashboard-visitor-section" aria-labelledby="dashboard-traffic-heading">
         <div className="dashboard-section-heading">
           <div>
@@ -425,7 +495,9 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
         </div>
         <p className="dashboard-interaction-note">Select any daily bar or pie slice to combine that day’s total with its 24-hour visit breakdown.</p>
       </section>
-      <GoogleAnalyticsView />
+      {(!user?.employee_id || user.is_owner || user.employee_permissions?.google_analytics) && <GoogleAnalyticsView />}
+      </>}
+      {activePanel === "commerce" && <>
       <section className="dashboard-section dashboard-commerce-section" aria-labelledby="dashboard-commerce-heading">
         <div className="dashboard-section-heading">
           <div>
@@ -468,6 +540,8 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
         />
       </div>
       </section>
+      </>}
+      {activePanel === "traffic" && <>
       <section className="admin-panel dashboard-audience-section traffic-snapshot-panel">
         <div className="admin-panel-heading">
           <div>
@@ -528,6 +602,9 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
           </div>
         </div>
       </section>
+      </>}
+      {activePanel === "products" && <>
+      {mode === "advanced" && <div className="admin-metric-grid dashboard-kpi-grid dashboard-filtered-metrics" aria-label="Filtered product totals"><Metric label="Revenue" value={money(viewTotals.revenue)} detail={`${viewTotals.units || 0} units sold`} /><Metric label="Orders" value={viewTotals.orders || 0} /><Metric label="Profit" value={money(viewTotals.profit)} /><Metric label="Wishlist saves" value={viewTotals.wishlists || 0} /></div>}
       <section className="dashboard-section dashboard-performance-section" aria-labelledby="dashboard-performance-heading">
         <div className="dashboard-section-heading">
           <div>
@@ -670,6 +747,8 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
           </div>
         </section>
       )}
+      </>}
+      {activePanel === "overview" && <>
       <div className="admin-columns">
         <section className="admin-panel">
           <div className="admin-panel-heading">
@@ -729,21 +808,23 @@ function DashboardView({ dashboard, orders, notifications, onNavigate }) {
           )}
         </section>
       </div>
+      </>}
     </>
   );
 }
 
-function OrdersView({ orders, onOrderChanged, hasMoreOrders = false, orderTotal = orders.length, loadingMore = false, onLoadMore }) {
+function OrdersView({ orders, user, onNavigate, onOrderChanged, hasMoreOrders = false, orderTotal = orders.length, loadingMore = false, onLoadMore }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [quickFilter, setQuickFilter] = useState("all");
-  const [expanded, setExpanded] = useState("");
+  const [expanded, setExpanded] = useState(()=>new URLSearchParams(window.location.search).get('order')||'');
   const [drafts, setDrafts] = useState({});
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
   const counts = useMemo(() => {
     const attention = orders.filter((order) => {
-      const needsPaymentReview = ["pending", "failed"].includes(order.payment_status);
+      const needsPaymentReview = ["pending", "failed"].includes(order.payment_status)
+        || ['reconciliation_required','review_required','failed'].includes(order.cancellation_refund?.state);
       const needsPacking = !["cancelled", "delivered"].includes(order.status) && order.packing_status !== "packed";
       return needsPaymentReview || needsPacking;
     }).length;
@@ -754,13 +835,29 @@ function OrdersView({ orders, onOrderChanged, hasMoreOrders = false, orderTotal 
       complete: orders.filter((order) => order.status === "delivered").length
     };
   }, [orders]);
+  async function openOriginal(path) {
+    const id=new URL(path,window.location.origin).searchParams.get('order');
+    setQuery('');setStatus('all');setQuickFilter('all');
+    if(!orders.some(order=>order.id===id)) {
+      try {
+        const response=await apiFetch(`/api/orders?scope=admin&order=${encodeURIComponent(id)}&limit=1`);
+        const data=await response.json();
+        if(!response.ok||!data.orders?.length)throw Error(data.error||'The original order could not be loaded');
+        onOrderChanged(data.orders[0]);
+      }catch(error){setMessage(error.message);return;}
+    }
+    setExpanded(id);onNavigate(path);
+  }
   const filtered = useMemo(() => orders.filter((order) => {
     const haystack = `${order.order_number} ${order.customer_name} ${order.customer_email}`.toLowerCase();
     const matchesQuickFilter = quickFilter === "all"
-      || (quickFilter === "attention" && (["pending", "failed"].includes(order.payment_status) || (!["cancelled", "delivered"].includes(order.status) && order.packing_status !== "packed")))
+      || (quickFilter === "attention" && (["pending", "failed"].includes(order.payment_status)
+        || ['reconciliation_required','review_required','failed'].includes(order.cancellation_refund?.state)
+        || (!["cancelled", "delivered"].includes(order.status) && order.packing_status !== "packed")))
       || (quickFilter === "transit" && order.status === "shipped")
       || (quickFilter === "complete" && order.status === "delivered");
-    return (!query || haystack.includes(query.toLowerCase())) && (status === "all" || order.status === status) && matchesQuickFilter;
+    const matchesStatus = status === "all" || (status.startsWith("packing:") ? order.packing_status === status.slice(8) : order.status === status);
+    return (!query || haystack.includes(query.toLowerCase())) && matchesStatus && matchesQuickFilter;
   }), [orders, query, quickFilter, status]);
   const labels = { pending: "Pending", confirmed: "Confirmed", shipped: "Shipped", delivered: "Delivered", cancelled: "Cancelled", demo: "Demo recorded", paid: "Paid", failed: "Payment failed", refunded: "Refunded", not_required: "Not required" };
   const label = (value) => labels[value] || String(value || "Pending").replace(/_/g, " ");
@@ -793,32 +890,34 @@ function OrdersView({ orders, onOrderChanged, hasMoreOrders = false, orderTotal 
   return <section className="admin-panel admin-wide-panel orders-workspace">
     <div className="admin-panel-heading orders-heading"><div><p className="eyebrow">Order workspace <span className="orders-live-dot" aria-hidden="true" /> Live queue</p><h2>Orders</h2><p className="muted">Follow every order from confirmation to delivery. Razorpay remains disabled until approval.</p></div><div className="orders-heading-meta"><span className="orders-auto-refresh"><i aria-hidden="true" /> Auto-refreshes every 30s</span><strong>{filtered.length}<small> showing</small></strong></div></div>
     <div className="orders-overview-grid" aria-label="Order overview">
-      {[{ key: "all", label: "All orders", count: counts.all, tone: "blue", note: "Total queue" }, { key: "attention", label: "Needs attention", count: counts.attention, tone: "amber", note: "Packing or payment" }, { key: "transit", label: "In transit", count: counts.transit, tone: "violet", note: "Shipped orders" }, { key: "complete", label: "Completed", count: counts.complete, tone: "green", note: "Delivered orders" }].map((item) => <button type="button" key={item.key} className={`orders-overview-card tone-${item.tone} ${quickFilter === item.key ? "is-active" : ""}`} onClick={() => { setQuickFilter(item.key); setStatus("all"); }} aria-pressed={quickFilter === item.key}><span className="orders-overview-icon" aria-hidden="true"><i /></span><span><strong>{item.count}</strong><small>{item.label}</small><em>{item.note}</em></span><span className="orders-overview-arrow" aria-hidden="true">↗</span></button>)}
+      {[{ key: "all", label: "All orders", count: counts.all, tone: "blue", note: "Total queue" }, { key: "attention", label: "Needs attention", count: counts.attention, tone: "amber", note: "Packing or payment" }, { key: "transit", label: "In transit", count: counts.transit, tone: "violet", note: "Shipped orders" }, { key: "complete", label: "Completed", count: counts.complete, tone: "green", note: "Delivered orders" }].map((item) => <button type="button" key={item.key} className={`orders-overview-card tone-${item.tone} ${quickFilter === item.key ? "is-active" : ""}`} onClick={() => { setQuickFilter(item.key); setStatus("all"); }} aria-pressed={quickFilter === item.key}><span className="orders-overview-icon" aria-hidden="true"><i /></span><span><strong>{item.count}</strong><small>{item.label}</small><em>{item.note}</em></span></button>)}
     </div>
-    <div className="admin-filters orders-filter-bar"><label className="orders-search-field" htmlFor="adminOrderSearch"><span>Find an order</span><input id="adminOrderSearch" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Order number, customer, or email" /></label><label className="orders-status-field" htmlFor="adminOrderStatus"><span>Status</span><select id="adminOrderStatus" value={status} onChange={(event) => { setStatus(event.target.value); setQuickFilter("all"); }} aria-label="Filter orders by status"><option value="all">All statuses</option>{["pending", "confirmed", "shipped", "delivered", "cancelled"].map((value) => <option key={value} value={value}>{label(value)}</option>)}</select></label></div>
+    <div className="admin-filters orders-filter-bar"><label className="orders-search-field" htmlFor="adminOrderSearch"><span>Find an order</span><input id="adminOrderSearch" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Order number, customer, or email" /></label><label className="orders-status-field" htmlFor="adminOrderStatus"><span>Status</span><select id="adminOrderStatus" value={status} onChange={(event) => { setStatus(event.target.value); setQuickFilter("all"); }} aria-label="Filter orders by status"><option value="all">All statuses</option><optgroup label="Fulfilment">{["pending", "confirmed", "shipped", "delivered", "cancelled"].map((value) => <option key={value} value={value}>{label(value)}</option>)}</optgroup><optgroup label="Packing"><option value="packing:packed">Packed</option><option value="packing:unpacked">Awaiting pack</option></optgroup></select></label></div>
     {message && <p className="inline-note" role="status">{message}</p>}
     <div className="orders-results-heading"><span><strong>{filtered.length}</strong> {filtered.length === 1 ? "order" : "orders"} in view</span><small>Click an order to view details and edit its status</small></div>
     <div className="admin-order-list">{filtered.map((order, index) => {
-      const values = draft(order); const isOpen = expanded === order.id; const orderStatus = order.status || "pending"; const paymentStatus = order.payment_status || "pending"; const isPacked = order.packing_status === "packed"; const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0); const customer = order.customer_name || order.customer_email || "Customer"; const initials = customer.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "C"; const progressIndex = orderStatus === "cancelled" ? -1 : orderStatus === "delivered" ? 3 : orderStatus === "shipped" ? 2 : isPacked ? 1 : 0;
-      return <article className={`admin-order-card order-status-${orderStatus} ${isOpen ? "is-expanded" : ""}`} key={order.id}>
+      const values = draft(order); const isOpen = expanded === order.id; const orderStatus = order.status || "pending"; const paymentStatus = order.payment_status || "pending"; const isCancelled = orderStatus === "cancelled"; const isPacked = !isCancelled && order.packing_status === "packed"; const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0); const customer = order.customer_name || order.customer_email || "Customer"; const initials = customer.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "C"; const progressIndex = isCancelled ? -1 : orderStatus === "delivered" ? 3 : orderStatus === "shipped" ? 2 : isPacked ? 1 : 0;
+      return <article id={`order-${order.id}`} className={`admin-order-card order-status-${orderStatus} ${isOpen ? "is-expanded" : ""}`} key={order.id}>
+         <ReplacementOrderBadge order={order}/>
          <button type="button" className="admin-order-card-summary" onClick={() => setExpanded(isOpen ? "" : order.id)} aria-expanded={isOpen}>
            <span className="admin-order-card-main"><span className="admin-order-index">{String(index + 1).padStart(2, "0")}</span><span className="admin-order-identity"><span className="admin-order-customer"><i>{initials}</i><strong>{customer}</strong></span><b>{order.order_number || order.id}</b><small>{order.created_at ? formatIST(order.created_at) : "Recent"} · {itemCount || (order.items || []).length || 0} item{itemCount === 1 ? "" : "s"}{order.order_type === "preorder" ? " · Pre-order" : ""}</small></span></span>
-           <span className={`admin-order-progress ${orderStatus === "cancelled" ? "is-cancelled" : ""}`} aria-label={`Order progress: ${orderStatus === "cancelled" ? "cancelled" : label(orderStatus)}`}>{orderStatus === "cancelled" ? <span className="admin-order-progress-cancelled"><i>!</i><small>Order cancelled</small></span> : [{ key: "confirmed", text: orderStatus === "pending" ? "Pending" : "Confirmed" }, { key: "packed", text: "Packed" }, { key: "shipped", text: "Shipped" }, { key: "delivered", text: "Delivered" }].map((step, stepIndex) => <span className={`${stepIndex <= progressIndex ? "is-complete" : ""} ${stepIndex === progressIndex ? "is-current" : ""}`} key={step.key}><i>{stepIndex < progressIndex ? "✓" : stepIndex + 1}</i><small>{step.text}</small></span>)}</span>
-           <span className="admin-order-card-side"><b>{money(order.total)}</b><span className="admin-order-status-stack"><small className={`status-pill status-${orderStatus}`}><i />{label(orderStatus)}</small><small className={`status-pill status-${paymentStatus}`}><i />Payment · {label(paymentStatus)}</small><small className={`status-pill ${isPacked ? "status-live" : "status-hold"}`}><i />{isPacked ? "Packed" : "Awaiting pack"}</small></span><span className="admin-order-open">{isOpen ? "Close details" : "View / edit"} <em aria-hidden="true">↗</em></span></span>
+           <span className={`admin-order-progress ${orderStatus === "cancelled" ? "is-cancelled" : ""}`} aria-label={`Order progress: ${orderStatus === "cancelled" ? "cancelled" : `${label(orderStatus)}, packing ${isPacked ? "packed" : "awaiting confirmation"}`}`}>{orderStatus === "cancelled" ? <span className="admin-order-progress-cancelled"><i>!</i><small>Order cancelled</small></span> : [{ key: "confirmed", text: orderStatus === "pending" ? "Pending" : "Confirmed" }, { key: "packed", text: "Packed" }, { key: "shipped", text: "Shipped" }, { key: "delivered", text: "Delivered" }].map((step, stepIndex) => { const completed = step.key === "packed" ? isPacked : stepIndex <= progressIndex; return <span className={`${completed ? "is-complete" : ""} ${stepIndex === progressIndex && completed ? "is-current" : ""}`} key={step.key}><i>{completed && stepIndex < progressIndex ? "✓" : stepIndex + 1}</i><small>{step.text}</small></span>; })}</span>
+           <span className="admin-order-card-side"><b>{money(order.total)}</b><span className="admin-order-status-stack"><small className={`status-pill status-${orderStatus}`}><i />{label(orderStatus)}</small><small className={`status-pill status-${paymentStatus}`}><i />Payment · {label(paymentStatus)}</small><small className={`status-pill ${isCancelled ? "status-cancelled" : isPacked ? "status-live" : "status-hold"}`}><i />{isCancelled ? "Packing not required" : isPacked ? "Packing · Packed" : "Packing · Awaiting pack"}</small></span><span className="admin-order-open">{isOpen ? "Close details" : "View / edit"} </span></span>
          </button>
-         {isOpen && <div className="admin-order-card-details"><div className="admin-order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}</span>)}{order.shipping && <p className="muted">Ship to: {order.shipping.name || order.customer_name}, {order.shipping.city || ""}, {order.shipping.state || ""} {order.shipping.pin || ""}</p>}<p className="muted">Customer: {order.customer_email || "—"}{order.payment_updated_at ? ` · Payment updated ${formatIST(order.payment_updated_at)}` : ""}</p><p className="muted">Packing: {order.packing_status === "packed" ? `Packed ${order.packed_at ? formatIST(order.packed_at) : ""}${order.packed_by ? ` by ${order.packed_by}` : ""}` : "Awaiting employee confirmation"}</p><a className="text-link" href={`/api/orders/${encodeURIComponent(order.id)}/invoice`} target="_blank" rel="noreferrer">Open GST invoice preview ↗</a></div><div className="admin-order-edit"><label>Fulfilment status<select value={values.status} onChange={(event) => changeDraft(order, "status", event.target.value)} disabled={order.status === "cancelled"}><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></label><label>Payment state<select value={values.payment_status} onChange={(event) => changeDraft(order, "payment_status", event.target.value)}><option value="pending">Pending provider</option><option value="paid">Marked paid</option><option value="failed">Failed</option><option value="refunded">Refunded</option><option value="not_required">Not required</option></select></label><label>Payment reference <span className="form-hint">optional · never enter a secret</span><input value={values.payment_reference} onChange={(event) => changeDraft(order, "payment_reference", event.target.value)} maxLength="160" placeholder="Future Razorpay payment/order ID" /></label><label>Tracking number <span className="form-hint">optional</span><input value={values.tracking_number} onChange={(event) => changeDraft(order, "tracking_number", event.target.value)} maxLength="80" placeholder="Assign courier tracking" /></label>{message && <p className={message.includes("updated") ? "inline-note" : "inline-error"} role="status">{message}</p>}<button className="primary-action" type="button" disabled={busyId === order.id} onClick={() => save(order)}>{busyId === order.id ? "Saving…" : "Save order"} <span aria-hidden="true">↗</span></button></div></div>}
+         {isOpen && <div className="admin-order-card-details"><div className="admin-order-items">{(order.items || []).map((item, index) => <span key={`${order.id}-${index}`}>{item.name || item.product_name || item.id}{item.size ? ` · ${item.size}` : ""} × {item.quantity}</span>)}{order.shipping && <p className="muted">Ship to: {order.shipping.name || order.customer_name}, {order.shipping.city || ""}, {order.shipping.state || ""} {order.shipping.pin || ""}</p>}<p className="muted">Customer: {order.customer_email || "—"}{order.payment_updated_at ? ` · Payment updated ${formatIST(order.payment_updated_at)}` : ""}</p><p className="muted">Packing: {isCancelled ? "Not required — order cancelled" : order.packing_status === "packed" ? `Packed ${order.packed_at ? formatIST(order.packed_at) : ""}${order.packed_by ? ` by ${order.packed_by}` : ""}` : "Awaiting employee confirmation"}</p><a className="text-link" href={`/api/orders/${encodeURIComponent(order.id)}/invoice`} target="_blank" rel="noreferrer">Open GST invoice preview </a></div><div className="admin-order-edit"><label>Fulfilment status<select value={values.status} onChange={(event) => changeDraft(order, "status", event.target.value)} disabled={order.status === "cancelled"}><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></label><label>Verified payment state<input value={values.payment_status} readOnly /><small className="form-hint">Updated only by verified provider events.</small></label><label>Verified payment reference<input value={values.payment_reference || order.gateway_payment_id || "—"} readOnly /></label><label>Tracking number <span className="form-hint">optional</span><input value={values.tracking_number} onChange={(event) => changeDraft(order, "tracking_number", event.target.value)} maxLength="80" placeholder="Assign courier tracking" /></label>{message && <p className={message.includes("updated") ? "inline-note" : "inline-error"} role="status">{message}</p>}<button className="primary-action" type="button" disabled={busyId === order.id} onClick={() => save(order)}>{busyId === order.id ? "Saving…" : "Save order"} </button></div></div>}
+        {isOpen && <OrderDetails order={order} onNavigate={openOriginal} admin/>}
+        {isOpen && <CancellationRefundCard order={order} admin canManage={Boolean(user?.is_owner)} onChanged={onOrderChanged}/>}
+        {isOpen && canUseAdminArea(user, "/admin/returns") && <AdminOrderAfterSales key={order.id} order={order} onNavigate={onNavigate} />}
       </article>;
     })}{!filtered.length && <div className="empty-state">No matching orders.</div>}</div>
     {hasMoreOrders && <div className="admin-load-more"><span>Showing {orders.length} of {orderTotal} orders. Search and filters apply to the loaded orders.</span><button type="button" className="secondary-action" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? "Loading older orders…" : "Load older orders"} <span aria-hidden="true">↓</span></button></div>}
   </section>;
 }
 
-function ProductsView({ products, onNavigate }) {
-  return <section className="admin-panel admin-wide-panel"><div className="admin-panel-heading"><div><p className="eyebrow">Catalog visibility</p><h2>Products</h2></div><span>{products.length} listings</span></div><div className="admin-product-grid">{products.slice(0, 24).map((product) => <article className="admin-product-card" key={product.id}>{product.thumbnail_url || product.image_url ? <img src={product.thumbnail_url || product.image_url} alt="" loading="lazy" /> : <div className="admin-product-placeholder" />}<div><strong>{product.name}</strong><span>{product.category || "Uncategorized"} · {money(product.price)}</span><small className={`status-pill status-${product.status}`}>{product.status || "on hold"}</small></div></article>)}</div>{!products.length && <div className="empty-state">No listings found.</div>}<button className="primary-action admin-inline-action" type="button" onClick={() => onNavigate("/admin/products")}>Open product controls <span aria-hidden="true">↗</span></button></section>;
-}
+
 
 function ListingFormFields({ form, categories, availableSubcategories, onChange, onSizesChange, onTaxChange, sizes, sizeStock, setSizeStock, totalStock, hasSizeStock = true, legacyStock, setLegacyStock, imageItems, thumbnailSourceUrl, onImagesChange, onUploadImages, uploading, uploadSizeChart, variants, setVariants, setUploading, setStatus, copyBusy, busy, generateSpecifications, generateDescription, copyStatus, allowAddColourway = true }) {
-  return <><div className="admin-form-grid"><label>Product name<input name="name" value={form.name} onChange={onChange} required /></label><label>Brand<input name="brand" value={form.brand} onChange={onChange} required /></label><label>Category<select name="category" value={form.category} onChange={onChange} required><option value="">Choose category</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label><label>Subcategory <span className="form-hint">optional</span><select name="subcategory" value={form.subcategory} onChange={onChange}><option value="">None</option>{availableSubcategories.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label><ColourPickerField color={form.color} colorHex={form.color_hex} onColorChange={onChange} onHexChange={onChange} /><label>Material<input name="material" value={form.material} onChange={onChange} required /></label><label>Price (₹)<input name="price" type="number" min="1" value={form.price} onChange={onChange} required /></label><label>MRP (₹)<input name="mrp" type="number" min="1" value={form.mrp} onChange={onChange} required /></label><label>Cost price (₹)<input name="cost_price" type="number" min="0" value={form.cost_price} onChange={onChange} /></label></div><TaxCodePicker code={form.hsn_sac_code} type={form.hsn_sac_type} rate={form.gst_rate} price={form.price} mrp={form.mrp} taxInclusive={form.gst_tax_inclusive} context={[form.name, form.category, form.subcategory, form.material, form.description].join(" ")} onChange={onTaxChange} /><label>Sizes <span className="form-hint">comma separated</span><input name="sizes" value={form.sizes} onChange={onSizesChange} required /></label>{hasSizeStock ? <div className="size-stock-editor"><div className="listing-subheading"><strong>Stock by size</strong><span>{totalStock} total units</span></div>{sizes.map((size) => <label key={size}>{size}<input type="number" min="0" value={sizeStock[size] ?? 0} onChange={(event) => setSizeStock((current) => ({ ...current, [size]: event.target.value }))} /></label>)}</div> : <label>Total stock <span className="form-hint">This listing has no per-size stock map yet.</span><input type="number" min="0" value={legacyStock} onChange={(event) => setLegacyStock(event.target.value)} /></label>}<ImageManager value={imageItems} thumbnailUrl={thumbnailSourceUrl} onChange={onImagesChange} onUpload={onUploadImages} uploading={uploading} min={MIN_LISTING_IMAGES} max={MAX_LISTING_IMAGES} label="Product images" /><label className="merch-checkbox listing-returnable"><input name="returnable" type="checkbox" checked={form.returnable !== false && form.returnable !== 0} onChange={(event) => onChange({ target: { name: "returnable", value: event.target.checked } })} /><span className="merch-checkbox-copy"><strong>Product is returnable</strong><small>Eligible returns follow the store return policy.</small></span></label><div className="admin-form-grid"><label>Reorder point<input name="reorder_point" type="number" min="0" value={form.reorder_point} onChange={onChange} /></label></div><section className="preorder-react-block" aria-labelledby="preorder-settings-heading"><div className="listing-option-heading"><div><p className="eyebrow">Availability option</p><h3 id="preorder-settings-heading">Pre-order this product</h3><p id="preorder-settings-help">Let customers reserve it before it is ready to ship. Use this for upcoming stock.</p></div><span className={`listing-option-status ${form.preorder_enabled ? "is-on" : ""}`}>{form.preorder_enabled ? "Enabled" : "Off"}</span></div><label className="merch-checkbox"><input name="preorder_enabled" type="checkbox" checked={form.preorder_enabled} aria-describedby="preorder-settings-help" onChange={(event) => onChange({ target: { name: "preorder_enabled", value: event.target.checked } })} /><span className="merch-checkbox-copy"><strong>Accept pre-orders</strong><small>Show a pre-order action and collect reservations until the release date.</small></span></label>{form.preorder_enabled && <div className="admin-form-grid preorder-details"><label>Expected release date <span className="form-hint">When customers can expect delivery</span><input name="preorder_release_at" type="datetime-local" value={form.preorder_release_at} onChange={onChange} /></label><label>Maximum reservations <span className="form-hint">Optional · leave blank for unlimited</span><input name="preorder_limit" type="number" min="1" value={form.preorder_limit} onChange={onChange} /></label></div>}</section><label>Size chart URL <span className="form-hint">optional</span><input name="size_chart_url" type="url" value={form.size_chart_url} onChange={onChange} placeholder="https://…" /></label><label className="upload-button secondary">Upload size chart from PC<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={uploadSizeChart} /></label><VariantEditor variants={variants} setVariants={setVariants} setUploading={setUploading} setStatus={setStatus} uploading={uploading} allowAddColourway={allowAddColourway} /><div className="listing-copy-assistant"><div><p className="eyebrow">Content assistant</p><strong>Generate product copy</strong><span>Builds an editable draft from the listing details you have entered.</span></div><div className="listing-copy-actions"><button className="secondary-action" type="button" onClick={generateSpecifications} disabled={copyBusy || busy || uploading}>{copyBusy === "specifications" ? "Generating…" : "Generate specifications"} <span aria-hidden="true">✦</span></button><button className="secondary-action" type="button" onClick={generateDescription} disabled={copyBusy || busy || uploading}>{copyBusy === "description" ? "Generating…" : "Generate description"} <span aria-hidden="true">✦</span></button></div></div>{copyStatus && <p className="form-hint" role="status">{copyStatus}</p>}<div className="admin-form-grid listing-copy-grid"><label>Product specifications <span className="form-hint">editable · one item per line</span><textarea name="specifications" rows="7" value={form.specifications} onChange={onChange} placeholder="Generate a draft or add specifications manually." /></label><label>Description<textarea name="description" rows="7" value={form.description} onChange={onChange} required placeholder="Generate a draft or write a product description." /></label></div></>;
+  return <><div className="admin-form-grid"><label>Product name<input name="name" value={form.name} onChange={onChange} required /></label><label>Brand<input name="brand" value={form.brand} onChange={onChange} required /></label><label>Category<select name="category" value={form.category} onChange={onChange} required><option value="">Choose category</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label><label>Subcategory <span className="form-hint">optional</span><select name="subcategory" value={form.subcategory} onChange={onChange}><option value="">None</option>{availableSubcategories.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label><ColourPickerField color={form.color} colorHex={form.color_hex} onColorChange={onChange} onHexChange={onChange} /><label>Material<input name="material" value={form.material} onChange={onChange} required /></label><label>Price (₹)<input name="price" type="number" min="1" value={form.price} onChange={onChange} required /></label><label>MRP (₹)<input name="mrp" type="number" min="1" value={form.mrp} onChange={onChange} required /></label><label>Cost price (₹)<input name="cost_price" type="number" min="0" value={form.cost_price} onChange={onChange} /></label></div><label className="wibrawl-admin-visibility">Show listing on<select name="storefront_visibility" value={form.storefront_visibility || "glamia"} onChange={onChange}><option value="glamia">Glamia only</option><option value="wibrawl">Wibrawl only</option><option value="both">Both storefronts</option></select><small className="form-hint">Categories and inventory remain shared across both storefronts.</small></label><TaxCodePicker code={form.hsn_sac_code} type={form.hsn_sac_type} rate={form.gst_rate} price={form.price} mrp={form.mrp} taxInclusive={form.gst_tax_inclusive} context={[form.name, form.category, form.subcategory, form.material, form.description].join(" ")} onChange={onTaxChange} /><label>Sizes <span className="form-hint">comma separated</span><input name="sizes" value={form.sizes} onChange={onSizesChange} required /></label>{hasSizeStock ? <div className="size-stock-editor"><div className="listing-subheading"><strong>Stock by size</strong><span>{totalStock} total units</span></div>{sizes.map((size) => <label key={size}>{size}<input type="number" min="0" value={sizeStock[size] ?? 0} onChange={(event) => setSizeStock((current) => ({ ...current, [size]: event.target.value }))} /></label>)}</div> : <label>Total stock <span className="form-hint">This listing has no per-size stock map yet.</span><input type="number" min="0" value={legacyStock} onChange={(event) => setLegacyStock(event.target.value)} /></label>}<ImageManager value={imageItems} thumbnailUrl={thumbnailSourceUrl} onChange={onImagesChange} onUpload={onUploadImages} uploading={uploading} min={MIN_LISTING_IMAGES} max={MAX_LISTING_IMAGES} label="Product images" /><label className="listing-what-in-box">What's in the box <span className="form-hint">required · list everything included in the package</span><textarea name="what_in_box" rows="3" value={form.what_in_box} onChange={onChange} required placeholder="1 night suit, 1 pair of trousers, care card" /></label><label className="merch-checkbox listing-returnable"><input name="returnable" type="checkbox" checked={form.returnable !== false && form.returnable !== 0} onChange={(event) => onChange({ target: { name: "returnable", value: event.target.checked } })} /><span className="merch-checkbox-copy"><strong>Product is returnable</strong><small>Eligible returns follow the store return policy.</small></span></label><div className="admin-form-grid"><label>Reorder point<input name="reorder_point" type="number" min="0" value={form.reorder_point} onChange={onChange} /></label></div><section className="preorder-react-block" aria-labelledby="preorder-settings-heading"><div className="listing-option-heading"><div><p className="eyebrow">Availability option</p><h3 id="preorder-settings-heading">Pre-order this product</h3><p id="preorder-settings-help">Let customers reserve it before it is ready to ship. Use this for upcoming stock.</p></div><span className={`listing-option-status ${form.preorder_enabled ? "is-on" : ""}`}>{form.preorder_enabled ? "Enabled" : "Off"}</span></div><label className="merch-checkbox"><input name="preorder_enabled" type="checkbox" checked={form.preorder_enabled} aria-describedby="preorder-settings-help" onChange={(event) => onChange({ target: { name: "preorder_enabled", value: event.target.checked } })} /><span className="merch-checkbox-copy"><strong>Accept pre-orders</strong><small>Show a pre-order action and collect reservations until the release date.</small></span></label>{form.preorder_enabled && <div className="admin-form-grid preorder-details"><label>Expected release date <span className="form-hint">When customers can expect delivery</span><input name="preorder_release_at" type="datetime-local" value={form.preorder_release_at} onChange={onChange} /></label><label>Maximum reservations <span className="form-hint">Optional · leave blank for unlimited</span><input name="preorder_limit" type="number" min="1" value={form.preorder_limit} onChange={onChange} /></label></div>}</section><label>Size chart URL <span className="form-hint">optional</span><input name="size_chart_url" type="url" value={form.size_chart_url} onChange={onChange} placeholder="https://…" /></label><label className="upload-button secondary">Upload size chart from PC<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden onChange={uploadSizeChart} /></label><VariantEditor variants={variants} setVariants={setVariants} setUploading={setUploading} setStatus={setStatus} uploading={uploading} allowAddColourway={allowAddColourway} /><div className="listing-copy-assistant"><div><p className="eyebrow">Content assistant</p><strong>Generate product copy</strong><span>Builds an editable draft from the listing details you have entered.</span></div><div className="listing-copy-actions"><button className="secondary-action" type="button" onClick={generateSpecifications} disabled={copyBusy || busy || uploading}>{copyBusy === "specifications" ? "Generating…" : "Generate specifications"} <span aria-hidden="true">✦</span></button><button className="secondary-action" type="button" onClick={generateDescription} disabled={copyBusy || busy || uploading}>{copyBusy === "description" ? "Generating…" : "Generate description"} <span aria-hidden="true">✦</span></button></div></div>{copyStatus && <p className="form-hint" role="status">{copyStatus}</p>}<div className="admin-form-grid listing-copy-grid"><label>Product specifications <span className="form-hint">editable · one item per line</span><textarea name="specifications" rows="7" value={form.specifications} onChange={onChange} placeholder="Generate a draft or add specifications manually." /></label><label>Description<textarea name="description" rows="7" value={form.description} onChange={onChange} required placeholder="Generate a draft or write a product description." /></label></div></>;
 }
 
 function normalizeVariantDrafts(variants) {
@@ -850,7 +949,6 @@ function listingCopyDraft(form) {
     `Brand: ${brand}`,
     `Category: ${category}`,
     form.subcategory ? `Type: ${type}` : "",
-    color ? `Colour: ${color}` : "",
     material ? `Material: ${material}` : "",
     availableSizes ? `Available sizes: ${availableSizes}` : ""
   ].filter(Boolean).join("\n");
@@ -860,7 +958,7 @@ function listingCopyDraft(form) {
 }
 
 function EditProductForm({ product, categories, subcategories, onSave, onCancel }) {
-  const [form, setForm] = useState({ name: product.name || "", brand: product.brand || "", category: product.category || "", subcategory: product.subcategory || "", color: product.color || "", color_hex: product.color_hex || colourHexForName(product.color), returnable: product.returnable !== false && product.returnable !== 0, material: product.material || "", price: product.price || "", mrp: product.mrp || "", cost_price: product.cost_price || "", hsn_sac_code: product.hsn_sac_code || "", hsn_sac_type: product.hsn_sac_type || "HSN", gst_rate: product.gst_rate ?? "", gst_tax_inclusive: product.gst_tax_inclusive !== false, reorder_point: product.reorder_point ?? 15, sizes: (product.sizes || []).join(", "), images: (product.images || [product.image_url]).filter(Boolean).join("\n"), specifications: product.specifications || "", description: product.description || "", preorder_enabled: Boolean(product.preorder_enabled), preorder_release_at: product.preorder_release_at ? new Date(product.preorder_release_at).toISOString().slice(0, 16) : "", preorder_limit: product.preorder_limit ?? "", size_chart_url: product.size_chart_url || "" });
+  const [form, setForm] = useState({ name: product.name || "", brand: product.brand || "", category: product.category || "", subcategory: product.subcategory || "", color: product.color || "", color_hex: product.color_hex || colourHexForName(product.color), returnable: product.returnable !== false && product.returnable !== 0, material: product.material || "", price: product.price || "", mrp: product.mrp || "", cost_price: product.cost_price || "", hsn_sac_code: product.hsn_sac_code || "", hsn_sac_type: product.hsn_sac_type || "HSN", gst_rate: product.gst_rate ?? "", gst_tax_inclusive: product.gst_tax_inclusive !== false, reorder_point: product.reorder_point ?? 15, sizes: (product.sizes || []).join(", "), images: (product.images || [product.image_url]).filter(Boolean).join("\n"), what_in_box: product.what_in_box || "", specifications: product.specifications || "", description: product.description || "", preorder_enabled: Boolean(product.preorder_enabled), preorder_release_at: product.preorder_release_at ? new Date(product.preorder_release_at).toISOString().slice(0, 16) : "", preorder_limit: product.preorder_limit ?? "", size_chart_url: product.size_chart_url || "", storefront_visibility: product.storefront_visibility || "glamia" });
   const [imageItems, setImageItems] = useState(() => productImageItems(product));
   const [thumbnailSourceUrl, setThumbnailSourceUrl] = useState(() => product.thumbnail_source_url || productImageItems(product)[0]?.url || "");
   const [variants, setVariants] = useState(() => (Array.isArray(product.variants) ? product.variants : []).map((variant) => ({ color: variant.color || "", color_hex: variant.color_hex || colourHexForName(variant.color), sizes: Array.isArray(variant.sizes) ? variant.sizes.join(", ") : String(variant.sizes || "S, M, L"), sizeStock: { ...(variant.size_stock || variant.sizeStock || {}) }, images: Array.isArray(variant.images) ? variant.images.join("\n") : String(variant.images || ""), assets: variant.assets || [], thumbnailSourceUrl: variant.thumbnail_source_url || variant.thumbnailSourceUrl || "" })));
@@ -935,7 +1033,7 @@ function EditProductForm({ product, categories, subcategories, onSave, onCancel 
        onSave(data.product || { ...product, ...form, sizes, images, variants: normalizedVariants, size_stock: normalizedSizeStock, stock: totalStock });
     } catch (error) { setStatus(error.message); } finally { setBusy(false); }
   }
-  return <form className="admin-listing-form admin-edit-product-form" onSubmit={submit}><div className="admin-panel-heading"><div><p className="eyebrow">Catalog editor</p><h3>Edit listing</h3></div><button type="button" className="secondary-action" onClick={onCancel}>Close</button></div><ListingFormFields form={form} categories={categories} availableSubcategories={availableSubcategories} onChange={change} onSizesChange={changeSizes} onTaxChange={(next) => setForm((current) => ({ ...current, ...next }))} sizes={sizes} sizeStock={sizeStock} setSizeStock={setSizeStock} totalStock={totalStock} hasSizeStock={hasSizeStock} legacyStock={legacyStock} setLegacyStock={setLegacyStock} imageItems={imageItems} thumbnailSourceUrl={thumbnailSourceUrl} onImagesChange={changeImages} onUploadImages={uploadImages} uploading={uploading} uploadSizeChart={uploadSizeChart} variants={variants} setVariants={setVariants} setUploading={setUploading} setStatus={setStatus} copyBusy={copyBusy} busy={busy} generateSpecifications={() => generateCopy("specifications")} generateDescription={() => generateCopy("description")} copyStatus={copyStatus} allowAddColourway={false} /><div className="listing-form-actions"><button className="primary-action" type="submit" disabled={busy || uploading}>{busy ? "Saving…" : uploading ? "Uploading…" : "Save listing"} <span aria-hidden="true">↗</span></button><button className="secondary-action" type="button" onClick={onCancel}>Cancel</button></div></form>;
+  return <form className="admin-listing-form admin-edit-product-form" onSubmit={submit}><div className="admin-panel-heading"><div><p className="eyebrow">Catalog editor</p><h3>Edit listing</h3>{product.variant_group && <p className="form-hint">Shared product details update every colourway. Product name, colour, sizes, stock, and images stay specific to this colourway. Colour and product-name lines in specifications also stay specific.</p>}</div><button type="button" className="secondary-action" onClick={onCancel}>Close</button></div><ListingFormFields form={form} categories={categories} availableSubcategories={availableSubcategories} onChange={change} onSizesChange={changeSizes} onTaxChange={(next) => setForm((current) => ({ ...current, ...next }))} sizes={sizes} sizeStock={sizeStock} setSizeStock={setSizeStock} totalStock={totalStock} hasSizeStock={hasSizeStock} legacyStock={legacyStock} setLegacyStock={setLegacyStock} imageItems={imageItems} thumbnailSourceUrl={thumbnailSourceUrl} onImagesChange={changeImages} onUploadImages={uploadImages} uploading={uploading} uploadSizeChart={uploadSizeChart} variants={variants} setVariants={setVariants} setUploading={setUploading} setStatus={setStatus} copyBusy={copyBusy} busy={busy} generateSpecifications={() => generateCopy("specifications")} generateDescription={() => generateCopy("description")} copyStatus={copyStatus} allowAddColourway={false} />{status && <p className="form-status" role="status">{status}</p>}<div className="listing-form-actions"><button className="primary-action" type="submit" disabled={busy || uploading}>{busy ? "Saving…" : uploading ? "Uploading…" : "Save listing"} </button><button className="secondary-action" type="button" onClick={onCancel}>Cancel</button></div></form>;
 }
 
 function VariantEditor({ variants, setVariants, setUploading, setStatus, uploading = false, allowAddColourway = true }) {
@@ -974,7 +1072,7 @@ function ManageProductsView({ products, categories, subcategories, onProductChan
   const [filter, setFilter] = useState("all");
   const [busyId, setBusyId] = useState("");
   const [editing, setEditing] = useState(null);
-  const visible = products.filter((product) => filter === "all" || product.status === filter);
+  const visible = products.filter((product) => filter === "all" ? product.status !== "archived" : product.status === filter);
   const imageFor = (product) => product.thumbnail || product.thumbnail_url || product.image || product.image_url || "";
 
   async function patchProduct(product, patch) {
@@ -984,7 +1082,7 @@ function ManageProductsView({ products, categories, subcategories, onProductChan
       const data = await response.json();
       if (!response.ok) throw new Error([data.error, ...(Array.isArray(data.issues) ? data.issues.map((issue) => `• ${issue}`) : [])].filter(Boolean).join("\n"));
       onProductChanged(data.product || { ...product, ...patch });
-    } catch (error) { window.alert(error.message); } finally { setBusyId(""); }
+    } catch (error) { reportAdminError(error); } finally { setBusyId(""); }
   }
 
   async function removeProduct(product) {
@@ -995,10 +1093,10 @@ function ManageProductsView({ products, categories, subcategories, onProductChan
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Product could not be deleted");
       onProductDeleted(product.id);
-    } catch (error) { window.alert(error.message); } finally { setBusyId(""); }
+    } catch (error) { reportAdminError(error); } finally { setBusyId(""); }
   }
 
-  return <section className="admin-panel admin-wide-panel"><div className="admin-panel-heading"><div><p className="eyebrow">Catalog controls</p><h2>All products</h2></div><button className="secondary-action" type="button" onClick={() => onNavigate("/admin/add-product")}>Add listing ↗</button></div>{editing && <EditProductForm key={editing.id} product={editing} categories={categories} subcategories={subcategories} onCancel={() => setEditing(null)} onSave={(next) => { onProductChanged(next); setEditing(null); }} />}<div className="admin-filters"><label className="sr-only" htmlFor="productStatusFilter">Filter products</label><select id="productStatusFilter" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All statuses</option><option value="live">Live</option><option value="hold">On hold</option><option value="review">In review</option><option value="archived">Archived</option></select><span className="admin-filter-result">{visible.length} listings</span></div><div className="manage-product-list">{visible.map((product) => <article className="manage-product-row" key={product.id}>{imageFor(product) ? <img src={imageFor(product)} alt="" loading="lazy" /> : <div className="admin-product-placeholder" />}<div className="manage-product-main"><strong>{product.name}</strong><span>{product.category || "Uncategorized"}{product.color ? ` · ${product.color}` : ""}</span><span>{money(product.price)} · {Number(product.stock || 0)} total units</span></div><span className={`status-pill status-${product.status}`}>{product.status || "hold"}</span><div className="manage-product-actions"><button type="button" disabled={busyId === product.id} onClick={() => setEditing(product)}>Edit</button><button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: product.status === "live" ? "hold" : "live" })}>{product.status === "live" ? "Put on hold" : "Go live"}</button><button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { featured: !product.featured })}>{product.featured ? "Unfeature" : "Feature"}</button>{product.status === "archived" ? <button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: "hold" })}>Restore</button> : <button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: "archived" })}>Archive</button>}<button className="danger-action" type="button" disabled={busyId === product.id} onClick={() => removeProduct(product)}>Delete</button></div></article>)}{!visible.length && <div className="empty-state">No products match this status.</div>}</div>{hasMoreProducts && <div className="admin-load-more"><span>Showing {products.length} of {productTotal} listings.</span><button type="button" className="secondary-action" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? "Loading more listings…" : "Load more listings"} <span aria-hidden="true">↓</span></button></div>}</section>;
+  return <section className="admin-panel admin-wide-panel"><div className="admin-panel-heading"><div><p className="eyebrow">Catalog controls</p><h2>All products</h2></div><button className="secondary-action" type="button" onClick={() => onNavigate("/admin/add-product")}>Add listing </button></div>{editing && <EditProductForm key={editing.id} product={editing} categories={categories} subcategories={subcategories} onCancel={() => setEditing(null)} onSave={(next) => { onProductChanged(next); setEditing(null); }} />}<div className="admin-filters"><label className="sr-only" htmlFor="productStatusFilter">Filter products</label><select id="productStatusFilter" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All statuses</option><option value="live">Live</option><option value="hold">On hold</option><option value="review">In review</option><option value="archived">Archived</option></select><span className="admin-filter-result">{visible.length} listings</span></div><div className="manage-product-list">{visible.map((product) => <article className="manage-product-row" key={product.id}>{imageFor(product) ? <img src={imageFor(product)} alt="" loading="lazy" /> : <div className="admin-product-placeholder" />}<div className="manage-product-main"><strong>{product.name}</strong><span>{product.category || "Uncategorized"}{product.color ? ` · ${product.color}` : ""}</span><span>{money(product.price)} · {Number(product.stock || 0)} total units</span></div><span className={`status-pill status-${product.status}`}>{product.status || "hold"}</span><div className="manage-product-actions"><button type="button" disabled={busyId === product.id} onClick={() => setEditing(product)}>Edit</button><button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: product.status === "live" ? "hold" : "live" })}>{product.status === "live" ? "Put on hold" : "Go live"}</button><button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { featured: !product.featured })}>{product.featured ? "Unfeature" : "Feature"}</button>{product.status === "archived" ? <button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: "hold" })}>Restore</button> : <button type="button" disabled={busyId === product.id} onClick={() => patchProduct(product, { status: "archived" })}>Archive</button>}<button className="danger-action" type="button" disabled={busyId === product.id} onClick={() => removeProduct(product)}>Delete</button></div></article>)}{!visible.length && <div className="empty-state">No products match this status.</div>}</div>{hasMoreProducts && <div className="admin-load-more"><span>Showing {products.length} of {productTotal} listings.</span><button type="button" className="secondary-action" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? "Loading more listings…" : "Load more listings"} <span aria-hidden="true">↓</span></button></div>}</section>;
 }
 
 function InventoryView({ products, onProductChanged, hasMoreProducts = false, productTotal = products.length, loadingMore = false, onLoadMore }) {
@@ -1102,7 +1200,7 @@ function InventoryView({ products, onProductChanged, hasMoreProducts = false, pr
 }
 
 function AddListingView({ categories, subcategories, onNavigate }) {
-  const [form, setForm] = useState({ name: "", category: "", subcategory: "", brand: "", color: "", color_hex: "#d1d1d1", returnable: true, price: "", mrp: "", cost_price: "", material: "", hsn_sac_code: "", hsn_sac_type: "HSN", gst_rate: "", gst_tax_inclusive: true, specifications: "", description: "", sizes: "S, M, L", images: "", reorder_point: "15", preorder_enabled: false, preorder_release_at: "", preorder_limit: "", size_chart_url: "" });
+  const [form, setForm] = useState({ name: "", category: "", subcategory: "", brand: "", color: "", color_hex: "#d1d1d1", returnable: true, price: "", mrp: "", cost_price: "", material: "", hsn_sac_code: "", hsn_sac_type: "HSN", gst_rate: "", gst_tax_inclusive: true, what_in_box: "", specifications: "", description: "", sizes: "S, M, L", images: "", reorder_point: "15", preorder_enabled: false, preorder_release_at: "", preorder_limit: "", size_chart_url: "", storefront_visibility: "glamia" });
   const [imageItems, setImageItems] = useState([]);
   const [thumbnailSourceUrl, setThumbnailSourceUrl] = useState("");
   const [variants, setVariants] = useState([]);
@@ -1163,7 +1261,7 @@ function AddListingView({ categories, subcategories, onNavigate }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Listing could not be created");
       setStatus("Listing created and placed on hold for review.");
-       setForm({ name: "", category: categories[0] || "", subcategory: "", brand: "", color: "", color_hex: "#d1d1d1", returnable: true, price: "", mrp: "", cost_price: "", material: "", hsn_sac_code: "", hsn_sac_type: "HSN", gst_rate: "", gst_tax_inclusive: true, specifications: "", description: "", sizes: "S, M, L", images: "", reorder_point: "15", preorder_enabled: false, preorder_release_at: "", preorder_limit: "", size_chart_url: "" });
+       setForm({ name: "", category: categories[0] || "", subcategory: "", brand: "", color: "", color_hex: "#d1d1d1", returnable: true, price: "", mrp: "", cost_price: "", material: "", hsn_sac_code: "", hsn_sac_type: "HSN", gst_rate: "", gst_tax_inclusive: true, what_in_box: "", specifications: "", description: "", sizes: "S, M, L", images: "", reorder_point: "15", preorder_enabled: false, preorder_release_at: "", preorder_limit: "", size_chart_url: "", storefront_visibility: "glamia" });
        setImageItems([]);
        setThumbnailSourceUrl("");
        setVariants([]);
@@ -1172,11 +1270,12 @@ function AddListingView({ categories, subcategories, onNavigate }) {
     } catch (error) { setStatus(error.message); } finally { setBusy(false); }
   }
 
-  return <section className="admin-panel admin-wide-panel"><div className="admin-panel-heading"><div><p className="eyebrow">Catalog creation</p><h2>Add listing</h2></div><span>New listings start on hold</span></div><form className="admin-listing-form" onSubmit={submit}><ListingFormFields form={form} categories={categories} availableSubcategories={availableSubcategories} onChange={changeField} onSizesChange={changeSizes} onTaxChange={(next) => setForm((current) => ({ ...current, ...next }))} sizes={sizes} sizeStock={sizeStock} setSizeStock={setSizeStock} totalStock={totalStock} imageItems={imageItems} thumbnailSourceUrl={thumbnailSourceUrl} onImagesChange={changeImages} onUploadImages={uploadImages} uploading={uploading} uploadSizeChart={uploadSizeChart} variants={variants} setVariants={setVariants} setUploading={setUploading} setStatus={setStatus} copyBusy={copyBusy} busy={busy} generateSpecifications={() => generateCopy("specifications")} generateDescription={() => generateCopy("description")} copyStatus={copyStatus} /><div className="listing-form-actions"><button className="primary-action" type="submit" disabled={busy || uploading}>{busy ? "Creating…" : uploading ? "Uploading…" : "Create listing"} <span aria-hidden="true">↗</span></button><button className="secondary-action" type="button" onClick={() => onNavigate("/admin/products")}>Cancel</button></div></form></section>;
+  return <section className="admin-panel admin-wide-panel"><div className="admin-panel-heading"><div><p className="eyebrow">Catalog creation</p><h2>Add listing</h2></div><span>New listings start on hold</span></div><form className="admin-listing-form" onSubmit={submit}><ListingFormFields form={form} categories={categories} availableSubcategories={availableSubcategories} onChange={changeField} onSizesChange={changeSizes} onTaxChange={(next) => setForm((current) => ({ ...current, ...next }))} sizes={sizes} sizeStock={sizeStock} setSizeStock={setSizeStock} totalStock={totalStock} imageItems={imageItems} thumbnailSourceUrl={thumbnailSourceUrl} onImagesChange={changeImages} onUploadImages={uploadImages} uploading={uploading} uploadSizeChart={uploadSizeChart} variants={variants} setVariants={setVariants} setUploading={setUploading} setStatus={setStatus} copyBusy={copyBusy} busy={busy} generateSpecifications={() => generateCopy("specifications")} generateDescription={() => generateCopy("description")} copyStatus={copyStatus} />{status && <p className="form-status" role="status">{status}</p>}<div className="listing-form-actions"><button className="primary-action" type="submit" disabled={busy || uploading}>{busy ? "Creating…" : uploading ? "Uploading…" : "Create listing"} </button><button className="secondary-action" type="button" onClick={() => onNavigate("/admin/products")}>Cancel</button></div></form></section>;
 }
 
 function notificationDestination(item) {
   const type = String(item?.type || "").toLowerCase();
+  if (item?.owner_only && type.includes("return")) return "/admin/credits";
   if (type.includes("stock") || type.includes("inventory")) return "/admin/inventory";
   if (type.includes("return") || type.includes("exchange") || type.includes("refund")) return "/admin/returns";
   if (type.includes("review") || type.includes("rating")) return "/admin/reviews";
@@ -1185,11 +1284,94 @@ function notificationDestination(item) {
   return "/admin/orders";
 }
 
+function notificationTone(item) {
+  const type = String(item?.type || "").toLowerCase();
+  if (item?.priority === "urgent" || type.includes("out_of_stock")) return "urgent";
+  if (type.includes("stock") || type.includes("inventory")) return "inventory";
+  if (type.includes("review") || type.includes("rating")) return "review";
+  if (type.includes("support") || type.includes("question")) return "support";
+  if (type.includes("return") || type.includes("refund") || type.includes("exchange")) return "return";
+  return "order";
+}
+
+function notificationToneLabel(tone) {
+  return { urgent: "Needs attention", inventory: "Inventory", review: "Customer voice", support: "Care", return: "Aftercare", order: "Order flow" }[tone] || "Update";
+}
+
+function NotificationCard({ item, busy, onOpen, onMarkRead, onDismiss }) {
+  const [offset, setOffset] = useState(0);
+  const [swipeAction, setSwipeAction] = useState("");
+  const startX = useRef(null);
+  const offsetRef = useRef(0);
+  const suppressClick = useRef(false);
+  const tone = notificationTone(item);
+
+  function updateOffset(value) {
+    offsetRef.current = value;
+    setOffset(value);
+  }
+
+  function touchStart(event) {
+    if (busy || !event.touches[0]) return;
+    startX.current = event.touches[0].clientX;
+    suppressClick.current = false;
+    setSwipeAction("");
+  }
+
+  function touchMove(event) {
+    if (startX.current === null || !event.touches[0]) return;
+    const delta = event.touches[0].clientX - startX.current;
+    if (Math.abs(delta) < 5) return;
+    event.preventDefault();
+    suppressClick.current = true;
+    updateOffset(Math.max(-136, Math.min(136, delta)));
+    setSwipeAction(delta < 0 ? "read" : "clear");
+  }
+
+  function touchEnd() {
+    if (startX.current === null) return;
+    const finalOffset = offsetRef.current;
+    startX.current = null;
+    if (Math.abs(finalOffset) < 72) {
+      updateOffset(0);
+      setSwipeAction("");
+      window.setTimeout(() => { suppressClick.current = false; }, 120);
+      return;
+    }
+    const action = finalOffset < 0 ? "read" : "clear";
+    updateOffset(finalOffset < 0 ? -420 : 420);
+    window.setTimeout(() => {
+      if (action === "read") onMarkRead(item);
+      else onDismiss(item);
+      updateOffset(0);
+      setSwipeAction("");
+      suppressClick.current = false;
+    }, 180);
+  }
+
+  return <div className={`notification-swipe-shell notification-swipe-${swipeAction || "idle"}`}>
+    {swipeAction && <div className={`notification-gesture-hint notification-gesture-${swipeAction}`} aria-live="polite">{swipeAction === "read" ? "← Release to mark as read" : "Release to clear →"}</div>}
+    <div className={`notification-swipe-reveal notification-reveal-${swipeAction || "idle"}`} aria-hidden="true">{swipeAction === "read" ? "Mark read" : swipeAction === "clear" ? "Clear" : ""}</div>
+    <article className={`admin-notification-card notification-tone-${tone} ${item.read_at ? "is-read" : "is-unread"}`} style={{ transform: `translateX(${offset}px)` }} onTouchStart={touchStart} onTouchMove={touchMove} onTouchEnd={touchEnd} onTouchCancel={touchEnd}>
+      <span className="notification-dot" />
+      <button type="button" className="notification-open" onClick={() => { if (suppressClick.current) return; onOpen(item); }}>
+        <span className="notification-card-top"><span className="notification-type">{notificationToneLabel(tone)}</span>{!item.read_at && <span className="notification-unread-label">New</span>}</span>
+        <strong>{item.title || item.type}</strong>
+        <p>{item.message || item.body || "New activity"}</p>
+        <small>{item.created_at ? formatIST(item.created_at) : "Recent"}</small>
+      </button>
+
+    </article>
+  </div>;
+}
+
 function NotificationsView({ notifications, onNotificationsChanged, onNavigate }) {
   const [filter, setFilter] = useState("all");
   const [busy, setBusy] = useState(false);
   const visible = notifications.filter((item) => filter === "all" || (filter === "unread" ? !item.read_at : filter === "urgent" ? item.priority === "urgent" : item.type === filter));
   const types = [...new Set(notifications.map((item) => item.type).filter(Boolean))];
+  const unreadCount = notifications.filter((item) => !item.read_at).length;
+
   async function update(item, patch) {
     setBusy(true);
     try {
@@ -1197,25 +1379,30 @@ function NotificationsView({ notifications, onNotificationsChanged, onNavigate }
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Notification could not be updated");
       onNotificationsChanged((items) => items.map((entry) => entry.id === item.id ? { ...entry, ...patch, read_at: patch.read ? (entry.read_at || new Date().toISOString()) : entry.read_at, dismissed_at: patch.dismissed ? new Date().toISOString() : entry.dismissed_at } : entry).filter((entry) => !entry.dismissed_at));
-    } catch (error) { window.alert(error.message); } finally { setBusy(false); }
+    } catch (error) { reportAdminError(error); } finally { setBusy(false); }
   }
+
   async function markAllRead() {
     setBusy(true);
     try { const response = await apiFetch("/api/admin/notifications/read-all", { method: "POST", body: "{}" }); if (!response.ok) throw new Error("Notifications could not be marked read"); onNotificationsChanged((items) => items.map((item) => ({ ...item, read_at: item.read_at || new Date().toISOString() }))); }
-    catch (error) { window.alert(error.message); } finally { setBusy(false); }
+    catch (error) { reportAdminError(error); } finally { setBusy(false); }
   }
+
   async function clearProcessed() {
     setBusy(true);
     try { const response = await apiFetch("/api/admin/notifications/cleared", { method: "DELETE" }); if (!response.ok) throw new Error("Processed notifications could not be cleared"); onNotificationsChanged((items) => items.filter((item) => !item.read_at && !item.dismissed_at)); }
-    catch (error) { window.alert(error.message); } finally { setBusy(false); }
+    catch (error) { reportAdminError(error); } finally { setBusy(false); }
   }
-  return <section className="admin-panel admin-wide-panel"><div className="admin-panel-heading"><div><p className="eyebrow">Keep the store moving</p><h2>Notification center</h2></div><span>{notifications.filter((item) => !item.read_at).length} unread</span></div><div className="notification-toolbar"><label>Show<select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All notifications</option><option value="unread">Unread</option><option value="urgent">Urgent</option>{types.map((type) => <option key={type} value={type}>{type.replace(/_/g, " ")}</option>)}</select></label><div><button className="secondary-action" type="button" disabled={busy} onClick={markAllRead}>Mark all read</button><button className="secondary-action" type="button" disabled={busy} onClick={clearProcessed}>Clear processed</button></div></div><div className="admin-notification-list">{visible.map((item) => <article className={`admin-notification-card ${item.priority === "urgent" ? "urgent" : ""} ${item.read_at ? "is-read" : ""}`} key={item.id}><span className="notification-dot" /><div className="notification-open-wrap"><button type="button" className="notification-open" onClick={() => onNavigate(notificationDestination(item))}><strong>{item.title || item.type}</strong><p>{item.message || item.body || "New activity"}</p><small>{item.created_at ? formatIST(item.created_at) : "Recent"}</small></button></div><div className="notification-actions">{!item.read_at && <button type="button" disabled={busy} onClick={(event) => { event.stopPropagation(); update(item, { read: true }); }}>Mark read</button>}<button type="button" disabled={busy} onClick={(event) => { event.stopPropagation(); update(item, { dismissed: true }); }}>Dismiss</button></div></article>)}{!visible.length && <div className="empty-state">No notifications match this filter.</div>}</div></section>;
+
+  return <section className="admin-panel admin-wide-panel notification-center-panel"><div className="notification-center-heading"><div><p className="eyebrow">Your store pulse</p><h2>Notification center</h2><p className="muted">Every alert has a next step. Tap a notification to open the right workspace.</p></div><div className="notification-center-stats"><span className="notification-stat notification-stat-unread"><strong>{unreadCount}</strong><small>unread</small></span><span className="notification-stat"><strong>{notifications.length}</strong><small>in view</small></span></div></div><div className="notification-toolbar"><label>Show<select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All notifications</option><option value="unread">Unread</option><option value="urgent">Urgent</option>{types.map((type) => <option key={type} value={type}>{type.replace(/_/g, " ")}</option>)}</select></label><div><button className="secondary-action" type="button" disabled={busy || !unreadCount} onClick={markAllRead}>Mark all read</button><button className="secondary-action" type="button" disabled={busy || !notifications.some((item) => item.read_at)} onClick={clearProcessed}>Clear processed</button></div></div><div className="admin-notification-list">{visible.map((item) => <NotificationCard key={item.id} item={item} busy={busy} onOpen={(notification) => onNavigate(notificationDestination(notification))} onMarkRead={(notification) => update(notification, { read: true })} onDismiss={(notification) => update(notification, { dismissed: true })} />)}{!visible.length && <div className="empty-state">No notifications match this filter.</div>}</div></section>;
 }
 
-export function AdminWorkspace({ route, onNavigate }) {
-  const [dashboard, setDashboard] = useState(null); const [orders, setOrders] = useState([]); const [orderPagination, setOrderPagination] = useState(null); const [notifications, setNotifications] = useState([]); const [unreadCount, setUnreadCount] = useState(0); const [products, setProducts] = useState([]); const [productPagination, setProductPagination] = useState(null); const [categories, setCategories] = useState([]); const [subcategories, setSubcategories] = useState([]); const [loadingMore, setLoadingMore] = useState(""); const [error, setError] = useState(""); const [errorRoute, setErrorRoute] = useState(""); const [loadedRoute, setLoadedRoute] = useState("");
+export function AdminWorkspace({ route, onNavigate, user }) {
+  const [retryVersion, setRetryVersion] = useState(0);
+  const [dashboard, setDashboard] = useState(null); const [orders, setOrders] = useState([]); const [orderPagination, setOrderPagination] = useState(null); const [notifications, setNotifications] = useState([]); const [unreadCount, setUnreadCount] = useState(0); const [products, setProducts] = useState([]); const [productPagination, setProductPagination] = useState(null); const [categories, setCategories] = useState([]); const [subcategories, setSubcategories] = useState([]); const [customers, setCustomers] = useState([]); const [loadingMore, setLoadingMore] = useState(""); const [error, setError] = useState(""); const [errorRoute, setErrorRoute] = useState(""); const [loadedRoute, setLoadedRoute] = useState("");
   useEffect(() => {
     let active = true;
+    if (!canUseAdminArea(user, route)) return undefined;
     const needs = ADMIN_SECTION_DATA[route] || {};
     const paginateOrders = ADMIN_PAGINATED_ROUTES.orders.has(route);
     const paginateProducts = ADMIN_PAGINATED_ROUTES.products.has(route);
@@ -1223,17 +1410,28 @@ export function AdminWorkspace({ route, onNavigate }) {
       const requestEntries = [];
       const addRequest = (key, input) => requestEntries.push([key, apiFetch(input, { cacheTtl: ADMIN_CACHE_TTLS[key] || 0 })]);
       if (needs.dashboard) addRequest("dashboard", "/api/admin/dashboard");
-      if (needs.notifications) addRequest("notifications", "/api/admin/notifications");
-      else addRequest("notificationCount", "/api/admin/notifications/count");
-      if (needs.orders) addRequest("orders", paginateOrders ? `/api/orders?scope=admin&limit=${ADMIN_PAGE_SIZES.orders}&page=1` : "/api/orders?scope=admin");
+      if (canUseAdminArea(user, "/admin/notifications")) {
+        if (needs.notifications) addRequest("notifications", "/api/admin/notifications");
+        else addRequest("notificationCount", "/api/admin/notifications/count");
+      }
+      if (needs.orders && (canUseAdminArea(user, "/admin/orders") || canUseAdminArea(user, "/admin/labels") || canUseAdminArea(user, "/admin"))) addRequest("orders", paginateOrders ? `/api/orders?scope=admin&limit=${ADMIN_PAGE_SIZES.orders}&page=1` : "/api/orders?scope=admin");
       if (needs.products) addRequest("products", paginateProducts ? `/api/products?scope=admin&limit=${ADMIN_PAGE_SIZES.products}&page=1` : "/api/products?scope=admin");
       if (needs.categories) addRequest("categories", "/api/categories");
+      if (needs.customers) addRequest("customers", "/api/admin/customers");
+      if (needs.couponRecipients) addRequest("couponRecipients", "/api/admin/coupon-recipients");
       const responses = await Promise.all(requestEntries.map(([, request]) => request));
+      if (responses.some((response) => response.status === 401 || response.status === 403)) {
+        if (active) onNavigate("/");
+        return;
+      }
       const responseData = {};
       for (let index = 0; index < requestEntries.length; index += 1) {
         const [key] = requestEntries[index];
         const response = responses[index];
-        responseData[key] = response.ok ? await response.json() : {};
+        responseData[key] = await response.json().catch(() => ({}));
+        if (!response.ok && key !== "notificationCount") {
+          throw new Error(responseData[key]?.error || `Could not load ${key}. Please refresh to try again.`);
+        }
       }
       const dashboardIndex = requestEntries.findIndex(([key]) => key === "dashboard");
       if (needs.dashboard && !responses[dashboardIndex]?.ok) {
@@ -1259,6 +1457,8 @@ export function AdminWorkspace({ route, onNavigate }) {
         setCategories(responseData.categories?.categories || []);
         setSubcategories(responseData.categories?.subcategories || []);
       }
+      if (needs.customers) setCustomers(responseData.customers?.customers || []);
+      if (needs.couponRecipients) setCustomers(responseData.couponRecipients?.recipients || []);
       setError("");
     }
     const reportError = (requestError) => {
@@ -1280,9 +1480,26 @@ export function AdminWorkspace({ route, onNavigate }) {
       window.clearInterval(refreshTimer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [route]);
-  function changeProduct(next) { setProducts((current) => current.map((product) => product.id === next.id ? { ...product, ...next } : product)); }
-  function changeOrder(next) { setOrders((current) => current.map((order) => order.id === next.id ? { ...order, ...next } : order)); }
+  }, [route, user, onNavigate, retryVersion]);
+  useEffect(() => {
+    if (route === "/admin" || route === "/admin/notifications") {
+      setUnreadCount(notifications.filter((item) => !item.read_at && !item.dismissed_at).length);
+    }
+  }, [notifications, route]);
+  function changeProduct(next) {
+    setProducts((current) => current.map((product) => {
+      if (product.id === next.id) return { ...product, ...next };
+      if (!next.variant_group || product.variant_group !== next.variant_group) return product;
+      const shared = Object.fromEntries(SHARED_PRODUCT_FIELDS
+        .filter((field) => Object.prototype.hasOwnProperty.call(next, field))
+        .map((field) => [field, next[field]]));
+      if (Object.prototype.hasOwnProperty.call(shared, 'specifications')) {
+        shared.specifications = linkedSpecificationCopy(shared.specifications, product);
+      }
+      return { ...product, ...shared };
+    }));
+  }
+  function changeOrder(next) { setOrders((current) => current.some(order=>order.id===next.id)?current.map((order) => order.id === next.id ? { ...order, ...next } : order):[...current,next]); }
   function changeNotifications(update) { setNotifications(update); }
   function removeProduct(id) { setProducts((current) => current.filter((product) => product.id !== id)); }
   async function loadMore(kind) {
@@ -1313,5 +1530,6 @@ export function AdminWorkspace({ route, onNavigate }) {
   }
   async function refreshCatalog() { const response = await apiFetch("/api/categories", { cacheTtl: ADMIN_CACHE_TTLS.categories }); const data = await response.json(); if (response.ok) { setCategories(data.categories || []); setSubcategories(data.subcategories || []); } }
   const loading = loadedRoute !== route;
-  return <AdminShell route={route} onNavigate={onNavigate} notifications={notifications} unreadCount={unreadCount}>{error && errorRoute === route ? <section className="admin-panel admin-wide-panel"><p className="eyebrow">Admin access</p><h2>{error}</h2><p className="muted">Use the sign-in page to continue.</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Open admin sign-in <span aria-hidden="true">↗</span></button></section> : loading ? <div className="loading-card">Preparing your console…</div> : route === "/admin" ? <DashboardView dashboard={dashboard} orders={orders} notifications={notifications} onNavigate={onNavigate} /> : route === "/admin/storefront" ? <StorefrontSettingsView /> : route === "/admin/labels" ? <LabelsView orders={orders} /> : route === "/admin/hero" ? <HeroStudioView products={products} categories={categories} /> : route === "/admin/tax" ? <TaxComplianceView /> : route === "/admin/add-product" ? <AddListingView categories={categories} subcategories={subcategories} onNavigate={onNavigate} /> : route === "/admin/bulk-listing" ? <BulkListingView categories={categories} subcategories={subcategories} /> : route === "/admin/orders" ? <OrdersView orders={orders} onOrderChanged={changeOrder} orderTotal={orderPagination?.total ?? orders.length} hasMoreOrders={Boolean(orderPagination?.has_more)} loadingMore={loadingMore === "orders"} onLoadMore={() => loadMore("orders")} /> : route === "/admin/products" ? <ManageProductsView products={products} categories={categories} subcategories={subcategories} onProductChanged={changeProduct} onProductDeleted={removeProduct} onNavigate={onNavigate} productTotal={productPagination?.total ?? products.length} hasMoreProducts={Boolean(productPagination?.has_more)} loadingMore={loadingMore === "products"} onLoadMore={() => loadMore("products")} /> : route === "/admin/inventory" ? <InventoryView products={products} onProductChanged={changeProduct} productTotal={productPagination?.total ?? products.length} hasMoreProducts={Boolean(productPagination?.has_more)} loadingMore={loadingMore === "products"} onLoadMore={() => loadMore("products")} /> : route === "/admin/customers" ? <CustomersView /> : route === "/admin/employees" ? <EmployeesView /> : route === "/admin/reviews" ? <ReviewsView /> : route === "/admin/questions" ? <QuestionsView /> : route === "/admin/coupons" ? <CouponsView products={products} categories={categories} subcategories={subcategories} /> : route === "/admin/deals" ? <DealsView products={products} onProductChanged={changeProduct} /> : route === "/admin/categories" ? <CategoriesView categories={categories} subcategories={subcategories} onCatalogChanged={refreshCatalog} /> : route === "/admin/returns" ? <ReturnsView /> : route === "/admin/support" ? <SupportView /> : route === "/admin/system" ? <SystemView /> : route === "/admin/manage-store" ? <ManageStoreView onNavigate={onNavigate} /> : <NotificationsView notifications={notifications} onNotificationsChanged={changeNotifications} onNavigate={onNavigate} />}</AdminShell>;
+  if (route === "/admin/completed-orders") return <AdminShell user={user} route={route} onNavigate={onNavigate} notifications={notifications} unreadCount={unreadCount}>{loading || !canUseAdminArea(user, route) ? <div className="loading-card">Preparing purchase history…</div> : <CompletedOrdersView onNavigate={onNavigate} />}</AdminShell>;
+return <AdminShell user={user} route={route} onNavigate={onNavigate} notifications={notifications} unreadCount={unreadCount}>{error && errorRoute === route ? <section className="admin-panel admin-wide-panel"><p className="eyebrow">Connection problem</p><h2>This section could not load.</h2><p className="inline-error" role="alert">{error}</p><p className="muted">Your session is still active. Retry this section without leaving the console.</p><button className="primary-action" type="button" onClick={() => { setError(""); setLoadedRoute(""); setRetryVersion(value => value + 1); }}>Retry loading</button></section> : loading ? <div className="loading-card">Preparing your console…</div> : route === "/admin" ? <DashboardView user={user} dashboard={dashboard} orders={orders} notifications={notifications} onNavigate={onNavigate} /> : route === "/admin/storefront" ? <StorefrontSettingsView /> : route === "/admin/about" ? <AdminAboutView /> : route === "/admin/events" ? <EventsView categories={categories} subcategories={subcategories} /> : route === "/admin/labels" ? <LabelsView orders={orders} onOrderChanged={changeOrder} /> : route === "/admin/hero" ? <HeroStudioView products={products} categories={categories} /> : route === "/admin/tax" ? <TaxComplianceView /> : route === "/admin/add-product" ? <AddListingView categories={categories} subcategories={subcategories} onNavigate={onNavigate} /> : route === "/admin/bulk-listing" ? <BulkListingView categories={categories} subcategories={subcategories} /> : route === "/admin/orders" ? <OrdersView user={user} onNavigate={onNavigate} orders={orders} onOrderChanged={changeOrder} orderTotal={orderPagination?.total ?? orders.length} hasMoreOrders={Boolean(orderPagination?.has_more)} loadingMore={loadingMore === "orders"} onLoadMore={() => loadMore("orders")} /> : route === "/admin/products" ? <ManageProductsView products={products} categories={categories} subcategories={subcategories} onProductChanged={changeProduct} onProductDeleted={removeProduct} onNavigate={onNavigate} productTotal={productPagination?.total ?? products.length} hasMoreProducts={Boolean(productPagination?.has_more)} loadingMore={loadingMore === "products"} onLoadMore={() => loadMore("products")} /> : route === "/admin/inventory" ? <InventoryView products={products} onProductChanged={changeProduct} productTotal={productPagination?.total ?? products.length} hasMoreProducts={Boolean(productPagination?.has_more)} loadingMore={loadingMore === "products"} onLoadMore={() => loadMore("products")} /> : route === "/admin/customers" ? <CustomersView user={user} /> : route === "/admin/employees" ? <EmployeesView user={user} /> : route === "/admin/reviews" ? <ReviewsView /> : route === "/admin/questions" ? <QuestionsView /> : route === "/admin/credits" ? <AdminCreditsView /> : route === "/admin/coupons" ? <CouponsView products={products} categories={categories} subcategories={subcategories} customers={customers} /> : route === "/admin/deals" ? <DealsView products={products} onProductChanged={changeProduct} /> : route === "/admin/categories" ? <CategoriesView categories={categories} subcategories={subcategories} onCatalogChanged={refreshCatalog} /> : route === "/admin/returns" ? <ReturnsView user={user} /> : route === "/admin/support" ? <SupportView /> : route === "/admin/system" ? <SystemView /> : route === "/admin/manage-store" ? <ManageStoreView user={user} onNavigate={onNavigate} /> : <NotificationsView notifications={notifications} onNotificationsChanged={changeNotifications} onNavigate={onNavigate} />}</AdminShell>;
 }

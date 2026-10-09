@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { colourSwatchStyle } from "../lib/colours";
-import { availableQuantity, formatIST, isPreorder, money, preorderRemaining, productUrl, sellingPrice } from "../lib/commerce";
+import { availableQuantity, formatIST, isPreorder, preorderRemaining, productUrl } from "../lib/commerce";
 import { Icon } from "./Icon";
 import { ProductGuarantees } from "./ProductGuarantees";
+import { SpecialPrice } from "./SpecialPrice";
 
 function colourwaySwatchClass(value) {
   const colour = String(value || "").trim().toLowerCase();
@@ -16,7 +17,7 @@ function colourwaySwatchClass(value) {
   return "colourway-swatch-accent";
 }
 
-export function QuickView({ product, onClose, onNavigate, addToCart }) {
+export function QuickView({ product, onClose, onNavigate, addToCart, eventLive = false }) {
   const dialog = useRef(null);
   const [size, setSize] = useState("");
   const [message, setMessage] = useState("");
@@ -45,7 +46,7 @@ export function QuickView({ product, onClose, onNavigate, addToCart }) {
   return <dialog ref={dialog} className="product-modal quick-view-dialog" aria-labelledby="modal-title" onCancel={onClose} onClick={(event) => { if (event.target === dialog.current) { const rect = dialog.current.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose(); } }}>
     <button type="button" className="modal-close" onClick={onClose} aria-label="Close product details">×</button>
     <div className="modal-image">{displayProduct.image_url && <img src={displayProduct.image_url} alt={displayProduct.name} />}{preorder && <span className="detail-preorder-badge">Pre-order</span>}</div>
-    <div className="modal-copy"><p className="eyebrow">{displayProduct.brand || displayProduct.category}</p><h2 id="modal-title">{displayProduct.name}</h2><p className="modal-price">{money(sellingPrice(displayProduct))}</p><ProductGuarantees compact returnable={displayProduct.returnable} />{preorder && <p className="preorder-detail-note"><strong>Pre-order available</strong>{preorderRelease && <span>Expected release: {preorderRelease}</span>}{preorderCapacity !== null && <span>{preorderCapacity > 0 ? `${preorderCapacity} reservation${preorderCapacity === 1 ? "" : "s"} remaining` : "Pre-order limit reached"}</span>}</p>}
+    <div className="modal-copy"><p className="eyebrow">{displayProduct.brand || displayProduct.category}</p><h2 id="modal-title">{displayProduct.name}</h2><SpecialPrice product={displayProduct} eventLive={eventLive} className="modal-price" /><ProductGuarantees compact returnable={displayProduct.returnable} />{preorder && <p className="preorder-detail-note"><strong>Pre-order available</strong>{preorderRelease && <span>Expected release: {preorderRelease}</span>}{preorderCapacity !== null && <span>{preorderCapacity > 0 ? `${preorderCapacity} reservation${preorderCapacity === 1 ? "" : "s"} remaining` : "Pre-order limit reached"}</span>}</p>}
       {!!displayProduct.sizes?.length && <div className="size-list"><strong>Select size</strong><div>{displayProduct.sizes.map((value) => <button type="button" key={value} disabled={!availableQuantity(displayProduct, value)} aria-pressed={size === value} className={size === value ? "selected" : ""} onClick={() => { setSize(value); setMessage(""); }}>{value}</button>)}</div></div>}
       {colourways.length > 1 && <div className="colourway-picker quick-view-colourways"><strong>Colour</strong><div>{colourways.map((colourway) => <button type="button" className={colourway.id === displayProduct.id ? "selected" : ""} key={colourway.id} onClick={() => { onClose(); onNavigate(productUrl(colourway)); }}><span className={`colourway-swatch ${colourwaySwatchClass(colourway.color)}`} style={colourSwatchStyle(colourway.color, colourway.color_hex)} aria-label={colourway.color || "Colourway"} role="img" />{colourway.color || "Colourway"}</button>)}</div></div>}
       <button className="primary-action" onClick={() => { if (displayProduct.sizes?.length && !size) return setMessage("Choose a size first."); if (!availableQuantity(displayProduct, size)) return setMessage(preorder ? "The pre-order limit has been reached." : "This selection is out of stock."); addToCart(displayProduct, size); onClose(); onNavigate("/cart"); }}>{preorder ? "Pre-order now" : "Add to bag"} <Icon name="bag" size={18} /></button>

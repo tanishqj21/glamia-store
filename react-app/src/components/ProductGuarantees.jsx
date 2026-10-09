@@ -1,5 +1,4 @@
-import React from "react";
-
+import React from 'react';
 function isReturnable(value) {
   return value === undefined || value === null ? true : Boolean(value);
 }

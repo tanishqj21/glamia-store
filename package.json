@@ -3,17 +3,33 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "overrides": {
+    "undici": "7.29.1",
+    "brace-expansion": "5.0.12"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "react:dev": "vite --config react-app/vite.config.js",
+    "prereact:build": "node scripts/prepare-cart-styles.mjs",
     "react:build": "vite build --config react-app/vite.config.js",
+    "media:optimize": "node scripts/optimize-product-media.mjs",
+    "postreact:build": "node scripts/prepare-storefront-styles.mjs && node scripts/check-assets.mjs",
+    "assets:archive": "node scripts/check-assets.mjs --archive",
     "deploy": "wrangler deploy",
     "lint": "eslint .",
     "db:migrate:local": "wrangler d1 migrations apply maison-mode-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply maison-mode-db --remote",
     "smoke": "node scripts/smoke-test.mjs",
     "test:browser": "node scripts/react-browser-test.mjs",
-    "postbuild": "node scripts/check-assets.mjs --delete"
+    "test:themes": "node scripts/theme-browser-test.mjs",
+    "test:events": "node scripts/events-browser-test.mjs",
+    "test:saved-items": "node scripts/saved-items-integration-test.mjs",
+    "test:mobile-links": "node scripts/mobile-links-test.mjs",
+    "test:event-alerts": "node scripts/event-alert-integration-test.mjs",
+    "test:security": "node --experimental-vm-modules --test scripts/security.test.mjs",
+    "test:hardening": "node --experimental-vm-modules --experimental-sqlite --test scripts/production-hardening.test.mjs",
+    "test:security:integration": "node scripts/security-smoke.mjs",
+    "postbuild": "node scripts/check-assets.mjs --archive"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
@@ -22,10 +38,14 @@
     "eslint": "^10.10.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.12.0",
+    "postcss": "8.5.28",
+    "sharp": "0.35.5",
     "vite": "^8.2.2",
-    "wrangler": "^4.131.2"
+    "wrangler": "4.147.0"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
+    "pdf-lib": "^1.17.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"

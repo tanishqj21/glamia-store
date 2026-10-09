@@ -1,0 +1,96 @@
+// Local-only integration and responsive UI checks. Never touch production data.
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { createHmac } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { chromium, expect } from '@playwright/test';
+
+const base = 'http://127.0.0.1:8788';
+const db = new DatabaseSync('.wrangler/credits-bills-audit/v3/d1/miniflare-D1DatabaseObject/a36f84ea60804f30bb0c7f7cad9f5336a6cca0165abdab8b9241d93dbf0b6006.sqlite');
+assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name='order_bills'").get());
+db.prepare("INSERT OR IGNORE INTO users(email,google_sub,name,referral_onboarding_open) VALUES ('credits-inviter@example.com','local-inviter','Local inviter',0),('credits-buyer@example.com','local-buyer','Local buyer',1)").run();
+db.prepare("INSERT OR IGNORE INTO referral_codes(code,user_email) VALUES ('7654321','credits-inviter@example.com'),('1234567','credits-buyer@example.com')").run();
+db.prepare("UPDATE users SET first_name='Local',last_name='Buyer',phone='+91 9876543210',dob='2000-01-01',gender='male',referral_onboarding_open=0 WHERE email='credits-buyer@example.com'").run();
+db.prepare("INSERT OR IGNORE INTO referral_rewards(referred_email,referrer_email,referral_code,status) VALUES ('credits-buyer@example.com','credits-inviter@example.com','7654321','pending')").run();
+const items = JSON.stringify([{name:'Night suit',color:'Sage green',size:'M',quantity:1,price:949,hsn_code:'6108',gst_rate:5,taxable_value:903.81,tax_amount:45.19}]);
+db.prepare("INSERT OR IGNORE INTO orders(id,order_number,customer_email,customer_name,items_json,subtotal,total,payable_total,status,payment_method,payment_status,tracking_token,shipping_json) VALUES ('local-paid-order','GM-LOCAL-001','credits-buyer@example.com','Local buyer',?,949,949,949,'confirmed','razorpay','paid','local-private-bill-token',?)").run(items,JSON.stringify({line1:'123 Local Road',city:'New Delhi',state:'Delhi',pin:'110001',country:'India'}));
+assert.ok(db.prepare("SELECT balance FROM store_credit_accounts WHERE user_email='credits-buyer@example.com'").get().balance>=100);
+assert.equal(db.prepare("SELECT balance FROM store_credit_accounts WHERE user_email='credits-inviter@example.com'").get().balance,50);
+db.close();
+const login=await fetch(base+'/api/auth/demo-admin',{redirect:'manual'});
+assert.equal(login.status,302);
+const cookie=login.headers.get('set-cookie').split(';')[0];
+const [name,...parts]=cookie.split('=');
+const headers={Cookie:cookie,Origin:base,'X-Requested-With':'Glamia'};
+const list=await fetch(base+'/api/orders?scope=admin&completed=1&limit=30&page=1',{headers});
+assert.equal(list.status,200);
+const data=await list.json();
+assert.ok(data.orders.some(order=>order.id==='local-paid-order'&&order.bill_available));
+assert.equal((await fetch(base+'/api/orders/local-paid-order/bill')).status,404);
+assert.equal((await fetch(base+'/api/orders/local-paid-order/bill?token=wrong')).status,404);
+const pdf=await fetch(base+'/api/orders/local-paid-order/bill?token=local-private-bill-token');
+assert.equal(pdf.status,200);
+assert.match(pdf.headers.get('content-type'),/application\/pdf/);
+assert.match(pdf.headers.get('content-disposition'),/attachment/);
+const output='.wrangler/credits-bills-audit/qa';
+await mkdir(output,{recursive:true});
+await writeFile(output+'/bill.pdf',Buffer.from(await pdf.arrayBuffer()));
+const browser=await chromium.launch();
+const errors=[];
+try {
+  for(const width of [1440,390]) {
+    const context=await browser.newContext({viewport:{width,height:1000},timezoneId:'Asia/Kolkata'});
+    await context.addCookies([{name,value:parts.join('='),url:base}]);
+    const page=await context.newPage();
+    page.on('pageerror',error=>errors.push(error.message));
+    await page.goto(base+'/admin/credits');
+    await expect(page.getByRole('heading',{name:'Store credits',exact:true,level:2})).toBeVisible();
+    await expect(page.getByRole('heading',{name:'Give a customer credits'})).toBeVisible();
+    await page.getByLabel('1. Choose a customer',{exact:true}).fill('credits-buyer');
+    await page.getByRole('button',{name:/Local buyer.*credits-buyer@example.com/}).click();
+    await page.getByLabel('2. Credits to add',{exact:true}).fill('25');
+    await page.getByLabel('3. Why are you giving credits?',{exact:true}).fill('Local QA only');
+    await page.screenshot({path:`${output}/admin-credits-${width}.png`,fullPage:true});
+    if(width===1440){
+      await page.getByRole('button',{name:'Add store credits',exact:true}).click();
+      await expect(page.getByText('Store credits added. The transaction is recorded in History.',{exact:true})).toBeVisible();
+    }
+    await page.getByRole('button',{name:'Referrals',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Two wallets. One successful order.'})).toBeVisible();
+    await expect(page.locator('.credits-reward-pair')).toContainText('₹100');
+    await expect(page.locator('.credits-reward-pair')).toContainText('₹50');
+    await page.screenshot({path:`${output}/admin-referrals-${width}.png`,fullPage:true});
+    await page.goto(base+'/admin/completed-orders');
+    await expect(page.getByRole('heading',{name:'Completed orders',exact:true})).toBeVisible();
+    await expect(page.getByRole('heading',{name:'GM-LOCAL-001'})).toBeVisible();
+    const downloadPromise=page.waitForEvent('download');
+    await page.getByRole('link',{name:'Download bill (PDF)',exact:true}).click();
+    assert.match((await downloadPromise).suggestedFilename(),/Glamia-bill-GM-LOCAL-001\.pdf/);
+    await page.screenshot({path:`${output}/completed-orders-${width}.png`,fullPage:true});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+    await context.close();
+    console.log(`PASS credits/referral/completed-order UI and PDF download at ${width}px`);
+  }
+  const now=Math.floor(Date.now()/1000);
+  const payload=Buffer.from(JSON.stringify({sub:'local-buyer',email:'credits-buyer@example.com',name:'Local buyer',role:'seller',iat:now,nbf:now,exp:now+3600,sv:0})).toString('base64url');
+  const token=payload+'.'+createHmac('sha256','isolated-local-audit-not-a-production-secret').update(payload).digest('base64url');
+  const context=await browser.newContext({viewport:{width:390,height:844}});
+  await context.addCookies([{name,value:token,url:base}]);
+  const page=await context.newPage();
+  page.on('pageerror',error=>errors.push(error.message));
+  await page.goto(base+'/credits');
+  await expect(page.getByRole('heading',{name:'Store credits',exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Invite a friend',exact:true})).toBeVisible();
+  await expect(page.locator('.credits-referral-code')).toContainText('1234567');
+  await expect(page.locator('#initial-loader')).toHaveCount(0);
+  await page.screenshot({path:output+'/buyer-wallet.png',fullPage:true});
+  await page.goto(base+'/orders');
+  await expect(page.getByRole('link',{name:'Download bill (PDF)',exact:true})).toBeVisible();
+  assert.equal((await context.request.get(base+'/api/orders/local-paid-order/bill')).status(),200);
+  assert.equal((await context.request.get(base+'/api/admin/credits')).status(),403);
+  assert.equal((await context.request.get(base+'/api/orders?scope=admin&completed=1')).status(),403);
+  await context.close();
+  console.log('PASS buyer wallet, account bill link and admin access restrictions');
+  assert.deepEqual(errors,[]);
+  console.log('PASS actual D1 dual rewards and private downloadable bill');
+} finally {await browser.close();}

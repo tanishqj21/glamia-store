@@ -19,7 +19,7 @@ function ReviewStars({ value, onChange }) {
 function reviewState(product) {
   return {
     reviews: product.reviews || [],
-    average: product.review_average ?? product.rating ?? 0,
+    average: Number(product.review_count || 0) > 0 ? (product.review_average ?? product.rating ?? 0) : 0,
     count: product.review_count ?? (product.reviews || []).length,
     my_review: product.my_review || null,
   };
@@ -104,7 +104,7 @@ export function ProductReviews({ product, user, onNavigate, onReviewsUpdated }) 
       <aside className="review-form-card">
         <p className="eyebrow">Your experience</p>
         <h3>{data.my_review ? "Update your review" : "Leave a review"}</h3>
-        {user ? <form className="review-form" onSubmit={saveReview}><label>Rating<ReviewStars value={rating} onChange={setRating} /></label><label>Review<textarea rows="5" minLength="3" maxLength="500" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="What should another shopper know?" required /></label><button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving…" : data.my_review ? "Update review" : "Post review"} <span aria-hidden="true">↗</span></button>{data.my_review && <button type="button" className="text-link review-delete" onClick={removeReview} disabled={busy}>Remove my review</button>}</form> : <><p className="muted">Sign in to share your rating. Purchased reviews receive a verified badge.</p><button type="button" className="secondary-action" onClick={() => onNavigate("/login")}>Sign in to review</button></>}
+        {user ? <form className="review-form" onSubmit={saveReview}><label>Rating<ReviewStars value={rating} onChange={setRating} /></label><label>Review<textarea rows="5" minLength="3" maxLength="500" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="What should another shopper know?" required /></label><button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving…" : data.my_review ? "Update review" : "Post review"} </button>{data.my_review && <button type="button" className="text-link review-delete" onClick={removeReview} disabled={busy}>Remove my review</button>}</form> : <><p className="muted">Sign in to share your rating. Purchased reviews receive a verified badge.</p><button type="button" className="secondary-action" onClick={() => onNavigate("/login")}>Sign in to review</button></>}
         {status && <p className="inline-note" role="status">{status}</p>}
       </aside>
     </div>
@@ -129,6 +129,6 @@ export function MyReviewsPanel({ onNavigate }) {
   return <section className="account-panel" aria-labelledby="my-reviews-title">
     <div className="account-panel-heading"><div><p className="eyebrow">Your voice</p><h2 id="my-reviews-title">Your reviews</h2></div><span className="account-badge">{reviews.length} posted</span></div>
     {status && <p className="inline-error" role="alert">{status}</p>}
-    {reviews.length ? <div className="my-review-list">{reviews.map((review) => <article className="my-review-card" key={review.id}><div className="review-card-heading"><div><strong>{review.product_name || "Product"}</strong>{review.verified ? <span className="review-verified">Verified purchase</span> : null}</div><time>{reviewDate(review.created_at)}</time></div><button type="button" className="review-product-link" onClick={() => onNavigate(productUrl({ id: review.product_id, name: review.product_name }))}><ReviewStars value={review.rating} /><span>View product ↗</span></button><p>{review.comment}</p><span className={`status-pill status-${review.status || "visible"}`}>{review.status || "visible"}</span></article>)}</div> : !status && <div className="empty-state">You have not posted a review yet. Your thoughts help the next shopper.</div>}
+    {reviews.length ? <div className="my-review-list">{reviews.map((review) => <article className="my-review-card" key={review.id}><div className="review-card-heading"><div><strong>{review.product_name || "Product"}</strong>{review.verified ? <span className="review-verified">Verified purchase</span> : null}</div><time>{reviewDate(review.created_at)}</time></div><button type="button" className="review-product-link" onClick={() => onNavigate(productUrl({ id: review.product_id, name: review.product_name }))}><ReviewStars value={review.rating} /><span>View product </span></button><p>{review.comment}</p><span className={`status-pill status-${review.status || "visible"}`}>{review.status || "visible"}</span></article>)}</div> : !status && <div className="empty-state">You have not posted a review yet. Your thoughts help the next shopper.</div>}
   </section>;
 }

@@ -46,10 +46,11 @@ export function formatIST(value, options) {
 }
 
 /* Canonical product URLs use the product hierarchy:
-   /<category-slug>/<subcategory-slug>/<name-slug>-<stable-product-id>.
+   /<category-slug>/<subcategory-slug>/<name-slug>-<public-code>-<uuid>.
    The category and subcategory make the URL useful to shoppers and search
-   engines; the complete stable id suffix guarantees colourways and future
-   re-edits remain unique even when names overlap.
+   engines; the readable code plus immutable UUID makes every listing and
+   colourway unambiguous. Legacy UUID-backed products continue to work through
+   the fallback.
    Legacy /product/<slug> links continue to resolve and redirect server-side. */
 function urlSlug(value, fallback = "collection") {
   const slug = String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -57,10 +58,15 @@ function urlSlug(value, fallback = "collection") {
 }
 
 export function productUrl(product) {
-  const id = String(product?.id || product?.slug || "").trim();
-  if (!id) return "/search";
-  const slug = urlSlug(product?.name, id);
+  const publicCode = String(product?.product_code || "").trim();
+  const internalId = String(product?.id || "").trim();
+  const stableId = publicCode || internalId || String(product?.slug || "").trim();
+  if (!stableId) return "/search";
+  const slug = urlSlug(product?.name, stableId);
   const category = urlSlug(product?.category);
   const subcategory = urlSlug(product?.subcategory);
-  return `/${category}/${subcategory}/${slug}-${id.toLowerCase()}`;
+  const suffix = publicCode && internalId && publicCode.toLowerCase() !== internalId.toLowerCase()
+    ? `${publicCode}-${internalId}`
+    : stableId;
+  return `/${category}/${subcategory}/${slug}-${suffix.toLowerCase()}`;
 }
