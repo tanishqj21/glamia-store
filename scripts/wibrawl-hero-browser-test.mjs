@@ -98,7 +98,9 @@ try {
   await show.nth(1).uncheck();await page.waitForFunction(()=>!document.querySelector('.hero-drag-handle').disabled);
   await page.goto(base+'/?wibrawl-preview=1');
   await page.getByRole('heading',{name:'Wear your world together',exact:true}).waitFor();
-  assert.equal(await page.locator('.wibrawl-carousel-pages button').count(),2);
+  assert.equal(await page.locator('.wibrawl-carousel-pages button').count(),0);
+  assert.equal(await page.locator('.wibrawl-hero-navigation button').count(),2);
+  assert.equal(await page.locator('.wibrawl-hero').getAttribute('aria-label'),'1 of 2');
   for(const id of ids)await worker.routeApi(new Request(base+'/api/admin/hero/'+id+'?storefront=wibrawl',{method:'PATCH',headers:{cookie:`mm_session=${token}`,Origin:base,"X-Requested-With":"Glamia"},body:JSON.stringify({active:false})}),env,new URL(base+'/api/admin/hero/'+id+'?storefront=wibrawl'),{});
   await page.reload();await page.locator('.wibrawl-home').waitFor();await page.waitForFunction(()=>!document.querySelector('.wibrawl-hero-loading'));
   assert.equal(await page.locator('.wibrawl-carousel').count(),0,'Hiding all slides hides the whole hero');
@@ -131,7 +133,8 @@ try {
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2),false);
       const result=await new AxeBuilder({page}).include('.wibrawl-carousel').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();
       assert.deepEqual(result.violations.map(v=>v.id),[],`${label} ${theme} carousel accessibility`);
-      assert.equal(await page.locator('.wibrawl-carousel button svg').count(),0);
+      assert.equal(await page.locator('.wibrawl-hero-navigation button svg').count(),2);
+      assert.equal(await page.locator('.wibrawl-hero-actions svg').count(),0);
       assert.equal(await page.getByRole('button',{name:'Pause carousel',exact:true}).count(),0,'Reduced motion disables autoplay');
       await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:`${output}/${label}-${theme.toLowerCase()}.png`,fullPage:true});
       await page.getByRole('button',{name:'Next hero slide',exact:true}).click();

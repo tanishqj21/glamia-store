@@ -156,6 +156,12 @@
   .admin-react-page *, .admin-react-page *::before, .admin-react-page *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 .hero-slide-queue .wb-reel-queue-row { display:grid; align-items:center; border-bottom:1px solid var(--line); grid-template-columns:44px minmax(0,1fr) auto; gap:10px; padding:14px 8px; position:relative; }
+.admin-react-page .wibrawl-reel-studio { display:flex; flex-direction:column; align-items:stretch; gap:22px; }
+.wibrawl-reel-studio > .reel-studio-feedback { margin:0; align-self:stretch; }
+.wibrawl-reel-studio > .merch-preview-dock { width:100%; }
+.wibrawl-reel-studio .merch-preview-heading { flex-wrap:wrap; gap:16px; padding:16px 24px; }
+.wibrawl-reel-studio .merch-preview-heading > label { display:grid; gap:6px; flex:0 1 200px; min-width:0; }
+.wibrawl-reel-studio .merch-preview-heading > span { margin-left:auto; }
 .hero-slide-queue .wb-reel-queue-row.is-dragging { opacity:.5; }
 .hero-slide-queue .wb-reel-queue-row.is-drop-target { outline:2px solid var(--ink); outline-offset:-2px; }
 .hero-slide-queue .wb-reel-queue-row.is-previewing { background:color-mix(in srgb,var(--accent) 6%,transparent); }

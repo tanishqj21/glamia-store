@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { collectionNames, WIBRAWL_HERO_LAYOUTS } from '../../../src/storefront-identity.js';
 import { Link } from './Header';
+import { Icon } from './Icon';
 
 export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
   const [index, setIndex] = useState(0);
@@ -47,8 +48,8 @@ export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
       select(index + (x < 0 ? 1 : -1));
     }}
     onClickCapture={event => { if (Date.now() < suppressClickUntil.current) { event.preventDefault(); event.stopPropagation(); suppressClickUntil.current = 0; } }}>
-    <div className={`wibrawl-hero wibrawl-edited-hero wibrawl-layout-${layout} ${slide.title.length > 46 ? 'is-long-title' : ''}`} data-layout={layout} key={slide.id} role="group" aria-roledescription="slide" aria-live={focused ? 'polite' : 'off'} aria-label={`${index + 1} of ${slides.length}`}>
-      <div className="wibrawl-hero-copy">
+    <div className={`wibrawl-hero wibrawl-edited-hero wibrawl-layout-${layout} ${slide.title.length > 46 ? 'is-long-title' : ''}`} data-layout={layout} role="group" aria-roledescription="slide" aria-live={focused ? 'polite' : 'off'} aria-label={`${index + 1} of ${slides.length}`}>
+      <div className="wibrawl-hero-copy" key={slide.id}>
         <p className="wibrawl-kicker">{slide.eyebrow}</p>
         {preview ? <h3 className="wibrawl-hero-title">{slide.title}</h3> : <h1 id="wibrawl-title" className="wibrawl-hero-title">{slide.title}</h1>}
         <p className="wibrawl-hero-intro">{slide.tagline}</p>
@@ -56,18 +57,17 @@ export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
         <div className="wibrawl-hero-actions"><Link className="wibrawl-primary-action" href={slide.cta_category ? `/category/${encodeURIComponent(slide.cta_category)}` : '/just-arrived'} onNavigate={onNavigate}>{slide.cta_label || 'Shop the edit'}</Link></div>
       </div>
       <div className="wibrawl-hero-stage">
-        {campaign ? <figure className="wibrawl-campaign-figure"><img src="/wibrawl/streetwear-campaign-1440.webp" srcSet="/wibrawl/streetwear-campaign-720.webp 720w, /wibrawl/streetwear-campaign-1440.webp 1440w" sizes="(max-width: 700px) 100vw, 60vw" width="1440" height="960" alt="Wibrawl campaign concept: two models in oversized graphic tees on a rooftop." fetchPriority="high" decoding="async" /><figcaption>Campaign concept · styling inspiration</figcaption></figure> : <div className={`wibrawl-hero-visual wibrawl-hero-frames wibrawl-hero-frames-${slide.frames.length}`}>
+        {campaign ? <figure className="wibrawl-campaign-figure" key={slide.id}><img src="/wibrawl/streetwear-campaign-1440.webp" srcSet="/wibrawl/streetwear-campaign-720.webp 720w, /wibrawl/streetwear-campaign-1440.webp 1440w" sizes="(max-width: 700px) 100vw, 60vw" width="1440" height="960" alt="Wibrawl campaign concept: two models in oversized graphic tees on a rooftop." fetchPriority="high" decoding="async" /><figcaption>Campaign concept · styling inspiration</figcaption></figure> : <div key={slide.id} className={`wibrawl-hero-visual wibrawl-hero-frames wibrawl-hero-frames-${slide.frames.length}`}>
           {slide.frames.map((frame, position) => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate} aria-label={`Shop ${frame.name}`}><img src={frame.image} alt={frame.name} width="960" height="1200" fetchPriority={position === 0 ? 'high' : 'auto'} decoding="async" /></Link>)}
         </div>}
         <span className="wibrawl-hero-stamp" aria-hidden="true">W.</span>
+        {slides.length > 1 && <div className="wibrawl-hero-navigation" role="group" aria-label="Navigate hero slides">
+          <button type="button" onClick={() => select(index - 1)} aria-label="Previous hero slide"><Icon name="chevronLeft" /></button>
+          <button type="button" onClick={() => select(index + 1)} aria-label="Next hero slide"><Icon name="chevronRight" /></button>
+        </div>}
       </div>
     </div>
     {campaign && <div className="wibrawl-hero-product-links"><span>Explore this edit</span>{slide.frames.map(frame => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate}><img src={frame.image} alt="" width="40" height="48" />{frame.name}</Link>)}</div>}
-    {slides.length > 1 && <div className="wibrawl-carousel-controls">
-      <button type="button" onClick={() => select(index - 1)} aria-label="Previous hero slide">Prev</button>
-      <div className="wibrawl-carousel-pages" role="group" aria-label="Choose hero slide">{slides.map((item, position) => <button type="button" key={item.id} aria-label={`Show hero slide ${position + 1}`} aria-current={position === index ? 'true' : undefined} onClick={() => select(position)}>{position + 1}</button>)}</div>
-      <button type="button" onClick={() => select(index + 1)} aria-label="Next hero slide">Next</button>
-    </div>}
   </section>;
 }
 

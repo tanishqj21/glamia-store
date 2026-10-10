@@ -84,6 +84,21 @@ try {
   await studio.getByLabel('Reel headline', { exact: true }).fill('YOUR NEXT FAVOURITE.');
   await studio.locator('.merch-product-options label').filter({ hasText: 'Another Wibrawl tee' }).click();
   await studio.getByRole('button', { name: 'Save reel', exact: true }).click(); await idle();
+  for (const viewport of [{width:1440,height:950},{width:390,height:844}]) {
+    await page.setViewportSize(viewport);
+    const feedback = await studio.locator('.reel-studio-feedback').boundingBox();
+    const preview = await studio.locator('.merch-preview-dock').boundingBox();
+    const queue = await studio.locator('.hero-slide-queue').boundingBox();
+    assert.ok(feedback.height < 90, 'Saved feedback is compact');
+    assert.ok(preview.y >= feedback.y + feedback.height, 'The preview follows the saved message');
+    assert.ok(queue.y >= preview.y + preview.height, 'The order queue follows the preview');
+    assert.ok(preview.width > (await studio.boundingBox()).width - 60, 'The reel preview spans the studio width');
+    await studio.locator('.merch-preview-dock').scrollIntoViewIfNeeded();
+    await page.locator('.site-header').evaluate(node => node.style.visibility = 'hidden');
+    await studio.screenshot({path:output + '/admin-feedback-' + viewport.width + '.png'});
+    await page.locator('.site-header').evaluate(node => node.style.visibility = '');
+  }
+  await page.setViewportSize({width:1440,height:950});
   assert.equal(getReels()[2].title, 'YOUR NEXT FAVOURITE.'); assert.deepEqual(getReels()[2].product_ids, ['wb2']);
   await studio.getByRole('button', { name: 'Use automatic selection', exact: true }).click();
   await studio.getByRole('button', { name: 'Save reel', exact: true }).click(); await idle();
