@@ -190,7 +190,7 @@ function Header({ onNavigate, query, setQuery, dark, setDark, wibrawlMode = fals
     {!adminMode && <AnnouncementBar announcement={storefront?.announcement} />}
     <header className={`site-header ${adminMode ? "admin-site-header" : ""}`}>
       {!adminMode && <button className="menu-button" aria-label="Open menu" aria-expanded={menuOpen} aria-controls="shop-menu" onClick={toggleMenu}><span /><span /><span /></button>}
-      {!adminMode && !wibrawlMode && <nav className="quick-links" aria-label="Collections">{collectionLinks.map(([href, label]) => <Link key={href} href={href} onNavigate={onNavigate}>{label}</Link>)}{!wibrawlMode && <a className="wibrawl-store-link" href={WIBRAWL_ORIGIN} onPointerMove={moveWibrawlGlow}><span className="wibrawl-store-pill"><span className="wibrawl-link-mark" aria-hidden="true">W.</span>Wibrawl</span></a>}</nav>}
+      {!adminMode && !wibrawlMode && <nav className="quick-links" aria-label="Collections">{collectionLinks.map(([href, label]) => <Link key={href} href={href} onNavigate={onNavigate}>{label}</Link>)}{!wibrawlMode && <a className="wibrawl-store-link" href={WIBRAWL_ORIGIN} onPointerMove={moveWibrawlGlow}><span className="wibrawl-store-pill">Wibrawl</span></a>}</nav>}
       <Link className={`wordmark ${wibrawlMode ? "wibrawl-wordmark" : ""}`} href="/" onNavigate={onNavigate}>{wibrawlMode ? <><span className="wibrawl-mark" aria-hidden="true">WB</span><span>WIBRAWL</span></> : <><img src="/glamia-g-mark-96.webp" alt="G" width="42" height="42" /><span>LAMIA</span></>}<span className="sr-only"> home</span></Link>
       <div className="header-tools">
         {!adminMode && <>
