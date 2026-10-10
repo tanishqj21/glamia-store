@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 256" role="img" aria-labelledby="title description">
+<title id="title">WiBrawl — WB Shift, charcoal and neon</title>
+<desc id="description">The approved WB monogram with a main dark charcoal-green body, balanced neon blue and yellow sections, and a small pink detail. Transparent counters and background.</desc>
+<defs>
+<clipPath id="clip-w-shift"><path d="M28 54H63L74 141L98 102H119L138 141L156 54H190L158 199H132L109 154L84 199H56Z"/></clipPath>
+<clipPath id="clip-b-shift"><path fill-rule="evenodd" clip-rule="evenodd" d="M169 54H227L260 76L254 111L235 126L253 143L244 180L216 199H156ZM196 80L190 111H213L224 101L227 90L214 80ZM184 141L178 173H207L218 163L221 151L207 141Z"/></clipPath>
+</defs>
+<g transform="translate(8 6)"><g fill="#3B4C40"><path d="M28 54H63L74 141L98 102H119L138 141L156 54H190L158 199H132L109 154L84 199H56Z"/>
+<path fill-rule="evenodd" d="M169 54H227L260 76L254 111L235 126L253 143L244 180L216 199H156ZM196 80L190 111H213L224 101L227 90L214 80ZM184 141L178 173H207L218 163L221 151L207 141Z"/></g>
+<g clip-path="url(#clip-w-shift)"><path fill="#24DFFF" d="M20 48H65L78 150L63 178L40 146Z"/><path fill="#D7FF45" d="M156 49H195L175 150H135Z"/></g>
+<g clip-path="url(#clip-b-shift)"><path fill="#D7FF45" d="M198 176H254V205H190Z"/><path fill="#FF4DB5" d="M246 172L244 180L231 189L226 180Z"/></g></g>
+</svg>
