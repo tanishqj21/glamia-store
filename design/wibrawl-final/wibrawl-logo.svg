@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 708 148" role="img" aria-labelledby="logo-title logo-description">
+<title id="logo-title">WIBRAWL — Afterimage</title>
+<desc id="logo-description">Dark lettering, a neon yellow lower echo, and a neon blue I. Forward leaning custom vector lettering with a seven-unit lower echo. Transparent background.</desc>
+<g transform="translate(45 22) skewX(-10)">
+<g transform="translate(0 7)"><path transform="translate(0 0)" fill="#C3F35E" fill-rule="evenodd" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/>
+<path transform="translate(122 0)" fill="#C3F35E" fill-rule="evenodd" d="M0 0H22V100H0Z"/>
+<path transform="translate(152 0)" fill="#C3F35E" fill-rule="evenodd" d="M0 0H62L80 18V38L68 50L80 62V82L62 100H0ZM22 19V42H53L59 36V25L53 19ZM22 59V81H54L60 75V65L54 59Z"/>
+<path transform="translate(240 0)" fill="#C3F35E" fill-rule="evenodd" d="M0 0H62L80 18V43L62 60L84 100H58L37 60H22V100H0ZM22 20V41H53L59 35V26L53 20Z"/>
+<path transform="translate(332 0)" fill="#C3F35E" fill-rule="evenodd" d="M0 100L31 0H59L90 100H66L60 78H30L24 100ZM36 58H54L45 27Z"/>
+<path transform="translate(430 0)" fill="#C3F35E" fill-rule="evenodd" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/>
+<path transform="translate(552 0)" fill="#C3F35E" fill-rule="evenodd" d="M0 0H22V79H70V100H0Z"/></g>
+<path transform="translate(0 0)" fill="#0D120B" fill-rule="evenodd" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/>
+<path transform="translate(122 0)" fill="#24DFFF" fill-rule="evenodd" d="M0 0H22V100H0Z"/>
+<path transform="translate(152 0)" fill="#0D120B" fill-rule="evenodd" d="M0 0H62L80 18V38L68 50L80 62V82L62 100H0ZM22 19V42H53L59 36V25L53 19ZM22 59V81H54L60 75V65L54 59Z"/>
+<path transform="translate(240 0)" fill="#0D120B" fill-rule="evenodd" d="M0 0H62L80 18V43L62 60L84 100H58L37 60H22V100H0ZM22 20V41H53L59 35V26L53 20Z"/>
+<path transform="translate(332 0)" fill="#0D120B" fill-rule="evenodd" d="M0 100L31 0H59L90 100H66L60 78H30L24 100ZM36 58H54L45 27Z"/>
+<path transform="translate(430 0)" fill="#0D120B" fill-rule="evenodd" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/>
+<path transform="translate(552 0)" fill="#0D120B" fill-rule="evenodd" d="M0 0H22V79H70V100H0Z"/>
+</g>
+</svg>
