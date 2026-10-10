@@ -6,7 +6,7 @@ import sharp from 'sharp';
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const source = await fs.readFile(path.join(directory, '..', 'wibrawl-logo', '02-afterimage.svg'), 'utf8');
 const variants = [
-  { id: 'gaming-lime', name: 'Gaming lime', main: '#C3F35E', echo: '#24DFFF', accent: '#101413', description: 'Lime lettering, a cyan lower echo, and a dark I matched to the supplied swatch.' },
+  { id: 'gaming-lime', name: 'Dark / neon', main: '#0D120B', echo: '#C3F35E', accent: '#24DFFF', description: 'Dark lettering, a neon yellow lower echo, and a neon blue I.' },
   { id: 'ice-blue', name: 'Ice blue', main: '#24DFFF', echo: '#849689', accent: '#D7FF45', description: 'Cyan lettering, a muted green-grey lower echo, and a neon yellow I.' },
   { id: 'electric-violet', name: 'Electric violet', main: '#B995FF', echo: '#24DFFF', accent: '#D7FF45', description: 'Violet lettering, a cyan lower echo, and a neon yellow I.' },
 ];
