@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+<title id="title">Wibrawl — simple symbol</title>
+<desc id="description">Two offset rounded hooks forming an open interlocking symbol. Single-colour version. Transparent background. No lettering.</desc>
+<path fill="#000000" d="M78 42H145Q178 42 178 75V96H148V79Q148 72 141 72H82Q72 72 72 82V141Q72 148 79 148H96V178H75Q42 178 42 145V78Q42 42 78 42Z"/>
+<path fill="#000000" transform="rotate(180 128 128)" d="M78 42H145Q178 42 178 75V96H148V79Q148 72 141 72H82Q72 72 72 82V141Q72 148 79 148H96V178H75Q42 178 42 145V78Q42 42 78 42Z"/>
+
+</svg>
