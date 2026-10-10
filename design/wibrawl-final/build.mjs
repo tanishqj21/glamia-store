@@ -5,7 +5,7 @@ import sharp from 'sharp';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 await fs.mkdir(directory, { recursive: true });
-const selected = await fs.readFile(path.join(directory, '..', 'wibrawl-afterimage', 'wibrawl-gaming-lime.svg'), 'utf8');
+const selected = await fs.readFile(path.join(directory, '..', 'wibrawl-logo', '02-afterimage.svg'), 'utf8');
 const artwork = selected.replace(/<title id="logo-title">.*?<\/title>/, '<title id="logo-title">WIBRAWL — Afterimage</title>');
 await fs.writeFile(path.join(directory, 'wibrawl-logo.svg'), artwork);
 await sharp(Buffer.from(artwork)).resize(2124).png().toFile(path.join(directory, 'wibrawl-logo-transparent.png'));
