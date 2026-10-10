@@ -58,6 +58,7 @@
 .wibrawl-drawer-collections a { padding:10px 0; text-decoration:none; font-weight:600; }
 .wibrawl-shell .drawer-category .ui-icon { display:none; }
 .wibrawl-home { max-width:1600px; margin-inline:auto; }
+.wibrawl-carousel { touch-action:pan-y pinch-zoom; }
 .wibrawl-hero { display:grid; grid-template-columns:1.08fr 1fr; min-height:560px; position:relative; overflow:hidden; }
 .wibrawl-hero-copy { padding:clamp(44px,5.5vw,84px) clamp(24px,5vw,76px); align-self:center; }
 .wibrawl-kicker { margin:0 0 24px; color:var(--muted); font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.16em; }
@@ -318,3 +319,54 @@
   .wibrawl-admin-preview .wibrawl-hero-stage { height:260px; }
 }
 @media (prefers-reduced-motion:reduce) { .wibrawl-carousel * { animation:none !important; transition:none !important; } }
+/* Wibrawl cinematic edits: native scrolling, deliberate composition, no playback UI. */
+.wb-reel { padding:clamp(32px,5vw,80px) clamp(22px,4vw,64px); background:var(--bg); color:var(--ink); border-top:1px solid var(--line); }
+.wb-reel-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:32px; }
+.wb-reel-heading h2 { font-family:Jost,sans-serif; font-size:clamp(34px,5vw,76px); line-height:1.02; letter-spacing:-.055em; margin:0; font-weight:600; }
+.wb-reel-heading h2 em { font-style:normal; color:var(--accent-text); }
+.wb-reel-description { max-width:460px; color:var(--muted); font-size:15px; line-height:1.6; margin:20px 0 0; }
+.wb-reel-label { white-space:nowrap; font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
+.wb-reel-piece { display:block; min-width:0; color:var(--ink); text-decoration:none; }
+.wb-reel-image { position:relative; overflow:hidden; background:var(--surface-strong); aspect-ratio:4/5; }
+.wb-reel-image img { display:block; width:100%; height:100%; object-fit:cover; transition:transform .35s ease; }
+.wb-reel-piece:hover .wb-reel-image img { transform:scale(1.025); }
+.wb-reel-image>span { position:absolute; top:14px; left:14px; color:#18221a; background:#c3f35e; font-size:12px; padding:6px 10px; }
+.wb-reel-caption { display:flex; align-items:start; justify-content:space-between; gap:14px; padding:16px 0; border-bottom:1px solid var(--line); }
+.wb-reel-caption strong { font-size:14px; font-weight:500; line-height:1.5; }
+.wb-reel-caption>span { font-size:11px; color:var(--muted); white-space:nowrap; padding-top:4px; }
+.wb-filmstrip { display:flex; gap:20px; overflow-x:auto; overscroll-behavior-x:contain; scroll-snap-type:x mandatory; scrollbar-color:var(--accent-text) var(--surface-strong); padding:8px 4px 20px; }
+.wb-filmstrip .wb-reel-piece { flex:0 0 31%; min-width:250px; scroll-snap-align:start; }
+.wb-filmstrip .wb-reel-piece:nth-child(even) { padding-top:42px; }
+.wb-filmstrip .wb-reel-piece:nth-child(even) .wb-reel-image { aspect-ratio:4/4.3; }
+.wb-reel-spotlight { background:var(--surface); }
+.wb-spotlight-stage { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:clamp(28px,6vw,100px); align-items:center; }
+.wb-spotlight-stage>.wb-reel-piece .wb-reel-image { aspect-ratio:5/5.6; }
+.wb-spotlight-copy { min-width:0; }
+.wb-spotlight-number { font-size:clamp(90px,14vw,200px); line-height:.85; display:block; color:var(--accent-text); font-weight:600; letter-spacing:-.08em; margin-bottom:30px; }
+.wb-spotlight-copy h3 { font-size:clamp(24px,3vw,44px); line-height:1.15; letter-spacing:-.03em; margin:0 0 28px; max-width:420px; }
+.wb-spotlight-thumbnails { display:flex; flex-wrap:wrap; gap:10px; margin-top:32px; }
+.wb-spotlight-thumbnails button { background:var(--surface-strong); padding:3px; border:1px solid var(--line); cursor:pointer; width:64px; min-height:80px; }
+.wb-spotlight-thumbnails button[aria-pressed="true"] { border:2px solid var(--accent-text); padding:2px; }
+.wb-spotlight-thumbnails img { display:block; width:100%; height:74px; object-fit:cover; }
+.wb-reel-controls { display:flex; align-items:center; justify-content:space-between; gap:18px; border-top:1px solid var(--line); margin-top:20px; padding-top:20px; }
+.wb-reel-controls button { background:transparent; color:var(--ink); border:1px solid var(--line); padding:12px 18px; min-height:44px; cursor:pointer; font:inherit; font-size:13px; }
+.wb-reel-controls>span { font-size:12px; color:var(--muted); }
+.wb-lookbook { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); gap:36px 28px; align-items:start; }
+.wb-lookbook .wb-reel-piece:nth-child(even) { margin-top:70px; }
+.wb-lookbook .wb-reel-piece:nth-child(3n) .wb-reel-image { aspect-ratio:1.15; }
+.wibrawl-admin-preview .wb-reel { padding:24px; }
+.wibrawl-admin-preview .wb-reel-heading h2 { font-size:clamp(30px,4vw,52px); }
+@media(max-width:700px) {
+ .wb-reel-heading { align-items:start; flex-direction:column; gap:14px; }
+ .wb-reel-label { font-size:10px; }
+ .wb-filmstrip .wb-reel-piece { flex-basis:80%; min-width:0; }
+ .wb-filmstrip .wb-reel-piece:nth-child(even) { padding-top:24px; }
+ .wb-spotlight-stage { grid-template-columns:1fr; gap:28px; }
+ .wb-spotlight-number { font-size:86px; margin-bottom:20px; }
+ .wb-spotlight-thumbnails { margin-top:24px; }
+ .wb-lookbook { gap:26px 14px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .wb-lookbook .wb-reel-piece:nth-child(even) { margin-top:44px; }
+ .wb-lookbook .wb-reel-caption { flex-direction:column; gap:2px; }
+ .wb-lookbook .wb-reel-caption strong { font-size:12px; }
+}
+@media(prefers-reduced-motion:reduce) { .wb-reel-image img { transition:none; } .wb-reel-piece:hover .wb-reel-image img { transform:none; } }

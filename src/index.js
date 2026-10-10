@@ -14,6 +14,7 @@ import { attachCancellationRefunds, cancellationRefundView } from "./cancellatio
 import { purchasedReturnLines, supportLineReferences } from './support-return-access.js';
 import { storefrontCss, storefrontStyleHash, storefrontScriptHashes, storefrontStyleFiles, storefrontDeferredStyleFile, storefrontRoutePreloads, storefrontRouteCriticalStyles } from './storefront-styles.js';
 import { inlineProductImage } from './product-image-bootstrap.js';
+import { normalizeWibrawlReels } from './wibrawl-reels.js';
 import { WIBRAWL_HOSTNAME, WIBRAWL_ORIGIN, STOREFRONT_ORIGINS, WIBRAWL_HERO_LAYOUTS, storefrontForUrl } from './storefront-identity.js';
 
 const SESSION_COOKIE = "mm_session";
@@ -271,7 +272,7 @@ export default {
         if (url.pathname === '/cart' && typeof body === 'string') {
           try {
             const settingsRequest = new Request(new URL('/api/storefront-settings?cache=1', url));
-            const settings = await (await cachedPublicResponse(settingsRequest, ctx, 60, () => getStorefrontSettings(env))).json();
+            const settings = await (await cachedPublicResponse(settingsRequest, ctx, 60, () => getStorefrontSettings(env, false, storefrontForRequest(url)))).json();
             const { renderCartShell } = await import('./cart-shell.jsx');
             const shell = renderCartShell(settings, storefrontForRequest(url));
             const style = storefrontRouteCriticalStyles.cart;
@@ -626,10 +627,10 @@ async function renderPublicPage(request, env, ctx) {
     ? catalogueDataPromise ? catalogueDataPromise.then(data => data ? { rows: data.products, available: true } : getPublicCatalogRows(env, "", storefront))
       : timed('catalog', () => getPublicCatalogRows(env, "", storefront)) : null;
   const homepageSettingsPromise = path === "/"
-    ? timed('settings', () => getStorefrontSettings(env).then(response => response.json())).catch(() => null)
+    ? timed('settings', () => getStorefrontSettings(env, false, storefront).then(response => response.json())).catch(() => null)
     : null;
   const productSettingsPromise = (legacyProductMatch || seoProductMatch || (catalogPath.has(path) && path !== '/')) && !CRAWLER_UA.test(request.headers.get('User-Agent') || '')
-    ? timed('settings', () => getStorefrontSettings(env).then(response => response.json())).catch(() => null)
+    ? timed('settings', () => getStorefrontSettings(env, false, storefront).then(response => response.json())).catch(() => null)
     : null;
   const heroPromise = path === "/" && storefront !== "wibrawl" && !CRAWLER_UA.test(request.headers.get("User-Agent") || "")
     ? timed('hero', () => listHeroSlides(env).then(response => response.json())).catch(() => null)
@@ -1054,18 +1055,20 @@ async function cachedPublicResponse(request, ctx, ttl, producer) {
   return cacheable;
 }
 
-async function invalidateStorefrontCache(request) {
+async function invalidateStorefrontCache(request, storefront = null) {
   const cache = globalThis.caches?.default;
   if (!cache) return;
-  // Settings also affect the homepage's server-rendered sharing metadata.
-  try { await Promise.all(["/api/storefront-settings?cache=1", "/"].map(path => {
-    return Promise.all((path === "/" ? ["crawler", "interactive"] : [null]).map(mode => {
-      const cacheUrl = new URL(path, request.url);
+  const requestUrl = new URL(request.url);
+  const origins = STOREFRONT_ORIGINS.includes(requestUrl.origin)
+    ? storefront === "wibrawl" ? [WIBRAWL_ORIGIN] : storefront === "glamia" ? STOREFRONT_ORIGINS.slice(0, 2) : STOREFRONT_ORIGINS
+    : [requestUrl.origin];
+  try { await Promise.all(origins.flatMap(origin => ["/api/storefront-settings?cache=1", "/"].flatMap(path =>
+    (path === "/" ? ["crawler", "interactive"] : [null]).map(mode => {
+      const cacheUrl = new URL(path, origin);
       cacheUrl.searchParams.set("__glamia_cache", PUBLIC_CACHE_VERSION);
       if (mode) cacheUrl.searchParams.set("__glamia_render", mode);
       return cache.delete(new Request(cacheUrl.toString(), { method: "GET" }));
-    }));
-  })); }
+    })))); }
   catch (error) { console.error("Storefront cache invalidation failed", error); }
 }
 
@@ -1322,7 +1325,7 @@ async function routeApi(request, env, url, ctx) {
     }
     if (request.method === "GET" && path === "/api/employee/admin/storefront-settings") {
       permission("storefront");
-      return getStorefrontSettings(env, true);
+      return getStorefrontSettings(env, true, adminHeroStorefront(request));
     }
     if (request.method === "PUT" && path === "/api/employee/admin/storefront-settings") {
       permission("storefront");
@@ -1334,7 +1337,7 @@ async function routeApi(request, env, url, ctx) {
     }
     if (request.method === "GET" && path === "/api/employee/admin/cinematic-reel") {
       permission("cinematic_reel");
-      return getCinematicReelSettings(env);
+      return getCinematicReelSettings(env, adminHeroStorefront(request));
     }
     if (request.method === "PUT" && path === "/api/employee/admin/cinematic-reel") {
       permission("cinematic_reel");
@@ -1663,7 +1666,7 @@ async function routeApi(request, env, url, ctx) {
   }
 
   if (request.method === "GET" && path === "/api/storefront-settings") {
-    return getStorefrontSettings(env);
+    return getStorefrontSettings(env, false, storefrontForRequest(url));
   }
 
   if (request.method === "POST" && path === "/api/payments/create") {
@@ -2137,7 +2140,7 @@ async function routeApi(request, env, url, ctx) {
 
   if (request.method === "GET" && path === "/api/admin/storefront-settings") {
     requireAdmin(user);
-    return getStorefrontSettings(env, true);
+    return getStorefrontSettings(env, true, adminHeroStorefront(request));
   }
 
   if (request.method === "PUT" && path === "/api/admin/storefront-settings") {
@@ -2167,7 +2170,7 @@ async function routeApi(request, env, url, ctx) {
 
   if (request.method === "GET" && path === "/api/admin/cinematic-reel") {
     requireAdmin(user);
-    return getCinematicReelSettings(env);
+    return getCinematicReelSettings(env, adminHeroStorefront(request));
   }
 
   if (request.method === "PUT" && path === "/api/admin/cinematic-reel") {
@@ -3768,7 +3771,7 @@ function normalizeSeoImage(value, fallback = `${CANONICAL_ORIGIN}/glamia-social-
   return fallback;
 }
 
-async function storefrontSettingsObject(env, includePrivate = false) {
+async function storefrontSettingsObject(env, includePrivate = false, storefront = "glamia") {
   const { results } = await env.DB.prepare("SELECT setting_key, value_json FROM storefront_settings").all();
   const raw = Object.fromEntries(results.map(row => [row.setting_key, parseSettingObject(row.value_json)]));
   const announcementTextValue = announcementText(raw.announcement?.text, STOREFRONT_DEFAULTS.announcement.text)
@@ -3804,7 +3807,7 @@ async function storefrontSettingsObject(env, includePrivate = false) {
     country_code: String(raw.support_contact?.country_code || STOREFRONT_DEFAULTS.support_contact.country_code),
     phone_number: includePrivate || supportContactVisible ? String(raw.support_contact?.phone_number || "") : ""
   };
-  const socials = normalizeSocialLinks(raw.socials, STOREFRONT_DEFAULTS.socials);
+  const socials = normalizeSocialLinks(raw[storefront === "wibrawl" ? "wibrawl_socials" : "socials"], STOREFRONT_DEFAULTS.socials);
   const rawCinematicReel = raw.cinematic_reel && typeof raw.cinematic_reel === "object" ? raw.cinematic_reel : {};
   const cinematicReel = {
     visible: rawCinematicReel.visible === undefined ? STOREFRONT_DEFAULTS.cinematic_reel.visible : Boolean(rawCinematicReel.visible),
@@ -3838,6 +3841,7 @@ async function storefrontSettingsObject(env, includePrivate = false) {
     customer_experience: customerPromises(raw.customer_experience),
     socials,
     cinematic_reel: cinematicReel,
+    ...(storefront === "wibrawl" ? { cinematic_reels: normalizeWibrawlReels(raw.wibrawl_cinematic_reels?.reels) } : {}),
     seo: {
       title: heroText(raw.seo?.title, "Glamia — Curated apparel for every wardrobe", 120),
       description: heroText(raw.seo?.description, "Discover refined everyday pieces, occasionwear, and accessories from independent ateliers.", 220),
@@ -3846,15 +3850,18 @@ async function storefrontSettingsObject(env, includePrivate = false) {
   };
 }
 
-async function getStorefrontSettings(env, includePrivate = false) {
-  const settings = await storefrontSettingsObject(env, includePrivate);
+async function getStorefrontSettings(env, includePrivate = false, storefront = "glamia") {
+  const settings = await storefrontSettingsObject(env, includePrivate, storefront);
+  if (storefront === "wibrawl") delete settings.cinematic_reel;
   if (!includePrivate) delete settings.fulfillment;
   return json(settings);
 }
 
 async function updateStorefrontSettings(request, env) {
+  const storefront = adminHeroStorefront(request);
   const body = await readJson(request);
-  const current = await storefrontSettingsObject(env, true);
+  if (storefront === "wibrawl" && body.cinematic_reel !== undefined) throw httpError("Edit Wibrawl reels in Cinematic Reel Studio", 400);
+  const current = await storefrontSettingsObject(env, true, storefront);
   const nextAnnouncement = body.announcement && typeof body.announcement === "object"
     ? body.announcement
     : current.announcement;
@@ -3940,10 +3947,10 @@ async function updateStorefrontSettings(request, env) {
     env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
       .bind("support_contact", JSON.stringify(supportContact)),
     env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
-      .bind("socials", JSON.stringify(socials)),
+      .bind(storefront === "wibrawl" ? "wibrawl_socials" : "socials", JSON.stringify(socials)),
     env.DB.prepare("INSERT INTO storefront_settings(setting_key,value_json) VALUES(?,?) ON CONFLICT(setting_key) DO UPDATE SET value_json=excluded.value_json").bind('customer_experience',JSON.stringify(experience)),
-    env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
-      .bind("cinematic_reel", JSON.stringify(cinematicReel)),
+    ...(storefront === "glamia" && body.cinematic_reel !== undefined ? [env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
+      .bind("cinematic_reel", JSON.stringify(cinematicReel))] : []),
     env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
       .bind("seo", JSON.stringify(seo))
   ]);
@@ -3962,13 +3969,28 @@ async function updateStorefrontSettings(request, env) {
   });
 }
 
-async function getCinematicReelSettings(env) {
-  const settings = await storefrontSettingsObject(env, true);
-  return json({ cinematic_reel: settings.cinematic_reel });
+async function getCinematicReelSettings(env, storefront = "glamia") {
+  const settings = await storefrontSettingsObject(env, true, storefront);
+  return json(storefront === "wibrawl" ? { cinematic_reels: settings.cinematic_reels } : { cinematic_reel: settings.cinematic_reel });
 }
 
 async function updateCinematicReelSettings(request, env) {
+  const storefront = adminHeroStorefront(request);
   const body = await readJson(request);
+  if (storefront === "wibrawl") {
+    let reels;
+    try { reels = normalizeWibrawlReels(body.cinematic_reels, true); }
+    catch (error) { throw httpError(error.message, 400); }
+    const ids = [...new Set(reels.flatMap(reel => reel.product_ids))];
+    if (ids.length) {
+      const { results } = await env.DB.prepare(`SELECT id FROM products WHERE status = 'live' AND storefront_visibility IN ('wibrawl', 'both') AND id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all();
+      if (results.length !== ids.length) throw httpError("Select only live Wibrawl or shared products", 400);
+    }
+    await env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
+      .bind("wibrawl_cinematic_reels", JSON.stringify({ reels })).run();
+    await invalidateStorefrontCache(request, storefront);
+    return json({ ok: true, cinematic_reels: reels });
+  }
   const current = await storefrontSettingsObject(env, true);
   const input = body.cinematic_reel && typeof body.cinematic_reel === "object" ? body.cinematic_reel : body;
   const currentReel = current.cinematic_reel || STOREFRONT_DEFAULTS.cinematic_reel;
@@ -3982,6 +4004,7 @@ async function updateCinematicReelSettings(request, env) {
   };
   await env.DB.prepare("INSERT INTO storefront_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP")
     .bind("cinematic_reel", JSON.stringify(cinematicReel)).run();
+  await invalidateStorefrontCache(request, storefront);
   return json({ ok: true, cinematic_reel: cinematicReel });
 }
 

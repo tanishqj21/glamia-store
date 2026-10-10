@@ -32,6 +32,28 @@
       "_commerce-CtZoLRIQ.js"
     ]
   },
+  "_CreditsBalance-Ce_qQhWM.js": {
+    "file": "assets/CreditsBalance-Ce_qQhWM.js",
+    "name": "CreditsBalance",
+    "imports": [
+      "_jsx-runtime-D3jfb0Ew.js",
+      "_api-B3Y_V1MI.js",
+      "_commerce-CtZoLRIQ.js"
+    ]
+  },
+  "_Header-CMl0aIdF.js": {
+    "file": "assets/Header-CMl0aIdF.js",
+    "name": "Header",
+    "imports": [
+      "_jsx-runtime-D3jfb0Ew.js",
+      "_api-B3Y_V1MI.js",
+      "_commerce-CtZoLRIQ.js",
+      "_Icon-QcDBXQVF.js",
+      "_workspaceAccess-Kn-t2JnF.js",
+      "_CreditsBalance-Ce_qQhWM.js",
+      "_storefront-identity-B8BUjp8N.js"
+    ]
+  },
   "_Icon-QcDBXQVF.js": {
     "file": "assets/Icon-QcDBXQVF.js",
     "name": "Icon",
@@ -61,8 +83,8 @@
       "_jsx-runtime-D3jfb0Ew.js"
     ]
   },
-  "_ReturnStatusCard-CExFTDgF.js": {
-    "file": "assets/ReturnStatusCard-CExFTDgF.js",
+  "_ReturnStatusCard-BfipPG6P.js": {
+    "file": "assets/ReturnStatusCard-BfipPG6P.js",
     "name": "ReturnStatusCard",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
@@ -117,8 +139,12 @@
     "file": "assets/storefront-identity-B8BUjp8N.js",
     "name": "storefront-identity"
   },
+  "_workspaceAccess-Kn-t2JnF.js": {
+    "file": "assets/workspaceAccess-Kn-t2JnF.js",
+    "name": "workspaceAccess"
+  },
   "index.html": {
-    "file": "assets/index-CI80-a9O.js",
+    "file": "assets/index-BT02yWrQ.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -126,7 +152,7 @@
       "src/main.jsx"
     ],
     "css": [
-      "assets/index-BnzRT5ly.css"
+      "assets/index-DDINoutD.css"
     ]
   },
   "src/components/AboutPage.jsx": {
@@ -140,7 +166,7 @@
     ]
   },
   "src/components/AccountPages.jsx": {
-    "file": "assets/AccountPages-ovmM_mtu.js",
+    "file": "assets/AccountPages-D-ds9V09.js",
     "name": "AccountPages",
     "src": "src/components/AccountPages.jsx",
     "isDynamicEntry": true,
@@ -154,7 +180,7 @@
       "_Reviews-CIzrLeNA.js",
       "_Icon-QcDBXQVF.js",
       "_CancellationRefundCard-C3S8TZgx.js",
-      "_ReturnStatusCard-CExFTDgF.js",
+      "_ReturnStatusCard-BfipPG6P.js",
       "_OrderDetails-CySZ0Zk3.js",
       "_AccountLayout-C1boTaS1.js"
     ]
@@ -171,7 +197,7 @@
     ]
   },
   "src/components/AdminCare.jsx": {
-    "file": "assets/AdminCare-DM01pQie.js",
+    "file": "assets/AdminCare-mBiaHEdP.js",
     "name": "AdminCare",
     "src": "src/components/AdminCare.jsx",
     "isDynamicEntry": true,
@@ -183,7 +209,7 @@
       "_SupportOrderContext-3OOpGH4f.js",
       "_Icon-QcDBXQVF.js",
       "_CancellationRefundCard-C3S8TZgx.js",
-      "_ReturnStatusCard-CExFTDgF.js",
+      "_ReturnStatusCard-BfipPG6P.js",
       "src/components/AdminWorkspace.jsx",
       "src/main.jsx"
     ]
@@ -222,7 +248,7 @@
     ]
   },
   "src/components/AdminMerchandising.jsx": {
-    "file": "assets/AdminMerchandising-Dy_6IMWw.js",
+    "file": "assets/AdminMerchandising-KuhH80a-.js",
     "name": "AdminMerchandising",
     "src": "src/components/AdminMerchandising.jsx",
     "isDynamicEntry": true,
@@ -236,7 +262,7 @@
     ]
   },
   "src/components/AdminOperations.jsx": {
-    "file": "assets/AdminOperations-EHu6dsHN.js",
+    "file": "assets/AdminOperations-MdTB2rZH.js",
     "name": "AdminOperations",
     "src": "src/components/AdminOperations.jsx",
     "isDynamicEntry": true,
@@ -246,12 +272,12 @@
       "_commerce-CtZoLRIQ.js",
       "_CancellationRefundCard-C3S8TZgx.js",
       "_OrderDetails-CySZ0Zk3.js",
-      "src/components/AdminWorkspace.jsx",
-      "src/main.jsx"
+      "_workspaceAccess-Kn-t2JnF.js",
+      "src/components/AdminWorkspace.jsx"
     ]
   },
   "src/components/AdminSystemViews.jsx": {
-    "file": "assets/AdminSystemViews-Bw0CFNI8.js",
+    "file": "assets/AdminSystemViews-BiYbfcsV.js",
     "name": "AdminSystemViews",
     "src": "src/components/AdminSystemViews.jsx",
     "isDynamicEntry": true,
@@ -259,11 +285,11 @@
       "_jsx-runtime-D3jfb0Ew.js",
       "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
-      "src/main.jsx"
+      "_workspaceAccess-Kn-t2JnF.js"
     ]
   },
   "src/components/AdminWorkspace.jsx": {
-    "file": "assets/AdminWorkspace-DzfgYeGS.js",
+    "file": "assets/AdminWorkspace--7hJ8IDB.js",
     "name": "AdminWorkspace",
     "src": "src/components/AdminWorkspace.jsx",
     "isDynamicEntry": true,
@@ -275,9 +301,9 @@
       "_Icon-QcDBXQVF.js",
       "_CancellationRefundCard-C3S8TZgx.js",
       "_OrderDetails-CySZ0Zk3.js",
+      "_workspaceAccess-Kn-t2JnF.js",
       "_storefront-identity-B8BUjp8N.js",
-      "_colours-CegqpAhr.js",
-      "src/main.jsx"
+      "_colours-CegqpAhr.js"
     ],
     "dynamicImports": [
       "src/components/BulkListingView.jsx",
@@ -294,11 +320,11 @@
       "src/components/AdminAbout.jsx"
     ],
     "css": [
-      "assets/AdminWorkspace-eo1_p0lA.css"
+      "assets/AdminWorkspace-DLXAPaN2.css"
     ]
   },
   "src/components/BulkListingView.jsx": {
-    "file": "assets/BulkListingView-BVkT0nLb.js",
+    "file": "assets/BulkListingView-qvpMbVw2.js",
     "name": "BulkListingView",
     "src": "src/components/BulkListingView.jsx",
     "isDynamicEntry": true,
@@ -309,7 +335,7 @@
     ]
   },
   "src/components/CartPage.jsx": {
-    "file": "assets/CartPage-D6rfLDkD.js",
+    "file": "assets/CartPage-D5JzRJ7t.js",
     "name": "CartPage",
     "src": "src/components/CartPage.jsx",
     "isDynamicEntry": true,
@@ -325,7 +351,7 @@
     ]
   },
   "src/components/CheckoutPage.jsx": {
-    "file": "assets/CheckoutPage-ByVtfcqj.js",
+    "file": "assets/CheckoutPage-Wrvx-wpP.js",
     "name": "CheckoutPage",
     "src": "src/components/CheckoutPage.jsx",
     "isDynamicEntry": true,
@@ -386,7 +412,7 @@
     ]
   },
   "src/components/ProductDetailPage.jsx": {
-    "file": "assets/ProductDetailPage-CtFA9rnF.js",
+    "file": "assets/ProductDetailPage-Ci8tqoio.js",
     "name": "ProductDetailPage",
     "src": "src/components/ProductDetailPage.jsx",
     "isDynamicEntry": true,
@@ -396,6 +422,7 @@
       "_commerce-CtZoLRIQ.js",
       "_Reviews-CIzrLeNA.js",
       "_Icon-QcDBXQVF.js",
+      "_Header-CMl0aIdF.js",
       "_colours-CegqpAhr.js",
       "_customer-promises-XpOAerbQ.js",
       "_ProductGuarantees-qxe_2eJD.js",
@@ -413,7 +440,7 @@
     ]
   },
   "src/components/QuickView.jsx": {
-    "file": "assets/QuickView-Bi5PJPhG.js",
+    "file": "assets/QuickView-CRgehG5V.js",
     "name": "QuickView",
     "src": "src/components/QuickView.jsx",
     "isDynamicEntry": true,
@@ -437,7 +464,7 @@
     ]
   },
   "src/components/StoreCredits.jsx": {
-    "file": "assets/StoreCredits-CdbicD7Z.js",
+    "file": "assets/StoreCredits-6SvqIACt.js",
     "name": "StoreCredits",
     "src": "src/components/StoreCredits.jsx",
     "isDynamicEntry": true,
@@ -446,7 +473,7 @@
       "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_AccountLayout-C1boTaS1.js",
-      "src/main.jsx"
+      "_CreditsBalance-Ce_qQhWM.js"
     ]
   },
   "src/components/TaxComplianceView.jsx": {
@@ -461,7 +488,7 @@
     ]
   },
   "src/main.jsx": {
-    "file": "assets/main-CalRwUgZ.js",
+    "file": "assets/main-DhxZXoYb.js",
     "name": "main",
     "src": "src/main.jsx",
     "isDynamicEntry": true,
@@ -471,6 +498,8 @@
       "_api-B3Y_V1MI.js",
       "_commerce-CtZoLRIQ.js",
       "_Icon-QcDBXQVF.js",
+      "_Header-CMl0aIdF.js",
+      "_workspaceAccess-Kn-t2JnF.js",
       "_storefront-identity-B8BUjp8N.js"
     ],
     "dynamicImports": [
@@ -489,19 +518,19 @@
     ]
   },
   "glamia-product-styles.css": {
-    "file": "assets/product-styles-abf9faf0.css",
+    "file": "assets/product-styles-3edf00ea.css",
     "src": "glamia-product-styles.css"
   },
   "glamia-catalogue-styles.css": {
-    "file": "assets/catalogue-styles-310c7e06.css",
+    "file": "assets/catalogue-styles-d34b75dd.css",
     "src": "glamia-catalogue-styles.css"
   },
   "glamia-cart-styles.css": {
-    "file": "assets/cart-styles-48f8b0b2.css",
+    "file": "assets/cart-styles-d1ddebfa.css",
     "src": "glamia-cart-styles.css"
   },
   "glamia-homepage-styles.css": {
-    "file": "assets/homepage-styles-310c7e06.css",
+    "file": "assets/homepage-styles-d34b75dd.css",
     "src": "glamia-homepage-styles.css"
   }
 }

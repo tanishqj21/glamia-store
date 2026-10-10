@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { collectionNames, WIBRAWL_HERO_LAYOUTS } from '../../../src/storefront-identity.js';
 import { Link } from './Header';
 
 export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
   const [index, setIndex] = useState(0);
-  const [paused, setPaused] = useState(false);
+  const swipe = useRef(null);
+  const suppressClickUntil = useRef(0);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -19,19 +20,34 @@ export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
   }, []);
   useEffect(() => { setIndex(0); }, [slides]);
   useEffect(() => {
-    if (slides.length < 2 || paused || reducedMotion || hovered || focused || !visible) return;
-    const timer = window.setInterval(() => setIndex(current => (current + 1) % slides.length), 6000);
-    return () => window.clearInterval(timer);
-  }, [slides.length, paused, reducedMotion, hovered, focused, visible]);
+    if (slides.length < 2 || reducedMotion || hovered || focused || !visible) return;
+    const timer = window.setTimeout(() => setIndex(current => (current + 1) % slides.length), 6000);
+    return () => window.clearTimeout(timer);
+  }, [slides.length, index, reducedMotion, hovered, focused, visible]);
   const slide = slides[index] || slides[0];
   if (!slide) return null;
   const layout = WIBRAWL_HERO_LAYOUTS.includes(slide.layout) ? slide.layout : 'poster';
   const campaign = slide.imagery === 'campaign';
-  const select = next => { setPaused(true); setIndex((next + slides.length) % slides.length); };
+  const select = next => setIndex((next + slides.length) % slides.length);
   return <section className="wibrawl-carousel" aria-label="Wibrawl featured collections" aria-roledescription="carousel"
-    onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
-    onFocusCapture={() => setFocused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}>
-    <div className={`wibrawl-hero wibrawl-edited-hero wibrawl-layout-${layout} ${slide.title.length > 46 ? 'is-long-title' : ''}`} data-layout={layout} key={slide.id} role="group" aria-roledescription="slide" aria-live={paused ? 'polite' : 'off'} aria-label={`${index + 1} of ${slides.length}`}>
+    onPointerEnter={event => { if (event.pointerType === 'mouse') setHovered(true); }} onPointerLeave={event => { if (event.pointerType === 'mouse') setHovered(false); }}
+    onFocusCapture={event => setFocused(event.target.matches(':focus-visible'))} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}
+    onPointerDownCapture={event => {
+      suppressClickUntil.current = 0;
+      if (slides.length < 2 || !['touch', 'pen'].includes(event.pointerType) || event.isPrimary === false || event.target.closest('button')) return;
+      swipe.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    }}
+    onPointerCancelCapture={() => { swipe.current = null; }}
+    onPointerUpCapture={event => {
+      const gesture = swipe.current; swipe.current = null;
+      if (!gesture || gesture.id !== event.pointerId) return;
+      const x = event.clientX - gesture.x, y = event.clientY - gesture.y;
+      if (Math.abs(x) < 50 || Math.abs(x) <= Math.abs(y) * 1.3) return;
+      suppressClickUntil.current = Date.now() + 400;
+      select(index + (x < 0 ? 1 : -1));
+    }}
+    onClickCapture={event => { if (Date.now() < suppressClickUntil.current) { event.preventDefault(); event.stopPropagation(); suppressClickUntil.current = 0; } }}>
+    <div className={`wibrawl-hero wibrawl-edited-hero wibrawl-layout-${layout} ${slide.title.length > 46 ? 'is-long-title' : ''}`} data-layout={layout} key={slide.id} role="group" aria-roledescription="slide" aria-live={focused ? 'polite' : 'off'} aria-label={`${index + 1} of ${slides.length}`}>
       <div className="wibrawl-hero-copy">
         <p className="wibrawl-kicker">{slide.eyebrow}</p>
         {preview ? <h3 className="wibrawl-hero-title">{slide.title}</h3> : <h1 id="wibrawl-title" className="wibrawl-hero-title">{slide.title}</h1>}
@@ -51,7 +67,6 @@ export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
       <button type="button" onClick={() => select(index - 1)} aria-label="Previous hero slide">Prev</button>
       <div className="wibrawl-carousel-pages" role="group" aria-label="Choose hero slide">{slides.map((item, position) => <button type="button" key={item.id} aria-label={`Show hero slide ${position + 1}`} aria-current={position === index ? 'true' : undefined} onClick={() => select(position)}>{position + 1}</button>)}</div>
       <button type="button" onClick={() => select(index + 1)} aria-label="Next hero slide">Next</button>
-      {!reducedMotion && <button type="button" onClick={() => setPaused(current => !current)}>{paused ? 'Play carousel' : 'Pause carousel'}</button>}
     </div>}
   </section>;
 }
