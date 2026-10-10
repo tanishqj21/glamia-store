@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 352 288" role="img" aria-labelledby="title description">
+<title id="title">WiBrawl — Mirror Circuit, Cutback</title>
+<desc id="description">One continuous closed circuit built from a normal angular B on the right and its exact horizontal mirror on the left. The two halves join at the top and bottom. Transparent background.</desc>
+<path d="M176 40L241 40Q248 40 252 46L284 80Q289 87 285 94L267 117Q263 123 255 123L237 123Q228 123 233 132L301 179Q306 184 303 193L286 230Q282 238 274 239L188 248L176 248L164 248L78 239Q70 238 66 230L49 193Q46 184 51 179L119 132Q124 123 115 123L97 123Q89 123 85 117L67 94Q63 87 68 80L100 46Q104 40 111 40L176 40Z" fill="none" stroke="#17191C" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
