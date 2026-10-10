@@ -16,7 +16,11 @@ function Piece({ product, number, onNavigate, className = '' }) {
   </Link>;
 }
 
-function Reel({ settings, products, onNavigate, preview }) {
+function EditableCopy({ field, label, value, onEditField }) {
+  return onEditField ? <button type="button" className="wb-preview-edit" aria-label={`Edit ${label}`} onClick={() => onEditField(field)}>{value || `Add ${label}`}</button> : value;
+}
+
+function Reel({ settings, products, onNavigate, preview, onEditField }) {
   const headingId = useId();
   const [index, setIndex] = useState(0);
   const pieces = reelProducts(products, settings);
@@ -24,13 +28,13 @@ function Reel({ settings, products, onNavigate, preview }) {
   const current = index % pieces.length;
   const active = pieces[current];
   return <section className={`wb-reel wb-reel-${settings.layout}`} data-reel={settings.id} aria-labelledby={headingId}>
-    <div className="wb-reel-heading"><div><p className="wibrawl-kicker">{settings.eyebrow}</p><h2 id={headingId}>{settings.title}<br /><em>{settings.emphasis}</em></h2>{settings.description && <p className="wb-reel-description">{settings.description}</p>}</div><span className="wb-reel-label">W. / {settings.layout}</span></div>
+    <div className="wb-reel-heading"><div><p className="wibrawl-kicker"><EditableCopy field="eyebrow" label="reel eyebrow" value={settings.eyebrow} onEditField={onEditField} /></p><h2 id={headingId}><EditableCopy field="title" label="reel headline" value={settings.title} onEditField={onEditField} /><br /><em><EditableCopy field="emphasis" label="reel emphasis" value={settings.emphasis} onEditField={onEditField} /></em></h2>{(settings.description || onEditField) && <p className="wb-reel-description"><EditableCopy field="description" label="reel description" value={settings.description} onEditField={onEditField} /></p>}</div><span className="wb-reel-label">W. / {settings.layout}</span></div>
     {settings.layout === 'filmstrip' && <div className="wb-filmstrip" tabIndex={0} role="region" aria-label="Swipe through the Wibrawl edit">{pieces.map((product, position) => <Piece key={product.id} product={product} number={position + 1} onNavigate={onNavigate} />)}</div>}
     {settings.layout === 'spotlight' && <><div className="wb-spotlight-stage"><Piece product={active} number={current + 1} onNavigate={onNavigate} /><div className="wb-spotlight-copy"><span className="wb-spotlight-number" aria-hidden="true">{String(current + 1).padStart(2, '0')}</span><p className="wibrawl-kicker">A closer look</p><h3>{active.name}</h3><Link className="wibrawl-secondary-action" href={productUrl(active)} onNavigate={onNavigate}>Explore this piece</Link><div className="wb-spotlight-thumbnails" role="group" aria-label="Choose spotlight piece">{pieces.map((product, position) => <button key={product.id} type="button" aria-label={`Spotlight ${product.name}`} aria-pressed={current === position} onClick={() => setIndex(position)}><img src={product.thumbnail_url || product.image_url} alt="" loading="lazy" width="64" height="80" /></button>)}</div></div></div>{pieces.length > 1 && <div className="wb-reel-controls"><button type="button" onClick={() => setIndex((current - 1 + pieces.length) % pieces.length)}>Prev piece</button><span aria-live="polite">{current + 1} / {pieces.length}</span><button type="button" onClick={() => setIndex((current + 1) % pieces.length)}>Next piece</button></div>}</>}
     {settings.layout === 'lookbook' && <div className="wb-lookbook">{pieces.map((product, position) => <Piece key={product.id} product={product} number={position + 1} onNavigate={onNavigate} />)}</div>}
   </section>;
 }
 
-export function WibrawlReels({ reels = [], products = [], onNavigate = href => window.location.assign(href), preview = false }) {
-  return <>{reels.map(settings => <Reel key={settings.id} settings={settings} products={products} onNavigate={onNavigate} preview={preview} />)}</>;
+export function WibrawlReels({ reels = [], products = [], onNavigate = href => window.location.assign(href), preview = false, onEditField }) {
+  return <>{reels.map(settings => <Reel key={settings.id} settings={settings} products={products} onNavigate={onNavigate} preview={preview} onEditField={preview ? onEditField : undefined} />)}</>;
 }

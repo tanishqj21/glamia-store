@@ -81,18 +81,46 @@ try {
   assert.deepEqual(getReels().map(reel => reel.id), ['lookbook', 'filmstrip', 'spotlight']);
 
   await studio.getByRole('button', { name: 'Preview Spotlight', exact: true }).click();
+  await studio.getByRole('button', { name: 'Edit reel headline', exact: true }).click();
+  assert.equal(await studio.getByLabel('Reel headline', { exact: true }).evaluate(node => node === document.activeElement), true);
   await studio.getByLabel('Reel headline', { exact: true }).fill('YOUR NEXT FAVOURITE.');
+  assert.equal(await studio.getByRole('button', { name: 'Edit reel headline', exact: true }).innerText(), 'YOUR NEXT FAVOURITE.');
+  // A queue visibility update must preserve the draft being edited.
+  await studio.getByRole('checkbox', { name: 'Show Filmstrip', exact: true }).uncheck(); await idle();
+  assert.equal(await studio.getByLabel('Reel headline', { exact: true }).inputValue(), 'YOUR NEXT FAVOURITE.');
+  await studio.getByRole('checkbox', { name: 'Show Filmstrip', exact: true }).check(); await idle();
+  await studio.getByRole('button', { name: 'Edit reel description', exact: true }).click();
+  assert.equal(await studio.getByLabel('Reel description', { exact: true }).evaluate(node => node === document.activeElement), true);
   await studio.locator('.merch-product-options label').filter({ hasText: 'Another Wibrawl tee' }).click();
+  assert.equal(await studio.locator('.merch-preview-dock .wb-reel-piece').count(), 1, 'Product selection updates the live preview before saving');
+  await studio.locator('.merch-preview-dock .wb-reel-piece').click();
+  assert.ok(page.url().includes('/admin/hero'), 'Preview product selection keeps the admin in the editor');
   await studio.getByRole('button', { name: 'Save reel', exact: true }).click(); await idle();
   for (const viewport of [{width:1440,height:950},{width:390,height:844}]) {
     await page.setViewportSize(viewport);
+    await studio.locator('.wb-reel-edit-workspace').evaluate(node => node.scrollIntoView({block:'start',behavior:'instant'}));
     const feedback = await studio.locator('.reel-studio-feedback').boundingBox();
     const preview = await studio.locator('.merch-preview-dock').boundingBox();
     const queue = await studio.locator('.hero-slide-queue').boundingBox();
     assert.ok(feedback.height < 90, 'Saved feedback is compact');
     assert.ok(preview.y >= feedback.y + feedback.height, 'The preview follows the saved message');
     assert.ok(queue.y >= preview.y + preview.height, 'The order queue follows the preview');
-    assert.ok(preview.width > (await studio.boundingBox()).width - 60, 'The reel preview spans the studio width');
+    const editor = await studio.locator('.wb-reel-edit-workspace > form').boundingBox();
+    if(viewport.width > 1100) {
+      assert.ok(preview.x >= editor.x + editor.width, 'Editor and preview are side by side');
+      assert.ok(Math.abs(preview.y - editor.y) < 2, 'Editor and preview start together: '+JSON.stringify({preview,editor}));
+    } else {
+      assert.ok(editor.y >= preview.y + preview.height, 'Mobile editor is directly below the compact preview');
+    }
+    const scroll = await studio.locator('.wb-reel-preview-scroll').boundingBox();
+    assert.ok(scroll.height <= viewport.height * .61, 'Preview fits within the screen');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false);
+    for(const theme of ['gaming','sports']) {
+      await studio.getByLabel('Reel preview theme').selectOption(theme);
+      const previewAxe=await new AxeBuilder({page}).include('.wb-reel-edit-workspace').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();
+      assert.deepEqual(previewAxe.violations.map(violation=>violation.id),[],`Editable reel preview ${viewport.width} ${theme}`);
+    }
+    await studio.getByLabel('Reel preview theme').selectOption('gaming');
     await studio.locator('.merch-preview-dock').scrollIntoViewIfNeeded();
     await page.locator('.site-header').evaluate(node => node.style.visibility = 'hidden');
     await studio.screenshot({path:output + '/admin-feedback-' + viewport.width + '.png'});

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
 const base = process.env.WIBRAWL_HEADER_TEST_URL || 'http://127.0.0.1:5174';
@@ -19,6 +19,7 @@ try {
     });
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if(message.type()==='error' && /Content Security Policy/i.test(message.text()))errors.push(message.text()); });
     await page.goto(base);
     const link = page.locator('.quick-links .wibrawl-store-link');
     await link.waitFor();
@@ -32,12 +33,26 @@ try {
       assert.deepEqual(await link.boundingBox(), before, 'Hover does not move the link');
       const style = await link.evaluate(node => {
         const css = getComputedStyle(node);
-        return { color: css.color, background: css.backgroundColor, radius: css.borderRadius, halo: getComputedStyle(node, '::before').opacity };
+        const pill = node.querySelector('.wibrawl-store-pill');
+        return { color: css.color, background: css.backgroundColor, radius: css.borderRadius, halo: getComputedStyle(pill, '::before').opacity, inner: getComputedStyle(pill).backgroundColor, textCase: css.textTransform };
       });
-      assert.equal(style.background, 'rgb(25, 30, 27)');
+      assert.equal(style.background, 'rgb(37, 46, 39)');
       assert.equal(style.color, 'rgb(241, 244, 235)');
       assert.equal(style.radius, '999px');
-      assert.equal(style.halo, '0.65');
+      assert.equal(style.halo, '1');
+      assert.equal(style.inner, 'rgb(57, 71, 59)');
+      assert.equal(style.textCase, 'none');
+      // Production paints the server header before the interactive client mounts.
+      await expect.poll(async()=>{
+        await link.hover({position:{x:8,y:22}});
+        const leftAngle=await link.evaluate(node=>parseFloat(node.style.getPropertyValue('--wibrawl-glow-angle')));
+        await link.hover({position:{x:before.width-8,y:22}});
+        const rightAngle=await link.evaluate(node=>parseFloat(node.style.getPropertyValue('--wibrawl-glow-angle')));
+        return Math.abs(leftAngle-rightAngle);
+      },{timeout:15000,message:'The edge highlight follows the pointer from left to right'}).toBeGreaterThan(150);
+      const rightAngle=await link.evaluate(node=>parseFloat(node.style.getPropertyValue('--wibrawl-glow-angle')));
+      assert.equal(await link.locator('.wibrawl-store-pill').evaluate(node=>parseFloat(getComputedStyle(node).getPropertyValue('--wibrawl-glow-angle'))),rightAngle);
+      await link.hover({position:{x:8,y:12}});
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2), false);
       const best = await page.getByRole('link', { name: 'Best sellers', exact: true }).boundingBox();
       const mark = await page.locator('.site-header .wordmark').boundingBox();

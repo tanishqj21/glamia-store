@@ -12,6 +12,13 @@ function Link({ href, onNavigate, children, className = "", ...props }) {
   return <a {...props} className={className} href={href} onClick={(event) => { props.onClick?.(event); if (!event.defaultPrevented && !event.button && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !props.target && href.startsWith("/")) { event.preventDefault(); onNavigate(href); } }}>{children}</a>;
 }
 
+function moveWibrawlGlow(event) {
+  if (event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
+  const bounds = event.currentTarget.getBoundingClientRect();
+  const angle = Math.atan2(event.clientY - bounds.y - bounds.height / 2, event.clientX - bounds.x - bounds.width / 2) * 180 / Math.PI + 90;
+  event.currentTarget.style.setProperty('--wibrawl-glow-angle', `${angle}deg`);
+}
+
 function productSubcategory(product) { return String(product?.subcategory || "").trim(); }
 function productSubSubcategory(product) { return String(product?.sub_subcategory || product?.subsubcategory || product?.subSubcategory || "").trim(); }
 function searchMatches(product, query) { const term = String(query || "").trim().toLowerCase(); return !term || `${product.name || ""} ${product.brand || ""} ${product.color || ""}`.toLowerCase().includes(term); }
@@ -183,7 +190,7 @@ function Header({ onNavigate, query, setQuery, dark, setDark, wibrawlMode = fals
     {!adminMode && <AnnouncementBar announcement={storefront?.announcement} />}
     <header className={`site-header ${adminMode ? "admin-site-header" : ""}`}>
       {!adminMode && <button className="menu-button" aria-label="Open menu" aria-expanded={menuOpen} aria-controls="shop-menu" onClick={toggleMenu}><span /><span /><span /></button>}
-      {!adminMode && !wibrawlMode && <nav className="quick-links" aria-label="Collections">{collectionLinks.map(([href, label]) => <Link key={href} href={href} onNavigate={onNavigate}>{label}</Link>)}{!wibrawlMode && <a className="wibrawl-store-link" href={WIBRAWL_ORIGIN}>Wibrawl</a>}</nav>}
+      {!adminMode && !wibrawlMode && <nav className="quick-links" aria-label="Collections">{collectionLinks.map(([href, label]) => <Link key={href} href={href} onNavigate={onNavigate}>{label}</Link>)}{!wibrawlMode && <a className="wibrawl-store-link" href={WIBRAWL_ORIGIN} onPointerMove={moveWibrawlGlow}><span className="wibrawl-store-pill"><span className="wibrawl-link-mark" aria-hidden="true">W.</span>Wibrawl</span></a>}</nav>}
       <Link className={`wordmark ${wibrawlMode ? "wibrawl-wordmark" : ""}`} href="/" onNavigate={onNavigate}>{wibrawlMode ? <><span className="wibrawl-mark" aria-hidden="true">WB</span><span>WIBRAWL</span></> : <><img src="/glamia-g-mark-96.webp" alt="G" width="42" height="42" /><span>LAMIA</span></>}<span className="sr-only"> home</span></Link>
       <div className="header-tools">
         {!adminMode && <>
