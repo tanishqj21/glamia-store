@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 256" role="img" aria-labelledby="logo-title logo-description">
+<title id="logo-title">Wibrawl — WB Club</title>
+<desc id="logo-description">A compact WB monogram drawn from custom rounded outlines. The W and B meet at a shared upright, with two curved counters in the B. Single-colour filled vector paths on a transparent background.</desc>
+<g fill="#B84430"><g transform="translate(22 0) skewX(-7)">
+<path d="M22 51H53L70 143L92 92Q94 87 100 87H114Q120 87 122 93L141 143L158 51H189L156 195Q154 205 144 205H131Q122 205 119 196L106 157L89 196Q86 205 77 205H64Q54 205 52 195Z"/>
+<path fill-rule="evenodd" d="M165 51H216C250 51 269 67 269 91C269 108 261 119 248 126C266 132 276 146 276 164C276 190 256 205 222 205H165ZM194 78V111H213C230 111 239 105 239 94C239 84 231 78 214 78ZM194 141V178H218C236 178 246 173 246 159C246 147 236 141 218 141Z"/>
+</g></g>
+</svg>

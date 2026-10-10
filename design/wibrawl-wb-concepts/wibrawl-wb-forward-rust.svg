@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 256" role="img" aria-labelledby="logo-title logo-description">
+<title id="logo-title">Wibrawl — WB Forward</title>
+<desc id="logo-description">A custom W joins a pointed B to form a forward arrow. Two open counters reveal the B inside the arrowhead. Single-colour filled vector paths on a transparent background.</desc>
+<g fill="#B84430"><path d="M16 51H45L64 150L87 87H110L132 150L151 51H181L148 205H123L98 137L74 205H47Z"/>
+<path fill-rule="evenodd" d="M162 51H201L289 128L201 205H162ZM185 76V108H229L198 76ZM185 148V180H198L229 148Z"/></g>
+</svg>
