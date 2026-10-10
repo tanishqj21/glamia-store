@@ -27,6 +27,17 @@ try {
     assert.equal(await link.locator('svg').count(), 0);
     for (const width of [1280, 1440]) {
       await page.setViewportSize({ width, height: 900 });
+      await page.mouse.move(0,500);
+      await page.waitForTimeout(250);
+      const idle=await link.evaluate(node=>{
+        const pill=node.querySelector('.wibrawl-store-pill');
+        return {background:getComputedStyle(node).backgroundColor,border:getComputedStyle(node).borderWidth,face:getComputedStyle(pill,'::after').backgroundColor,header:getComputedStyle(document.body).backgroundColor,halo:getComputedStyle(pill,'::before').opacity};
+      });
+      assert.equal(idle.background,'rgba(0, 0, 0, 0)','No outer shell fill');
+      assert.equal(idle.border,'0px','No outer shell border');
+      assert.equal(idle.face,idle.header,'Button blends into the header theme');
+      assert.equal(idle.halo,'0','Lime glow is hidden at rest');
+      await page.locator('.site-header').screenshot({path:`${output}/${theme}-${width}-idle.png`});
       const before = await link.boundingBox();
       await link.hover();
       await page.waitForTimeout(250);
@@ -36,11 +47,11 @@ try {
         const pill = node.querySelector('.wibrawl-store-pill');
         return { color: css.color, background: css.backgroundColor, radius: css.borderRadius, halo: getComputedStyle(pill, '::before').opacity, inner: getComputedStyle(pill).backgroundColor, textCase: css.textTransform };
       });
-      assert.equal(style.background, 'rgb(37, 46, 39)');
-      assert.equal(style.color, 'rgb(241, 244, 235)');
+      assert.equal(style.background, 'rgba(0, 0, 0, 0)');
+      assert.equal(style.color, theme==='light'?'rgb(21, 21, 21)':'rgb(244, 244, 244)');
       assert.equal(style.radius, '999px');
       assert.equal(style.halo, '1');
-      assert.equal(style.inner, 'rgb(57, 71, 59)');
+      assert.equal(style.inner, idle.header);
       assert.equal(style.textCase, 'none');
       // Production paints the server header before the interactive client mounts.
       await expect.poll(async()=>{
