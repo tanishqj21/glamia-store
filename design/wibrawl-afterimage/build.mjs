@@ -6,7 +6,7 @@ import sharp from 'sharp';
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const source = await fs.readFile(path.join(directory, '..', 'wibrawl-logo', '02-afterimage.svg'), 'utf8');
 const variants = [
-  { id: 'gaming-lime', name: 'Gaming lime', main: '#C3F35E', echo: '#24DFFF', accent: '#F1F4EB', description: 'Lime lettering, a cyan lower echo, and an off-white I.' },
+  { id: 'gaming-lime', name: 'Gaming lime', main: '#C3F35E', echo: '#24DFFF', accent: '#101413', description: 'Lime lettering, a cyan lower echo, and a dark I matched to the supplied swatch.' },
   { id: 'ice-blue', name: 'Ice blue', main: '#24DFFF', echo: '#849689', accent: '#D7FF45', description: 'Cyan lettering, a muted green-grey lower echo, and a neon yellow I.' },
   { id: 'electric-violet', name: 'Electric violet', main: '#B995FF', echo: '#24DFFF', accent: '#D7FF45', description: 'Violet lettering, a cyan lower echo, and a neon yellow I.' },
 ];
@@ -26,6 +26,9 @@ for (const variant of variants) {
   if (JSON.stringify(geometry(variant.svg)) !== JSON.stringify(geometry(source))) throw new Error('Reference lettering changed');
   await fs.writeFile(path.join(directory, `wibrawl-${variant.id}.svg`), variant.svg);
   await sharp(Buffer.from(variant.svg)).resize(1416).png().toFile(path.join(directory, `wibrawl-${variant.id}-transparent.png`));
+  if (variant.id === 'gaming-lime') {
+    await sharp(Buffer.from(variant.svg)).resize(1416).flatten({ background: '#101413' }).png().toFile(path.join(directory, 'gaming-lime-preview.png'));
+  }
 }
 await fs.writeFile(path.join(directory, 'wibrawl-original.svg'), source);
 

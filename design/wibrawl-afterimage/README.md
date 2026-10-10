@@ -4,11 +4,11 @@ Uses the middle wordmark from the supplied reference: `design/wibrawl-logo/02-af
 
 | Variant | Lettering | Lower echo | I accent |
 | --- | --- | --- | --- |
-| Gaming lime | `#C3F35E` | `#24DFFF` | `#F1F4EB` |
+| Gaming lime | `#C3F35E` | `#24DFFF` | `#101413` |
 | Ice blue | `#24DFFF` | `#849689` | `#D7FF45` |
 | Electric violet | `#B995FF` | `#24DFFF` | `#D7FF45` |
 
-The Gaming lime colour and the comparison background `#101413` come from the Wibrawl website's Gaming theme. The violet version explores a new accent palette.
+The Gaming lime colour and the comparison background `#101413` come from the Wibrawl website's Gaming theme. The Gaming lime variant's formerly white I now uses the exact solid colour from the supplied swatch: `#101413`. On the same dark background its main face blends into the background, with the cyan echo remaining visible. The violet version explores a new accent palette.
 
 `wibrawl-gaming-lime.svg`, `wibrawl-ice-blue.svg`, and `wibrawl-electric-violet.svg` are transparent scalable vector masters. Each contains custom path lettering without fonts, external assets, scripts, or bitmap content. `wibrawl-original.svg` preserves the supplied design's original cyan, pink and yellow combination.
 
