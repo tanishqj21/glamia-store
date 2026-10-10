@@ -171,6 +171,7 @@ try {
     }
   }
   await page.goto(base + '/'); await page.locator('footer').waitFor();
+  await page.locator('footer a[href="https://instagram.com/glamia-fixture"]').waitFor();
   assert.equal(await page.locator('footer a[href="https://instagram.com/glamia-fixture"]').count(), 1);
   assert.equal(await page.locator('footer a[href="https://instagram.com/wibrawl-fixture"]').count(), 0);
   assert.equal(await page.locator('.wb-reel').count(), 0);

@@ -21,10 +21,10 @@ export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
   }, []);
   useEffect(() => { setIndex(0); }, [slides]);
   useEffect(() => {
-    if (slides.length < 2 || reducedMotion || hovered || focused || !visible) return;
+    if (preview || slides.length < 2 || reducedMotion || hovered || focused || !visible) return;
     const timer = window.setTimeout(() => setIndex(current => (current + 1) % slides.length), 6000);
     return () => window.clearTimeout(timer);
-  }, [slides.length, index, reducedMotion, hovered, focused, visible]);
+  }, [preview, slides.length, index, reducedMotion, hovered, focused, visible]);
   const slide = slides[index] || slides[0];
   if (!slide) return null;
   const layout = WIBRAWL_HERO_LAYOUTS.includes(slide.layout) ? slide.layout : 'poster';

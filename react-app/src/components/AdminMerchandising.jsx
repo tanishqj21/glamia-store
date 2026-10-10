@@ -75,7 +75,6 @@ export function HeroStudioView({ products, categories, user }) {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [previewIndex, setPreviewIndex] = useState(0);
-  const [previewPaused, setPreviewPaused] = useState(false);
 
   const liveProducts = useMemo(() => products.filter((product) => product.status === "live" && [storefront, "both"].includes(product.storefront_visibility || "glamia")), [products, storefront]);
   const liveProductIds = new Set(liveProducts.map((product) => product.id));
@@ -94,7 +93,6 @@ export function HeroStudioView({ products, categories, user }) {
 
   useEffect(() => { load(); return () => { loadGeneration.current++; }; }, [storefront]);
   useEffect(() => { if (previewIndex >= slides.length && slides.length) setPreviewIndex(0); }, [previewIndex, slides.length]);
-  useEffect(() => { if (previewPaused || busy || slides.length < 2) return undefined; const timer = window.setInterval(() => setPreviewIndex((index) => (index + 1) % slides.length), 6000); return () => window.clearInterval(timer); }, [previewPaused, busy, slides.length]);
 
   const previewSlide = slides[previewIndex] || null;
   const previewUsesForm = Boolean(editingId) || selectedProducts.length > 0;
@@ -194,11 +192,10 @@ export function HeroStudioView({ products, categories, user }) {
       </> : <section className={`merch-hero-preview merch-hero-preview-${previewVariant}`} aria-label="Hero Studio live preview">
       <div className="merch-preview-copy"><p className="eyebrow">{previewEyebrow || "The Glamia Edit"}</p><h3>{previewTitle || "Everyday pieces, beautifully composed."}</h3><p>{previewTagline || "Build a considered edit from the products already live in your store."}</p>{previewWords.length > 0 && <div className="merch-preview-words">{previewWords.map((word) => <span key={word}>{word}</span>)}</div>}</div>
        <div className={`merch-preview-stage merch-preview-frame-count-${previewProducts.length}`}>{previewProducts.length ? previewProducts.map((product, productIndex) => imageFor(product) ? <div className={`merch-preview-frame merch-preview-frame-${productIndex}`} key={product.id || productIndex}><img src={imageFor(product)} alt={product.name || "Selected hero product"} /></div> : null) : <div className="merch-preview-placeholder"><span>Select 1–3 live product frames below</span></div>}</div>
-      <button type="button" className="merch-preview-arrow merch-preview-prev" aria-label="Previous hero slide" onClick={() => { setPreviewPaused(true); setPreviewIndex((index) => slides.length ? (index - 1 + slides.length) % slides.length : 0); }}>{storefront === "wibrawl" ? "Prev" : <Icon name="chevronLeft" />}</button><button type="button" className="merch-preview-arrow merch-preview-next" aria-label="Next hero slide" onClick={() => { setPreviewPaused(true); setPreviewIndex((index) => slides.length ? (index + 1) % slides.length : 0); }}>{storefront === "wibrawl" ? "Next" : <Icon name="chevronRight" />}</button>
-      {slides.length > 0 && <div className="merch-preview-progress" role="group" aria-label={`Hero preview slide ${previewIndex + 1} of ${slides.length}`}>{slides.map((slideItem, itemIndex) => <button type="button" key={slideItem.id || itemIndex} className={itemIndex === previewIndex ? "active" : ""} onClick={() => { setPreviewPaused(true); setPreviewIndex(itemIndex); }} aria-label={`Show hero preview slide ${itemIndex + 1}`} />)}</div>}
-      <button type="button" className="merch-preview-pause" onClick={() => setPreviewPaused((paused) => !paused)}>{previewPaused ? "Play preview" : "Pause preview"}</button>
+      <button type="button" className="merch-preview-arrow merch-preview-prev" aria-label="Previous hero slide" onClick={() => { setPreviewIndex((index) => slides.length ? (index - 1 + slides.length) % slides.length : 0); }}><Icon name="chevronLeft" /></button><button type="button" className="merch-preview-arrow merch-preview-next" aria-label="Next hero slide" onClick={() => { setPreviewIndex((index) => slides.length ? (index + 1) % slides.length : 0); }}><Icon name="chevronRight" /></button>
+      {slides.length > 0 && <div className="merch-preview-progress" role="group" aria-label={`Hero preview slide ${previewIndex + 1} of ${slides.length}`}>{slides.map((slideItem, itemIndex) => <button type="button" key={slideItem.id || itemIndex} className={itemIndex === previewIndex ? "active" : ""} onClick={() => { setPreviewIndex(itemIndex); }} aria-label={`Show hero preview slide ${itemIndex + 1}`} />)}</div>}
       </section>}
-      <HeroSlideQueue slides={slides} busy={busy} previewIndex={previewIndex} onPreview={index => { resetForm(); setPreviewPaused(true); setPreviewIndex(index); }} onReorder={reorderSlides} onVisibility={setSlideVisibility} onEdit={editSlide} onDelete={deleteSlide} />
+      <HeroSlideQueue slides={slides} busy={busy} previewIndex={previewIndex} onPreview={index => { resetForm(); setPreviewIndex(index); }} onReorder={reorderSlides} onVisibility={setSlideVisibility} onEdit={editSlide} onDelete={deleteSlide} />
       {(status || error) && <p className={error ? "inline-error" : "inline-note"} role="status">{error || status}</p>}
     </div>
     <div className="merch-studio-grid">
