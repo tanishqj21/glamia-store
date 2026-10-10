@@ -1,6 +1,6 @@
 # Wibrawl — WB Circuit
 
-A racing circuit built from WB. The W is rotated 90 degrees clockwise and supplies the left-side chicanes; B supplies the two right-side lobes. Together they form one closed route without crossings or branch junctions.
+A racing circuit built from WB. The W is rotated 90 degrees clockwise and supplies the left-side chicanes; an asymmetric angular B supplies the right-side sectors. Together they form one closed route without crossings or branch junctions. The revised B uses unequal lengths, clipped corners and straights instead of rounded lobes.
 
 The geometry is custom-drawn from the initials, not traced from an existing racing venue. No racing-series logo or wordmark appears in the artwork.
 
@@ -9,8 +9,10 @@ The geometry is custom-drawn from the initials, not traced from an existing raci
 - `wibrawl-circuit.svg`: single-colour ink master
 - `wibrawl-circuit-paper.svg`: light version
 - `wibrawl-circuit-red.svg`: optional red version
+- `wibrawl-circuit-offset.svg`: alternative B geometry with more staggered corners
 - `wibrawl-circuit-track.svg`: larger illustration with red-and-white edging and a start/finish stripe
 - `circuit-preview.png`: concept, construction, tee and label studies
+- `b-rework-comparison.png`: Cutback and Offset B routes at the same scale
 - `logo-preview.png`: enlarged master
 - `track-preview.png`: enlarged road illustration
 - `applications.png`: reversals and 16–64 px studies

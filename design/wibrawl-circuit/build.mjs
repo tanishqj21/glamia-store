@@ -6,9 +6,10 @@ import sharp from 'sharp';
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const palette = { ink: '#17191C', paper: '#EEEDE8', red: '#D3372D' };
 // A clockwise quarter-turn turns W's down-up-down into left-right-left.
-// Those turns replace B's straight back; B supplies the two right-hand lobes.
+// Those turns replace B's straight back; B supplies two unequal angular sectors.
 // One closed, uninterrupted course, with no crossings or branch junctions.
-const b = 'M148 40H215C258 40 287 60 287 93C287 119 266 134 241 144C276 154 297 173 297 199C297 230 269 248 224 248H148';
+const b = 'M148 40H241Q248 40 252 46L284 80Q289 87 285 94L267 117Q263 123 255 123H237Q228 123 233 132L301 179Q306 184 303 193L286 230Q282 238 274 239L188 248H148';
+const alternateB = 'M148 40H235L272 64L280 101L232 132H245L310 175L289 221L210 248H148';
 const w = 'L59 196Q48 189 57 180L104 148Q111 143 104 137L57 98Q48 89 59 84L148 40';
 const course = `${b}${w}Z`;
 function mark(colour, width = 15) {
@@ -18,7 +19,7 @@ function svg(colour) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 352 288" role="img" aria-labelledby="title description">
 <title id="title">Wibrawl — WB Circuit concept</title>
-<desc id="description">One continuous closed racing circuit. A W rotated ninety degrees clockwise forms the left-side chicanes, while B forms the two sweeping right-side lobes. Transparent background.</desc>
+<desc id="description">One continuous closed racing circuit. A W rotated ninety degrees clockwise forms the left-side chicanes, while an asymmetric angular B forms the right-side sectors. Transparent background.</desc>
 ${mark(colour)}
 </svg>
 `;
@@ -27,6 +28,7 @@ await fs.mkdir(directory, { recursive: true });
 for (const [suffix, colour] of [['', palette.ink], ['-paper', palette.paper], ['-red', palette.red]]) {
   await fs.writeFile(path.join(directory, `wibrawl-circuit${suffix}.svg`), svg(colour));
 }
+await fs.writeFile(path.join(directory, 'wibrawl-circuit-offset.svg'), svg(palette.ink).replace(course, `${alternateB}${w}Z`).replace('WB Circuit concept', 'WB Circuit — Offset concept'));
 
 // A separate presentation-only circuit treatment. The master remains uncluttered.
 const track = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 352 288" role="img" aria-labelledby="title description">
@@ -48,7 +50,7 @@ const board = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080
 <path d="M64 87H1536" stroke="#C7C7C1"/>
 <g transform="translate(10 127) scale(2.5)">${mark(palette.ink)}</g>
 <text x="64" y="880" font-family="Arial,sans-serif" font-size="44" font-weight="700" letter-spacing="-1" fill="${palette.ink}">We have our own circuit.</text>
-<text x="66" y="922" font-family="Arial,sans-serif" font-size="18" fill="#6A6A67">Rotated W turns. B-shaped loops. One continuous route.</text>
+<text x="66" y="922" font-family="Arial,sans-serif" font-size="18" fill="#6A6A67">Rotated W turns. Angular B sectors. One continuous route.</text>
 <path d="M920 126V958" stroke="#C7C7C1"/>
 <text x="977" y="156" font-family="Arial,sans-serif" font-size="12" letter-spacing="2" fill="#6A6A67">THE CONSTRUCTION</text>
 <g transform="translate(988 174) scale(1.22)">
@@ -74,6 +76,20 @@ const board = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080
 await sharp(Buffer.from(board)).png().toFile(path.join(directory, 'circuit-preview.png'));
 await sharp(Buffer.from(svg(palette.ink))).resize(880).flatten({ background: palette.paper }).png().toFile(path.join(directory, 'logo-preview.png'));
 await sharp(Buffer.from(track)).resize(880).flatten({ background: palette.paper }).png().toFile(path.join(directory, 'track-preview.png'));
+
+const comparison = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="820" viewBox="0 0 1600 820">
+<rect width="1600" height="820" fill="${palette.paper}"/>
+<text x="56" y="57" font-family="Arial,sans-serif" font-size="14" letter-spacing="2" fill="${palette.ink}">WB CIRCUIT / B REWORK</text>
+<text x="1544" y="57" text-anchor="end" font-family="Arial,sans-serif" font-size="13" fill="#6A6A67">SAME ROTATED W / TWO ANGULAR B ROUTES</text>
+<path d="M56 82H1544M800 119V761" stroke="#C7C7C1"/>
+<g transform="translate(13 107) scale(2.12)">${mark(palette.ink)}</g>
+<g transform="translate(813 107) scale(2.12)"><path d="${alternateB}${w}Z" fill="none" stroke="${palette.ink}" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="56" y="725" font-family="Arial,sans-serif" font-size="34" font-weight="700" fill="${palette.ink}">01 / Cutback</text>
+<text x="856" y="725" font-family="Arial,sans-serif" font-size="34" font-weight="700" fill="${palette.ink}">02 / Offset</text>
+<text x="57" y="763" font-family="Arial,sans-serif" font-size="16" fill="#6A6A67">Clipped upper sector. Longer lower return.</text>
+<text x="857" y="763" font-family="Arial,sans-serif" font-size="16" fill="#6A6A67">Angled straights. More staggered corners.</text>
+</svg>`;
+await sharp(Buffer.from(comparison)).png().toFile(path.join(directory, 'b-rework-comparison.png'));
 
 const applications = [];
 for (const [index, background, colour] of [[0, palette.paper, palette.ink], [1, palette.ink, palette.paper], [2, palette.paper, palette.red]]) {
