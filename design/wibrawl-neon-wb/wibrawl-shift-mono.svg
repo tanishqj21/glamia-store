@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 256" role="img" aria-labelledby="title description">
+<title id="title">WiBrawl — WB Shift</title>
+<desc id="description">A compact angular WB monogram with a shared diagonal and clipped B corners. A neon lime segment interrupts the top of the shared stroke. Single-colour version. Transparent background.</desc>
+<g transform="translate(8 6)"><g fill="#121615"><path d="M28 54H63L74 141L98 102H119L138 141L156 54H190L158 199H132L109 154L84 199H56Z"/>
+<path fill-rule="evenodd" d="M169 54H227L260 76L254 111L235 126L253 143L244 180L216 199H156ZM196 80L190 111H213L224 101L227 90L214 80ZM184 141L178 173H207L218 163L221 151L207 141Z"/></g></g>
+</svg>
