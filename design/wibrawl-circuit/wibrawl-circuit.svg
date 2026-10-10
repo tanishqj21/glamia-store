@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 352 288" role="img" aria-labelledby="title description">
+<title id="title">Wibrawl — WB Circuit concept</title>
+<desc id="description">One continuous closed racing circuit. A W rotated ninety degrees clockwise forms the left-side chicanes, while B forms the two sweeping right-side lobes. Transparent background.</desc>
+<path d="M148 40H215C258 40 287 60 287 93C287 119 266 134 241 144C276 154 297 173 297 199C297 230 269 248 224 248H148L59 196Q48 189 57 180L104 148Q111 143 104 137L57 98Q48 89 59 84L148 40Z" fill="none" stroke="#17191C" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

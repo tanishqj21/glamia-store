@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 352 288" role="img" aria-labelledby="title description">
+<title id="title">Wibrawl — WB Circuit track illustration</title>
+<desc id="description">The same WB circuit route with red-and-white track edging and a start-finish stripe. An illustration variant for larger displays.</desc>
+<path d="M148 40H215C258 40 287 60 287 93C287 119 266 134 241 144C276 154 297 173 297 199C297 230 269 248 224 248H148L59 196Q48 189 57 180L104 148Q111 143 104 137L57 98Q48 89 59 84L148 40Z" fill="none" stroke="#17191C" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/><path d="M148 40H215C258 40 287 60 287 93C287 119 266 134 241 144C276 154 297 173 297 199C297 230 269 248 224 248H148L59 196Q48 189 57 180L104 148Q111 143 104 137L57 98Q48 89 59 84L148 40Z" fill="none" stroke="#EEEDE8" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M148 40H215C258 40 287 60 287 93C287 119 266 134 241 144C276 154 297 173 297 199C297 230 269 248 224 248H148L59 196Q48 189 57 180L104 148Q111 143 104 137L57 98Q48 89 59 84L148 40Z" fill="none" stroke="#D3372D" stroke-width="20" stroke-dasharray="5 5" stroke-linejoin="round"/>
+<path d="M148 40H215C258 40 287 60 287 93C287 119 266 134 241 144C276 154 297 173 297 199C297 230 269 248 224 248H148L59 196Q48 189 57 180L104 148Q111 143 104 137L57 98Q48 89 59 84L148 40Z" fill="none" stroke="#17191C" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M189 30V50" stroke="#EEEDE8" stroke-width="4"/>
+<path d="M189 31V35M189 39V43M189 47V49" stroke="#17191C" stroke-width="4"/>
+</svg>
