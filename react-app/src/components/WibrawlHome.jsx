@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collectionNames } from '../../../src/storefront-identity.js';
+import { collectionNames, WIBRAWL_HERO_LAYOUTS } from '../../../src/storefront-identity.js';
 import { Link } from './Header';
 
-export function WibrawlCarousel({ slides, onNavigate }) {
+export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -24,22 +24,29 @@ export function WibrawlCarousel({ slides, onNavigate }) {
     return () => window.clearInterval(timer);
   }, [slides.length, paused, reducedMotion, hovered, focused, visible]);
   const slide = slides[index] || slides[0];
+  if (!slide) return null;
+  const layout = WIBRAWL_HERO_LAYOUTS.includes(slide.layout) ? slide.layout : 'poster';
+  const campaign = slide.imagery === 'campaign';
   const select = next => { setPaused(true); setIndex((next + slides.length) % slides.length); };
   return <section className="wibrawl-carousel" aria-label="Wibrawl featured collections" aria-roledescription="carousel"
     onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
     onFocusCapture={() => setFocused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}>
-    <div className="wibrawl-hero wibrawl-edited-hero" role="group" aria-roledescription="slide" aria-live={paused ? 'polite' : 'off'} aria-label={`${index + 1} of ${slides.length}`}>
+    <div className={`wibrawl-hero wibrawl-edited-hero wibrawl-layout-${layout} ${slide.title.length > 46 ? 'is-long-title' : ''}`} data-layout={layout} key={slide.id} role="group" aria-roledescription="slide" aria-live={paused ? 'polite' : 'off'} aria-label={`${index + 1} of ${slides.length}`}>
       <div className="wibrawl-hero-copy">
         <p className="wibrawl-kicker">{slide.eyebrow}</p>
-        <h1 id="wibrawl-title">{slide.title}</h1>
+        {preview ? <h3 className="wibrawl-hero-title">{slide.title}</h3> : <h1 id="wibrawl-title" className="wibrawl-hero-title">{slide.title}</h1>}
         <p className="wibrawl-hero-intro">{slide.tagline}</p>
         {slide.words?.length > 0 && <div className="wibrawl-hero-words">{slide.words.map(word => <span key={word}>{word}</span>)}</div>}
         <div className="wibrawl-hero-actions"><Link className="wibrawl-primary-action" href={slide.cta_category ? `/category/${encodeURIComponent(slide.cta_category)}` : '/just-arrived'} onNavigate={onNavigate}>{slide.cta_label || 'Shop the edit'}</Link></div>
       </div>
-      <div className={`wibrawl-hero-visual wibrawl-hero-frames wibrawl-hero-frames-${slide.frames.length}`}>
-        {slide.frames.map(frame => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate} aria-label={`Shop ${frame.name}`}><img src={frame.image} alt={frame.name} width="960" height="1200" fetchPriority="high" decoding="async" /></Link>)}
+      <div className="wibrawl-hero-stage">
+        {campaign ? <figure className="wibrawl-campaign-figure"><img src="/wibrawl/streetwear-campaign-1440.webp" srcSet="/wibrawl/streetwear-campaign-720.webp 720w, /wibrawl/streetwear-campaign-1440.webp 1440w" sizes="(max-width: 700px) 100vw, 60vw" width="1440" height="960" alt="Wibrawl campaign concept: two models in oversized graphic tees on a rooftop." fetchPriority="high" decoding="async" /><figcaption>Campaign concept · styling inspiration</figcaption></figure> : <div className={`wibrawl-hero-visual wibrawl-hero-frames wibrawl-hero-frames-${slide.frames.length}`}>
+          {slide.frames.map((frame, position) => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate} aria-label={`Shop ${frame.name}`}><img src={frame.image} alt={frame.name} width="960" height="1200" fetchPriority={position === 0 ? 'high' : 'auto'} decoding="async" /></Link>)}
+        </div>}
+        <span className="wibrawl-hero-stamp" aria-hidden="true">W.</span>
       </div>
     </div>
+    {campaign && <div className="wibrawl-hero-product-links"><span>Explore this edit</span>{slide.frames.map(frame => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate}><img src={frame.image} alt="" width="40" height="48" />{frame.name}</Link>)}</div>}
     {slides.length > 1 && <div className="wibrawl-carousel-controls">
       <button type="button" onClick={() => select(index - 1)} aria-label="Previous hero slide">Prev</button>
       <div className="wibrawl-carousel-pages" role="group" aria-label="Choose hero slide">{slides.map((item, position) => <button type="button" key={item.id} aria-label={`Show hero slide ${position + 1}`} aria-current={position === index ? 'true' : undefined} onClick={() => select(position)}>{position + 1}</button>)}</div>
@@ -49,28 +56,11 @@ export function WibrawlCarousel({ slides, onNavigate }) {
   </section>;
 }
 
-export function WibrawlHome({ theme, slides = [], onNavigate, children }) {
+export function WibrawlHome({ theme, slides = [], ready = true, onNavigate, children }) {
   const names = collectionNames(theme);
   const gaming = theme === 'gaming';
-  const campaign = gaming ? 'gaming' : 'sports';
   return <div className={`wibrawl-home wibrawl-home-${theme}`}>
-    {slides.length ? <WibrawlCarousel slides={slides} onNavigate={onNavigate} /> : <section className="wibrawl-hero" aria-labelledby="wibrawl-title">
-      <div className="wibrawl-hero-copy">
-        <p className="wibrawl-kicker">Pick your side.</p>
-        <h1 id="wibrawl-title"><span className="wibrawl-hero-line">WEAR YOUR</span><span>WORLD.</span></h1>
-        <p className="wibrawl-hero-intro">From late-night lobbies to matchday. Tees for everything you're into.</p>
-        <div className="wibrawl-hero-actions">
-          <Link className="wibrawl-primary-action" href="/just-arrived" onNavigate={onNavigate}>Shop {names.arrived}</Link>
-          <Link className="wibrawl-secondary-action" href="/best-sellers" onNavigate={onNavigate}>{names.best}</Link>
-        </div>
-      </div>
-      <figure className="wibrawl-hero-visual">
-        <img key={campaign} src={`/wibrawl/${campaign}-campaign-960.webp`} srcSet={`/wibrawl/${campaign}-campaign-640.webp 640w, /wibrawl/${campaign}-campaign-960.webp 960w`} sizes="(max-width: 700px) 100vw, 50vw" width="960" height="1200" alt={gaming ? 'Wibrawl campaign concept: original manga artwork on a black graphic tee.' : 'Wibrawl campaign concept: original manga basketball artwork on a light graphic tee.'} fetchPriority="high" decoding="async" />
-      </figure>
-    </section>}
-    <div className="wibrawl-culture-strip" aria-label="Made for your interests">
-      {['Gaming', 'Anime', 'Sports', 'Movies', 'Music', 'Memes'].map(interest => <span key={interest}>{interest}</span>)}
-    </div>
+    {!ready ? <div className="wibrawl-hero-loading" role="status" aria-label="Loading featured edit" /> : slides.length > 0 && <WibrawlCarousel slides={slides} onNavigate={onNavigate} />}
     <nav className="wibrawl-collection-nav" aria-label="Discover collections">
       <Link href="/just-arrived" onNavigate={onNavigate}><span className="wibrawl-collection-symbol" aria-hidden="true">+</span><div><h2>{names.arrived}</h2><p>{gaming ? 'Fresh out of the lobby.' : 'Fresh additions to your line-up.'}</p></div></Link>
       <Link href="/best-sellers" onNavigate={onNavigate}><span className="wibrawl-collection-symbol" aria-hidden="true">*</span><div><h2>{names.best}</h2><p>The crowd favourites.</p></div></Link>
@@ -79,11 +69,11 @@ export function WibrawlHome({ theme, slides = [], onNavigate, children }) {
     {children}
     <section className="wibrawl-manifesto" aria-labelledby="wibrawl-manifesto-title">
       <p>Whatever you're into,<br />you're in.</p>
-      <div><h2 id="wibrawl-manifesto-title">NO SINGLE<br />PLAYER ENERGY.</h2><p>For the fandoms, the rivalries, the playlists, and the inside jokes. Wear what brings you together.</p><Link className="wibrawl-secondary-action" href="/about" onNavigate={onNavigate}>Meet Wibrawl</Link></div>
+      <div><h2 id="wibrawl-manifesto-title">YOUR VIBE.<br />NO FILTER.</h2><p>Graphic tees for showing up as yourself. Mix it up, make it yours, and find your people along the way.</p><Link className="wibrawl-secondary-action" href="/about" onNavigate={onNavigate}>Meet Wibrawl</Link></div>
     </section>
   </div>;
 }
 
 export function WibrawlAbout({ onNavigate }) {
-  return <main className="page-main wibrawl-about"><p className="wibrawl-kicker">Meet Wibrawl</p><h1>YOUR INTERESTS.<br /><span>YOUR IDENTITY.</span></h1><p>Wibrawl brings gaming, anime, sports, movies, music, and internet culture into everyday graphic tees.</p><p>Some days it's your favourite game. Some days it's your team, a lyric, or a joke only your friends get. You don't have to choose one world.</p><Link className="wibrawl-primary-action" href="/just-arrived" onNavigate={onNavigate}>Explore the tees</Link><p className="wibrawl-about-origin">A brand from <a href="https://glamiastore.com">Glamia</a>.</p></main>;
+  return <main className="page-main wibrawl-about"><p className="wibrawl-kicker">Meet Wibrawl</p><h1>YOUR VIBE.<br /><span>YOUR IDENTITY.</span></h1><p>Wibrawl is a space for self-expression through everyday graphic tees. Bold ideas, easy fits, and a little more you.</p><p>Your style doesn't need a label. Dress for your mood, switch things up, and wear what feels like you.</p><Link className="wibrawl-primary-action" href="/just-arrived" onNavigate={onNavigate}>Explore the tees</Link><p className="wibrawl-about-origin">A brand from <a href="https://glamiastore.com">Glamia</a>.</p></main>;
 }

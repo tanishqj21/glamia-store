@@ -15,7 +15,7 @@ export function renderHomepageShell({ hero, settings }) {
       menuOpen={false} setMenuOpen={noop} categories={['All']} products={[]}
       wishlistCount={0} cartCount={0} user={null} storefront={settings} />
     <div id="main-content" tabIndex={-1}><Suspense><div>
-      <CinematicHero slides={hero?.slides || []} onNavigate={noop} />
+      <CinematicHero slides={hero?.slides || []} ready={Boolean(hero)} onNavigate={noop} />
       <StorePromises settings={settings?.trust_strip} />
       <CampaignFeature campaign={settings?.sales_campaign} onNavigate={noop} />
       <HomepageEditorial onNavigate={noop} />

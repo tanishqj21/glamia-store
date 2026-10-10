@@ -4,7 +4,8 @@ import { Icon } from "./Icon";
 import { PhoneField } from "./PhoneField";
 import { CinematicReel } from "./CinematicReel";
 import { WibrawlCarousel } from "./WibrawlHome";
-import { storefrontForUrl } from '../../../src/storefront-identity.js';
+import { HeroSlideQueue } from "./HeroSlideQueue";
+import { WIBRAWL_HERO_LAYOUTS, storefrontForUrl } from '../../../src/storefront-identity.js';
 
 const INSIGHT_LABELS = {
   best_selling: "Best selling",
@@ -54,10 +55,10 @@ function InsightCard({ label, products, onUse }) {
 }
 
 function emptyHeroForm(storefront = "glamia") {
-  return { variant: "editorial", eyebrow: storefront === "wibrawl" ? "The Wibrawl Edit" : "The Glamia Edit", title: "", tagline: "", cta_label: "Shop the edit", cta_category: "", words: "", active: true, position: "" };
+  return { variant: "editorial", layout: "poster", imagery: "products", eyebrow: storefront === "wibrawl" ? "The Wibrawl Edit" : "The Glamia Edit", title: "", tagline: "", cta_label: "Shop the edit", cta_category: "", words: "", active: true, position: "" };
 }
 
-export function HeroStudioView({ products, categories }) {
+export function HeroStudioView({ products, categories, user }) {
   const [storefront, setStorefront] = useState(() => storefrontForUrl(window.location.href));
   const [previewTheme, setPreviewTheme] = useState("gaming");
   const loadGeneration = useRef(0);
@@ -92,7 +93,7 @@ export function HeroStudioView({ products, categories }) {
 
   useEffect(() => { load(); return () => { loadGeneration.current++; }; }, [storefront]);
   useEffect(() => { if (previewIndex >= slides.length && slides.length) setPreviewIndex(0); }, [previewIndex, slides.length]);
-  useEffect(() => { if (previewPaused || slides.length < 2) return undefined; const timer = window.setInterval(() => setPreviewIndex((index) => (index + 1) % slides.length), 6000); return () => window.clearInterval(timer); }, [previewPaused, slides.length]);
+  useEffect(() => { if (previewPaused || busy || slides.length < 2) return undefined; const timer = window.setInterval(() => setPreviewIndex((index) => (index + 1) % slides.length), 6000); return () => window.clearInterval(timer); }, [previewPaused, busy, slides.length]);
 
   const previewSlide = slides[previewIndex] || null;
   const previewUsesForm = Boolean(editingId) || selectedProducts.length > 0;
@@ -102,6 +103,8 @@ export function HeroStudioView({ products, categories }) {
   const previewTagline = previewUsesForm ? form.tagline : previewSlide?.tagline;
   const previewWords = (previewUsesForm ? form.words.split(",").map((word) => word.trim()).filter(Boolean) : previewSlide?.words || []).slice(0, 4);
   const previewVariant = "editorial";
+  const previewLayout = previewUsesForm ? form.layout : previewSlide?.layout || "poster";
+  const previewImagery = previewUsesForm ? form.imagery : previewSlide?.imagery || "products";
 
   function changeField(event) {
     const { name, value, type, checked } = event.target;
@@ -120,7 +123,7 @@ export function HeroStudioView({ products, categories }) {
 
   function editSlide(slide) {
     setEditingId(slide.id);
-    setForm({ variant: slide.variant || "editorial", eyebrow: slide.eyebrow || "The Glamia Edit", title: slide.title || "", tagline: slide.tagline || "", cta_label: slide.cta_label || "Shop the edit", cta_category: slide.cta_category || "", words: (slide.words || []).join(", "), active: Boolean(slide.active), position: String(slide.position ?? "") });
+    setForm({ variant: slide.variant || "editorial", layout: slide.layout || "poster", imagery: slide.imagery || "products", eyebrow: slide.eyebrow || "The Glamia Edit", title: slide.title || "", tagline: slide.tagline || "", cta_label: slide.cta_label || "Shop the edit", cta_category: slide.cta_category || "", words: (slide.words || []).join(", "), active: Boolean(slide.active), position: String(slide.position ?? "") });
     setSelectedProducts((slide.product_ids || []).filter((id) => liveProductIds.has(id)).slice(0, 3));
     const slideIndex = slides.findIndex((item) => item.id === slide.id);
     if (slideIndex >= 0) setPreviewIndex(slideIndex);
@@ -135,7 +138,7 @@ export function HeroStudioView({ products, categories }) {
     event.preventDefault(); setBusy(true); setStatus(""); setError("");
     try {
       if (!selectedProducts.length) throw new Error("Select at least one live product frame.");
-      const payload = { ...form, variant: "editorial", words: form.words.split(",").map((word) => word.trim()).filter(Boolean), product_ids: selectedProducts, position: form.position === "" ? null : Number(form.position) };
+      const payload = { ...form, variant: "editorial", words: form.words.split(",").map((word) => word.trim()).filter(Boolean), product_ids: selectedProducts, position: editingId ? Number(form.position) : null };
       const response = await apiFetch(editingId ? slideEndpoint(editingId) : heroEndpoint, { method: editingId ? "PATCH" : "POST", body: JSON.stringify(payload) });
       await readResponse(response, "Hero slide could not be saved");
       const message = editingId ? "Hero slide updated." : "Hero slide published.";
@@ -149,16 +152,42 @@ export function HeroStudioView({ products, categories }) {
     try { const response = await apiFetch(slideEndpoint(slide.id), { method: "DELETE" }); await readResponse(response, "Hero slide could not be deleted"); if (editingId === slide.id) resetForm(); setStatus("Hero slide deleted."); await load(); } catch (requestError) { setError(requestError.message); } finally { setBusy(false); }
   }
 
+  async function reorderSlides(ordered) {
+    const currentId = slides[previewIndex]?.id;
+    const previous = slides;
+    setBusy(true); setError(""); setStatus(""); setSlides(ordered);
+    setPreviewIndex(Math.max(0, ordered.findIndex(slide => slide.id === currentId)));
+    try {
+      const response = await apiFetch(`/api/admin/hero/order?storefront=${storefront}`, {method:"PUT", body:JSON.stringify({ids:ordered.map(slide => slide.id)})});
+      await readResponse(response, "Slide order could not be saved");
+      if (editingId) setForm(current => ({...current, position:String(ordered.findIndex(slide => slide.id === editingId))}));
+      setStatus("Slide order saved. Top plays first."); await load();
+    } catch (reason) { setSlides(previous); setPreviewIndex(Math.max(0, previous.findIndex(slide => slide.id === currentId))); await load(); setError(reason.message); }
+    finally { setBusy(false); }
+  }
+  async function setSlideVisibility(slide, active) {
+    const previous = slides;
+    setSlides(current => current.map(item => item.id === slide.id ? {...item, active} : item));
+    setBusy(true); setError(""); setStatus("");
+    try {
+      const response = await apiFetch(slideEndpoint(slide.id), {method:"PATCH", body:JSON.stringify({active})});
+      await readResponse(response, "Slide visibility could not be saved");
+      if (editingId === slide.id) setForm(current => ({...current, active}));
+      setStatus(active ? "Slide is now shown on home." : "Slide is hidden from home."); await load();
+    } catch (reason) { setSlides(previous); setError(reason.message); }
+    finally { setBusy(false); }
+  }
+
   return <><section className="admin-panel admin-wide-panel merch-workspace">
     <div className="admin-panel-heading"><div><p className="eyebrow">Merchandising</p><h2>Hero Studio</h2><p className="muted">Build the {brand} home carousel using live products assigned to this storefront.</p><label className="wibrawl-admin-visibility">Storefront<select aria-label="Hero storefront" value={storefront} disabled={busy} onChange={event => { const next = event.target.value; loadGeneration.current++; setStorefront(next); setSlides([]); setInsights({ recommendations: {} }); setEditingId(""); setForm(emptyHeroForm(next)); setSelectedProducts([]); setPreviewIndex(0); setStatus(""); setError(""); }}><option value="glamia">Glamia</option><option value="wibrawl">Wibrawl</option></select></label></div><span>{slides.length} slides</span></div>
     
 
     <div className="merch-preview-dock">
-      <div className="merch-preview-heading"><div><p className="eyebrow">Live preview</p><strong>Updates as you edit</strong></div><span>Desktop composition</span></div>
+      <div className="merch-preview-heading"><div><p className="eyebrow">Live preview</p><strong>Updates as you edit</strong></div><span>Responsive composition</span></div>
       {storefront === "wibrawl" ? <>
         <label className="wibrawl-admin-visibility">Preview theme<select aria-label="Wibrawl preview theme" value={previewTheme} onChange={event => setPreviewTheme(event.target.value)}><option value="gaming">Gaming</option><option value="sports">Sports</option></select></label>
         <div className={`wibrawl-admin-preview wibrawl-home-${previewTheme}`} data-preview-theme={previewTheme}>
-          {previewProducts.length ? <WibrawlCarousel slides={[{ id: editingId || previewSlide?.id || "preview", eyebrow: previewEyebrow || "The Wibrawl Edit", title: previewTitle || "Wear your world.", tagline: previewTagline || "Tees for everything you're into.", cta_label: (previewUsesForm ? form.cta_label : previewSlide?.cta_label) || "Shop the edit", cta_category: (previewUsesForm ? form.cta_category : previewSlide?.cta_category) || "", words: previewWords, frames: previewProducts.map(product => ({id:product.id,name:product.name,image:imageFor(product)})) }]} onNavigate={() => {}} /> : <p className="wibrawl-preview-empty">Select 1–3 live Wibrawl products to preview your slide.</p>}
+          {previewProducts.length ? <WibrawlCarousel preview slides={[{ layout: previewLayout, imagery: previewImagery, id: editingId || previewSlide?.id || "preview", eyebrow: previewEyebrow || "The Wibrawl Edit", title: previewTitle || "Your vibe. Your rules.", tagline: previewTagline || "Graphic tees with a little more you.", cta_label: (previewUsesForm ? form.cta_label : previewSlide?.cta_label) || "Shop the edit", cta_category: (previewUsesForm ? form.cta_category : previewSlide?.cta_category) || "", words: previewWords, frames: previewProducts.map(product => ({id:product.id,name:product.name,image:imageFor(product)})) }]} onNavigate={() => {}} /> : <p className="wibrawl-preview-empty">Select 1–3 live Wibrawl products to preview your slide.</p>}
         </div>
         {slides.length > 0 && <div className="wibrawl-carousel-controls" role="group" aria-label="Preview a saved Wibrawl slide">{slides.map((item, position) => <button type="button" key={item.id} onClick={() => { resetForm(); setPreviewIndex(position); }} aria-current={position === previewIndex ? "true" : undefined}>Slide {position + 1}</button>)}</div>}
       </> : <section className={`merch-hero-preview merch-hero-preview-${previewVariant}`} aria-label="Hero Studio live preview">
@@ -168,19 +197,21 @@ export function HeroStudioView({ products, categories }) {
       {slides.length > 0 && <div className="merch-preview-progress" role="group" aria-label={`Hero preview slide ${previewIndex + 1} of ${slides.length}`}>{slides.map((slideItem, itemIndex) => <button type="button" key={slideItem.id || itemIndex} className={itemIndex === previewIndex ? "active" : ""} onClick={() => { setPreviewPaused(true); setPreviewIndex(itemIndex); }} aria-label={`Show hero preview slide ${itemIndex + 1}`} />)}</div>}
       <button type="button" className="merch-preview-pause" onClick={() => setPreviewPaused((paused) => !paused)}>{previewPaused ? "Play preview" : "Pause preview"}</button>
       </section>}
+      <HeroSlideQueue slides={slides} busy={busy} previewIndex={previewIndex} onPreview={index => { resetForm(); setPreviewPaused(true); setPreviewIndex(index); }} onReorder={reorderSlides} onVisibility={setSlideVisibility} onEdit={editSlide} onDelete={deleteSlide} />
+      {(status || error) && <p className={error ? "inline-error" : "inline-note"} role="status">{error || status}</p>}
     </div>
     <div className="merch-studio-grid">
       <form id="hero-slide-form" className="merch-form" onSubmit={submit}>
         <div className="merch-form-heading"><div><p className="eyebrow">{editingId ? "Edit slide" : "New slide"}</p><h3>{editingId ? "Refine this edit" : "Create a hero moment"}</h3></div><span>{selectedProducts.length}/3 frames</span></div>
-        <div className="merch-form-grid"><Field label="Carousel treatment"><input value="Editorial · layered frames" readOnly /></Field><Field label="Eyebrow"><input name="eyebrow" value={form.eyebrow} onChange={changeField} maxLength="60" /></Field><Field label="Headline"><input name="title" value={form.title} onChange={changeField} maxLength="100" required placeholder="The new evening edit" /></Field><Field wide label="Tagline"><textarea name="tagline" value={form.tagline} onChange={changeField} maxLength="240" rows="3" required placeholder="A short line that sets the mood for this collection." /></Field><Field label="CTA label"><input name="cta_label" value={form.cta_label} onChange={changeField} maxLength="40" /></Field><Field label="CTA destination"><select name="cta_category" value={form.cta_category} onChange={changeField}><option value="">No destination</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></Field><Field wide label="Style words" hint="Optional words shown beside the images, separated by commas."><input name="words" value={form.words} onChange={changeField} maxLength="120" placeholder="SILK, EVENING, NEW SEASON" /></Field><Field label="Position" hint="Leave blank to add at the end."><input name="position" type="number" min="0" value={form.position} onChange={changeField} /></Field></div>
+        <div className="merch-form-grid"><Field label="Carousel treatment">{storefront === "wibrawl" ? <select name="layout" value={form.layout} onChange={changeField}>{WIBRAWL_HERO_LAYOUTS.map(layout => <option key={layout} value={layout}>{layout === "poster" ? "Poster · oversized type" : layout === "collage" ? "Collage · playful cut-outs" : "Split · image-led edit"}</option>)}</select> : <input value="Editorial · layered frames" readOnly />}</Field>{storefront === "wibrawl" && <Field label="Hero imagery" hint="The campaign concept is styling inspiration; product links always use your selected listings."><select aria-label="Hero imagery" name="imagery" value={form.imagery} onChange={changeField}><option value="products">Selected product images</option><option value="campaign">Wibrawl streetwear campaign</option></select></Field>}<Field label="Eyebrow"><input name="eyebrow" value={form.eyebrow} onChange={changeField} maxLength="60" /></Field><Field label="Headline"><input name="title" value={form.title} onChange={changeField} maxLength="100" required placeholder="The new evening edit" /></Field><Field wide label="Tagline"><textarea name="tagline" value={form.tagline} onChange={changeField} maxLength="240" rows="3" required placeholder="A short line that sets the mood for this collection." /></Field><Field label="CTA label"><input name="cta_label" value={form.cta_label} onChange={changeField} maxLength="40" /></Field><Field label="CTA destination"><select name="cta_category" value={form.cta_category} onChange={changeField}><option value="">No destination</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></Field><Field wide label="Style words" hint="Optional words shown beside the images, separated by commas."><input name="words" value={form.words} onChange={changeField} maxLength="120" placeholder="SILK, EVENING, NEW SEASON" /></Field></div>
         <label className="merch-checkbox"><input name="active" type="checkbox" checked={form.active} onChange={changeField} /> Publish this slide on the home page</label>
         <div className="merch-product-picker"><div className="merch-section-heading"><div><p className="eyebrow">Product frames</p><h3>Select 1–3 live products</h3></div><span>{liveProducts.length} live</span></div><div className="merch-product-options">{liveProducts.map((product) => <label className={`merch-product-option ${selectedProducts.includes(product.id) ? "selected" : ""}`} key={product.id}><input type="checkbox" checked={selectedProducts.includes(product.id)} onChange={() => toggleProduct(product.id)} /><span>{imageFor(product) ? <img src={imageFor(product)} alt="" loading="lazy" /> : <span className="merch-image-placeholder" />}<strong>{product.name}</strong><small>{product.category || "Catalog"}</small></span></label>)}{!liveProducts.length && <p className="muted">Publish a live product before creating a hero slide.</p>}</div></div>
-        {(error || status) && <p className={error ? "inline-error" : "inline-note"} role="status">{error || status}</p>}<div className="form-actions"><button type="button" className="secondary-action" onClick={resetForm}>Reset</button><button className="primary-action" type="submit" disabled={busy || !liveProducts.length}>{busy ? "Saving…" : editingId ? "Save slide" : "Publish slide"} </button></div>
+        <div className="form-actions"><button type="button" className="secondary-action" onClick={resetForm}>Reset</button><button className="primary-action" type="submit" disabled={busy || !liveProducts.length}>{busy ? "Saving…" : editingId ? "Save slide" : "Publish slide"} </button></div>
       </form>
       <aside className="merch-insights"><div className="merch-section-heading"><div><p className="eyebrow">Merchandising signals</p><h3>What should lead?</h3></div></div><p className="muted">{insights.return_note || "Rankings use current store activity and sales data."}</p>{Object.entries(INSIGHT_LABELS).map(([key, label]) => <InsightCard key={key} label={label} products={insights.recommendations?.[key] || []} onUse={() => applyInsight(key)} />)}</aside>
     </div>
-    <div className="merch-published"><div className="merch-section-heading"><div><p className="eyebrow">Published order</p><h3>Home carousel slides</h3></div><span>Drag-free ordering via position</span></div>{slides.length ? <div className="merch-slide-list">{slides.map((slide, index) => <article className={`merch-slide-row ${slide.active ? "" : "is-draft"} ${previewIndex === index ? "is-previewing" : ""}`} key={slide.id} onClick={() => setPreviewIndex(index)}><div className="merch-slide-frames">{(slide.frames || []).map((frame) => imageFor(frame) ? <img key={frame.id} src={imageFor(frame)} alt={frame.name || slide.title} loading="lazy" /> : null)}</div><div className="merch-slide-copy"><strong>{slide.title}</strong><span>{slide.tagline}</span><small>Editorial · {slide.active ? "Published" : "Draft"} · position {slide.position} · {(slide.frames || []).length} frame{(slide.frames || []).length === 1 ? "" : "s"}</small></div><div className="merch-slide-actions"><button type="button" className="secondary-action" onClick={(event) => { event.stopPropagation(); editSlide(slide); }}>Edit</button><button type="button" className="danger-action" onClick={(event) => { event.stopPropagation(); deleteSlide(slide); }} disabled={busy}>Delete</button></div></article>)}</div> : <div className="empty-state">No {brand} hero slides yet. Create the first one above.</div>}</div>
-  </section>{storefront === "glamia" && <CinematicReelStudio products={products} />}</>;
+
+  </section>{(!user?.employee_id || user.is_owner || user.employee_permissions?.cinematic_reel === true) && <CinematicReelStudio products={products} />}</>;
 }
 
 const DEFAULT_CINEMATIC_REEL = {
@@ -197,7 +228,7 @@ function CinematicReelStudio({ products }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
-  const liveProducts = useMemo(() => products.filter((product) => product.status === "live"), [products]);
+  const liveProducts = useMemo(() => products.filter((product) => product.status === "live" && ["glamia", "both"].includes(product.storefront_visibility || "glamia")), [products]);
   const selectedIds = Array.isArray(draft.product_ids) ? draft.product_ids : [];
 
   useEffect(() => {
@@ -232,7 +263,7 @@ function CinematicReelStudio({ products }) {
   }
 
   return <section className="admin-panel admin-wide-panel merch-workspace cinematic-reel-studio">
-    <div className="admin-panel-heading"><div><p className="eyebrow">Home composition</p><h2>Cinematic Reel Studio</h2><p className="muted">Customize the lower homepage reel and preview the exact storefront composition while you edit it.</p></div><span>{selectedIds.length ? `${selectedIds.length} chosen` : "Automatic selection"}</span></div>
+    <div className="admin-panel-heading"><div><p className="eyebrow">Domain specific · Glamia</p><h2>Cinematic Reel Studio</h2><p className="muted">Customize the Glamia lower homepage reel and preview the exact storefront composition while you edit it.</p></div><span>{selectedIds.length ? `${selectedIds.length} chosen` : "Automatic selection"}</span></div>
     <div className="merch-preview-dock"><div className="merch-preview-heading"><div><p className="eyebrow">Cinematic Reel preview</p><strong>Matches the storefront reel</strong></div><span>Exact home composition</span></div><CinematicReel products={products} settings={draft} /></div>
     <div className="merch-studio-grid"><form className="merch-form" onSubmit={save}><div className="merch-form-heading"><div><p className="eyebrow">Reel settings</p><h3>Shape the current mood</h3></div><span>{selectedIds.length}/8 products</span></div><label className="merch-checkbox"><input name="visible" type="checkbox" checked={draft.visible !== false} onChange={changeField} /> Show Cinematic Reel on home page</label><div className="merch-form-grid"><Field label="Eyebrow"><input name="eyebrow" value={draft.eyebrow} onChange={changeField} maxLength="70" /></Field><Field label="Title"><input name="title" value={draft.title} onChange={changeField} maxLength="100" required /></Field><Field label="Emphasis"><input name="emphasis" value={draft.emphasis} onChange={changeField} maxLength="100" required /></Field><Field wide label="Description" hint="Optional supporting copy shown below the title."><textarea name="description" value={draft.description} onChange={changeField} maxLength="180" rows="3" /></Field></div><div className="merch-product-picker"><div className="merch-section-heading"><div><p className="eyebrow">Reel products</p><h3>Choose up to 8 live products</h3></div><button type="button" className="secondary-action" onClick={() => setDraft((current) => ({ ...current, product_ids: [] }))} disabled={!selectedIds.length}>Use automatic selection</button></div><p className="form-hint">Leave product selection empty to keep automatic variant-balanced products.</p><div className="merch-product-options">{liveProducts.map((product) => <label className={`merch-product-option ${selectedIds.includes(product.id) ? "selected" : ""}`} key={product.id}><input type="checkbox" checked={selectedIds.includes(product.id)} onChange={() => toggleProduct(product.id)} /><span>{imageFor(product) ? <img src={imageFor(product)} alt="" loading="lazy" /> : <span className="merch-image-placeholder" />}<strong>{product.name}</strong><small>{product.category || "Catalog"}</small></span></label>)}{!liveProducts.length && <p className="muted">Publish a live product before selecting reel products.</p>}</div></div>{(error || status) && <p className={error ? "inline-error" : "inline-note"} role="status">{error || status}</p>}<div className="form-actions"><button className="primary-action" type="submit" disabled={busy}>{busy ? "Saving…" : "Save Cinematic Reel"} </button></div></form><aside className="merch-insights"><div className="merch-section-heading"><div><p className="eyebrow">How it works</p><h3>A living product story</h3></div></div><p className="muted">Automatic selection balances variant groups so several colourways of one listing do not crowd out other products. Manual selection is useful for launches, campaigns, and seasonal edits.</p><div className="merch-insight-card"><strong>Preview behavior</strong><p className="muted">The preview above uses the same Cinematic Reel component as the home page, including its controls, hover treatment, product links, and rotation.</p></div></aside></div>
   </section>;

@@ -83,8 +83,8 @@ test('public sharing metadata and about copy identify Wibrawl', async t => {
     const html = await response.text();
     assert.match(html, /og:site_name" content="Wibrawl/);
     assert.ok(html.includes(`rel="canonical" href="${WIBRAWL_ORIGIN}${path}"`));
-    assert.ok(html.includes('/wibrawl/gaming-campaign-960.webp'));
-    if(path==='/about')assert.match(html,/Your interests. Your identity./);
+    assert.ok(html.includes('/wibrawl/streetwear-campaign-1440.webp'));
+    if(path==='/about')assert.match(html,/Your vibe. Your identity./);
     if(path==='/best-sellers')assert.match(html,/Current Meta/);
   }
 });
@@ -109,13 +109,13 @@ test('production CSP permits the exact built theme scripts', () => {
   assert.ok(csp.includes('https://accounts.google.com/gsi/style'));
 });
 
-test('the homepage discovers its application, chosen campaign and display font early', async t => {
+test('the homepage discovers its application and display font without preloading an inactive hero', async t => {
   const {env} = fixture(t);
   const html = await (await worker.renderPublicPage(new Request(WIBRAWL_ORIGIN),env)).text();
   assert.match(html, /rel="modulepreload"[^>]+\/assets\/main-/);
   assert.match(html, /href="\/fonts\/jost-[^"]+" as="font"/);
   assert.ok(!/<link[^>]+href="\/fonts\/cormorant[^>]+as="font"/.test(html));
-  assert.match(html, /preload.imageSrcset/);
+  assert.doesNotMatch(html, /preload.imageSrcset/);
 });
 
 test('direct product links render the Wibrawl header and footer before JavaScript', async t => {

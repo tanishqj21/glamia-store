@@ -14,7 +14,7 @@ import { attachCancellationRefunds, cancellationRefundView } from "./cancellatio
 import { purchasedReturnLines, supportLineReferences } from './support-return-access.js';
 import { storefrontCss, storefrontStyleHash, storefrontScriptHashes, storefrontStyleFiles, storefrontDeferredStyleFile, storefrontRoutePreloads, storefrontRouteCriticalStyles } from './storefront-styles.js';
 import { inlineProductImage } from './product-image-bootstrap.js';
-import { WIBRAWL_HOSTNAME, WIBRAWL_ORIGIN, STOREFRONT_ORIGINS, storefrontForUrl } from './storefront-identity.js';
+import { WIBRAWL_HOSTNAME, WIBRAWL_ORIGIN, STOREFRONT_ORIGINS, WIBRAWL_HERO_LAYOUTS, storefrontForUrl } from './storefront-identity.js';
 
 const SESSION_COOKIE = "mm_session";
 const HOST_SESSION_COOKIE = "__Host-mm_session";
@@ -648,9 +648,9 @@ async function renderPublicPage(request, env, ctx) {
     : null;
 
   let title = storefront === "wibrawl" ? "Wibrawl | Pick your side. Wear your world." : "Glamia — Curated Apparel & Accessories";
-  let description = storefront === "wibrawl" ? "Tees for the things you play, watch, follow, and love. Pick your side. Wear your world." : DEFAULT_PAGE_DESCRIPTION;
+  let description = storefront === "wibrawl" ? "Everyday graphic tees for self-expression. Your vibe. Your rules." : DEFAULT_PAGE_DESCRIPTION;
   let ogType = "website";
-  let ogImage = storefront === "wibrawl" ? `${origin}/wibrawl/gaming-campaign-960.webp` : `${origin}/glamia-social-banner.png`;
+  let ogImage = storefront === "wibrawl" ? `${origin}/wibrawl/streetwear-campaign-1440.webp` : `${origin}/glamia-social-banner.png`;
   let canonical = `${origin}${path}`;
   let headExtras = "";
   let botContent = "";
@@ -737,7 +737,7 @@ async function renderPublicPage(request, env, ctx) {
       const settings = await homepageSettingsPromise;
       const seo = settings?.seo || {};
       title = storefront === "wibrawl" ? "Wibrawl | Pick your side. Wear your world." : heroText(seo.title, "Glamia — Curated apparel for every wardrobe", 120);
-      description = storefront === "wibrawl" ? "Tees for the things you play, watch, follow, and love. Pick your side. Wear your world." : heroText(seo.description, "Discover refined everyday pieces, occasionwear, and accessories from independent ateliers.", 220);
+      description = storefront === "wibrawl" ? "Everyday graphic tees for self-expression. Your vibe. Your rules." : heroText(seo.description, "Discover refined everyday pieces, occasionwear, and accessories from independent ateliers.", 220);
       if (storefront !== "wibrawl") ogImage = absoluteImageUrl(normalizeSeoImage(seo.image, `${origin}/glamia-social-banner.png`), origin);
       botContent = catalogBotContent(storefront === "wibrawl" ? "Tees for every side" : "Curated apparel and accessories", description, rows.slice(0, 24), origin, storefront);
     } else {
@@ -787,8 +787,8 @@ async function renderPublicPage(request, env, ctx) {
       : `<main class="info-page"><p class="eyebrow">${brand}</p><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(info[1])}</p><p><a href="/best-sellers">Browse the collection</a> · <a href="/orders">Track your order</a></p></main>`;
     if (path === "/about" && storefront === "wibrawl") {
       title = "About Wibrawl | Wibrawl";
-      description = "Wibrawl brings gaming, anime, sports, movies, music, and internet culture into everyday graphic tees.";
-      botContent = `<main class="info-page"><p class="eyebrow">Meet Wibrawl</p><h1>Your interests. Your identity.</h1><p>${description}</p><p>A brand from <a href="https://glamiastore.com">Glamia</a>.</p></main>`;
+      description = "Wibrawl is a space for self-expression through everyday graphic tees. Bold ideas, easy fits, and a little more you.";
+      botContent = `<main class="info-page"><p class="eyebrow">Meet Wibrawl</p><h1>Your vibe. Your identity.</h1><p>${description}</p><p>A brand from <a href="https://glamiastore.com">Glamia</a>.</p></main>`;
     } else if (path === "/about") {
       const about = await readAboutPage(env);
       title = `${about.headline} | Glamia`;
@@ -1449,6 +1449,11 @@ async function routeApi(request, env, url, ctx) {
     const employeeSession = await requireEmployee(request, env);
     requireEmployeePermission(employeeSession, "hero");
     return createHeroSlide(request, env);
+  }
+  if (request.method === "PUT" && path === "/api/employee/hero/order") {
+    const employeeSession = await requireEmployee(request, env);
+    requireEmployeePermission(employeeSession, "hero");
+    return reorderHeroSlides(request, env);
   }
   const employeeHero = path.match(/^\/api\/employee\/hero\/([^/]+)$/);
   if (employeeHero && request.method === "PATCH") {
@@ -2173,6 +2178,11 @@ async function routeApi(request, env, url, ctx) {
   if (request.method === "POST" && path === "/api/admin/hero") {
     requireAdmin(user);
     return createHeroSlide(request, env);
+  }
+
+  if (request.method === "PUT" && path === "/api/admin/hero/order") {
+    requireAdmin(user);
+    return reorderHeroSlides(request, env);
   }
 
   const adminHero = path.match(/^\/api\/admin\/hero\/([^/]+)$/);
@@ -3156,6 +3166,8 @@ function formatHeroSlide(row, productsById) {
     id: row.id,
     storefront: row.storefront || "glamia",
     variant: "editorial",
+    layout: row.layout || "poster",
+    imagery: row.imagery || "products",
     eyebrow: row.eyebrow,
     title: row.title,
     tagline: row.tagline,
@@ -3234,6 +3246,11 @@ function heroProductIds(body) {
 }
 
 async function validateHeroPayload(body, env, storefront = "glamia") {
+  const layout = body.layout ?? "poster";
+  const imagery = body.imagery ?? "products";
+  if (!WIBRAWL_HERO_LAYOUTS.includes(layout)) throw httpError("Unknown hero layout", 400);
+  if (!["products", "campaign"].includes(imagery)) throw httpError("Unknown hero imagery", 400);
+  if (body.active !== undefined && typeof body.active !== "boolean") throw httpError("Hero visibility must be true or false", 400);
   const title = heroText(body.title, "", 100);
   const tagline = heroText(body.tagline, "", 240);
   if (title.length < 2 || title.length > 100) throw httpError("Hero headline must be 2–100 characters", 400);
@@ -3252,6 +3269,8 @@ async function validateHeroPayload(body, env, storefront = "glamia") {
     : [];
   return {
     variant: "editorial",
+    layout,
+    imagery,
     eyebrow: heroText(body.eyebrow, storefront === "wibrawl" ? "The Wibrawl Edit" : "The Glamia Edit", 60),
     title,
     tagline,
@@ -3260,7 +3279,7 @@ async function validateHeroPayload(body, env, storefront = "glamia") {
     productIds,
     words,
     active: body.active === undefined ? true : Boolean(body.active),
-    position: Number.isSafeInteger(Number(body.position)) && Number(body.position) >= 0 ? Number(body.position) : null
+    position: body.position !== null && body.position !== undefined && body.position !== "" && Number.isSafeInteger(Number(body.position)) && Number(body.position) >= 0 ? Number(body.position) : null
   };
 }
 
@@ -3274,11 +3293,11 @@ async function createHeroSlide(request, env) {
   await env.DB.prepare(`
     INSERT INTO hero_slides (
       id, variant, eyebrow, title, tagline, cta_label, cta_category, product_ids_json,
-      words_json, position, active, storefront
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      words_json, position, active, storefront, layout, imagery
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id, next.variant, next.eyebrow, next.title, next.tagline, next.ctaLabel, next.ctaCategory,
-    JSON.stringify(next.productIds), JSON.stringify(next.words), position, next.active ? 1 : 0, storefront
+    JSON.stringify(next.productIds), JSON.stringify(next.words), position, next.active ? 1 : 0, storefront, next.layout, next.imagery
   ).run();
   return json({ ok: true, id }, 201);
 }
@@ -3288,8 +3307,15 @@ async function updateHeroSlide(request, env, id) {
   const current = await env.DB.prepare("SELECT * FROM hero_slides WHERE id = ? AND storefront = ?").bind(id, storefront).first();
   if (!current) return json({ error: "Hero slide not found" }, 404);
   const body = await readJson(request);
+  // A stale or removed product must never prevent an admin from hiding its slide.
+  if (Object.keys(body).length === 1 && body.active === false) {
+    await env.DB.prepare("UPDATE hero_slides SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND storefront = ?").bind(id, storefront).run();
+    return json({ ok: true, id });
+  }
   const merged = {
     variant: body.variant ?? current.variant,
+    layout: body.layout ?? current.layout,
+    imagery: body.imagery ?? current.imagery,
     eyebrow: body.eyebrow ?? current.eyebrow,
     title: body.title ?? current.title,
     tagline: body.tagline ?? current.tagline,
@@ -3304,11 +3330,11 @@ async function updateHeroSlide(request, env, id) {
   await env.DB.prepare(`
     UPDATE hero_slides SET variant = ?, eyebrow = ?, title = ?, tagline = ?, cta_label = ?,
       cta_category = ?, product_ids_json = ?, words_json = ?, position = ?,
-      active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+      active = ?, layout = ?, imagery = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND storefront = ?
   `).bind(
     next.variant, next.eyebrow, next.title, next.tagline, next.ctaLabel, next.ctaCategory,
     JSON.stringify(next.productIds), JSON.stringify(next.words),
-    next.position ?? Number(current.position), next.active ? 1 : 0, id
+    next.position ?? Number(current.position), next.active ? 1 : 0, next.layout, next.imagery, id, storefront
   ).run();
   return json({ ok: true, id });
 }
@@ -3316,6 +3342,22 @@ async function updateHeroSlide(request, env, id) {
 async function deleteHeroSlide(env, id, storefront = "glamia") {
   const result = await env.DB.prepare("DELETE FROM hero_slides WHERE id = ? AND storefront = ?").bind(id, storefront).run();
   if (!result.meta.changes) return json({ error: "Hero slide not found" }, 404);
+  return json({ ok: true });
+}
+
+async function reorderHeroSlides(request, env) {
+  const storefront = adminHeroStorefront(request);
+  const body = await readJson(request);
+  const ids = body.ids;
+  if (!Array.isArray(ids) || ids.some(id => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length) {
+    throw httpError("Provide each slide ID once in display order", 400);
+  }
+  const { results } = await env.DB.prepare("SELECT id FROM hero_slides WHERE storefront = ?").bind(storefront).all();
+  const currentIds = new Set(results.map(row => row.id));
+  if (ids.length !== currentIds.size || ids.some(id => !currentIds.has(id))) {
+    throw httpError("The slide list changed. Reload it before reordering", 409);
+  }
+  if (ids.length) await env.DB.batch(ids.map((id, position) => env.DB.prepare("UPDATE hero_slides SET position = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND storefront = ?").bind(position, id, storefront)));
   return json({ ok: true });
 }
 

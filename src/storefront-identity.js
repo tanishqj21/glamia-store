@@ -5,6 +5,8 @@ export const STOREFRONT_ORIGINS = Object.freeze([
   'https://glamiastore.com', 'https://www.glamiastore.com', WIBRAWL_ORIGIN
 ]);
 
+export const WIBRAWL_HERO_LAYOUTS = Object.freeze(['poster', 'collage', 'split']);
+
 export function isWibrawlUrl(input) {
   const url = input instanceof URL ? input : new URL(input);
   const hostname = url.hostname.toLowerCase();

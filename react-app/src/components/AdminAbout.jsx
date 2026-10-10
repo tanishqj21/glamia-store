@@ -37,7 +37,7 @@ export function AdminAboutView() {
   };
   if (!page) return <section className="admin-panel"><p role="status">{error || "Loading About us editor…"}</p></section>;
   return <section className="admin-panel admin-about">
-    <div className="admin-section-heading"><div><p className="eyebrow">YOUR STORY</p><h2>About us</h2><p>Build the timeline shoppers see on the About us page. Changes go live when you save.</p></div><a href="/about" target="_blank" rel="noreferrer">View live page</a></div>
+    <div className="admin-section-heading"><div><p className="eyebrow">Domain specific · Glamia</p><h2>About us</h2><p>Build the timeline shoppers see on the Glamia About us page. Changes go live when you save.</p></div><a href="https://glamiastore.com/about" target="_blank" rel="noreferrer">View live page</a></div>
     <div className="admin-about-grid"><form onSubmit={save} className="admin-about-form">
       <label>Eyebrow<input value={page.eyebrow} maxLength={60} required onChange={event => field("eyebrow", event.target.value)} /></label>
       <label>Headline<input value={page.headline} maxLength={120} required onChange={event => field("headline", event.target.value)} /></label>

@@ -9,7 +9,7 @@ const subtle = new Proxy(crypto.subtle, { get(target, property) {
   if (property === 'timingSafeEqual') return timingSafeEqual;
   const value = target[property]; return typeof value === 'function' ? value.bind(target) : value;
 } });
-const worker = await workerFunctions(['routeApi', 'listHeroSlides', 'createHeroSlide', 'updateHeroSlide', 'deleteHeroSlide', 'heroInsights', 'signSession', 'currentUser', 'makeSessionCookie', 'withSecurityHeaders'], { crypto: { subtle, randomUUID: () => crypto.randomUUID() } });
+const worker = await workerFunctions(['routeApi', 'listHeroSlides', 'createHeroSlide', 'updateHeroSlide', 'deleteHeroSlide', 'reorderHeroSlides', 'heroInsights', 'signSession', 'currentUser', 'makeSessionCookie', 'withSecurityHeaders'], { crypto: { subtle, randomUUID: () => crypto.randomUUID() } });
 const buyer = { sub: 'fixture', email: 'fixture@example.com', name: 'Fixture', role: 'seller' };
 const root = STOREFRONT_ORIGINS[0];
 function fixture(t) {
@@ -62,6 +62,39 @@ test('hero validation and recommendations only use products assigned to that sto
   assert.equal((await (await worker.listHeroSlides(env,true,'wibrawl')).json()).slides[0].id,wb.id,'Admin can still repair the slide');
   const insights = await (await worker.heroInsights(env,'wibrawl')).json();
   assert.deepEqual(insights.products.map(p=>p.id),['both']);
+});
+
+test('drag ordering includes hidden slides, rejects stale/cross-store lists and commits atomically', async t => {
+  const {db,env} = fixture(t);
+  const gm = await (await worker.createHeroSlide(heroRequest('glamia',slide('gm')),env)).json();
+  const ids = [];
+  for (const layout of ['poster','collage','split']) ids.push((await (await worker.createHeroSlide(heroRequest('wibrawl',slide('wb',{layout,active:layout!=='collage'})),env)).json()).id);
+  const request = list => heroRequest('wibrawl',{ids:list},'order','PUT');
+  await worker.reorderHeroSlides(request([...ids].reverse()),env);
+  const all = (await (await worker.listHeroSlides(env,true,'wibrawl')).json()).slides;
+  assert.deepEqual(all.map(s=>s.id),[...ids].reverse());
+  assert.deepEqual(all.map(s=>s.position),[0,1,2]);
+  assert.deepEqual(all.map(s=>s.layout),['split','collage','poster']);
+  assert.deepEqual((await (await worker.listHeroSlides(env,false,'wibrawl')).json()).slides.map(s=>s.id),[ids[2],ids[0]]);
+  for (const list of [ids.slice(1),[gm.id,...ids.slice(1)], [...ids,'stale']]) await assert.rejects(worker.reorderHeroSlides(request(list),env),{status:409});
+  await assert.rejects(worker.reorderHeroSlides(request([ids[0],ids[0],ids[2]]),env),{status:400});
+  // A failure partway through the D1 batch must not leave half-reordered rows.
+  db.exec(`CREATE TRIGGER fail_hero_reorder BEFORE UPDATE OF position ON hero_slides WHEN NEW.id='${ids[1]}' BEGIN SELECT RAISE(ABORT,'fixture write failure'); END`);
+  await assert.rejects(worker.reorderHeroSlides(request(ids),env));
+  assert.deepEqual(db.prepare("SELECT id FROM hero_slides WHERE storefront='wibrawl' ORDER BY position").all().map(s=>s.id),[...ids].reverse());
+  assert.equal(db.prepare('SELECT position FROM hero_slides WHERE id=?').get(gm.id).position,0);
+});
+
+test('layouts and campaign choice persist, and a broken product cannot prevent hiding a slide', async t => {
+  const {db,env} = fixture(t);
+  for (const field of [{layout:'unknown'},{imagery:'https://attacker.test/a.jpg'},{active:'false'}]) await assert.rejects(worker.createHeroSlide(heroRequest('wibrawl',slide('wb',field)),env),{status:400});
+  const result = await (await worker.createHeroSlide(heroRequest('wibrawl',slide('wb',{layout:'split',imagery:'campaign'})),env)).json();
+  const data = (await (await worker.listHeroSlides(env,false,'wibrawl')).json()).slides[0];
+  assert.equal(data.layout,'split'); assert.equal(data.imagery,'campaign');
+  db.exec("UPDATE products SET status='hold' WHERE id='wb'");
+  await worker.updateHeroSlide(heroRequest('wibrawl',{active:false},result.id,'PATCH'),env,result.id);
+  assert.equal(db.prepare('SELECT active FROM hero_slides WHERE id=?').get(result.id).active,0);
+  await assert.rejects(worker.updateHeroSlide(heroRequest('wibrawl',{active:true},result.id,'PATCH'),env,result.id),{status:400});
 });
 
 test('public hero resolves from the hostname while admin requires authentication', async t => {

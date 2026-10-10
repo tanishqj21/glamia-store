@@ -39,6 +39,25 @@
 .admin-react-page .admin-action-error { align-items: center; display: flex; gap: 16px; justify-content: space-between; margin-bottom: 20px; }
 .admin-react-page .admin-action-error > span { min-width: 0; }
 .admin-react-page :where(.operation-main, .system-row-main, .admin-form-grid > *, .admin-listing-form > *, .care-conversation, .merch-workspace > *) { min-width: 0; }
+
+.hero-slide-queue { margin-top:24px; border-top:1px solid var(--line); padding-top:24px; }
+.hero-slide-queue>p { font-size:12px; line-height:1.6; }
+.hero-slide-queue ol { list-style:none; padding:0; }
+.hero-slide-queue .hero-queue-row { grid-template-columns:44px minmax(0,1fr) auto; gap:10px; padding:14px 8px; cursor:default; position:relative; }
+.admin-react-page .hero-drag-handle { touch-action:none; cursor:grab; width:44px; min-height:64px; border:1px solid var(--line); border-radius:4px; background:var(--surface); color:var(--ink); font-size:26px; }
+.hero-drag-handle:active { cursor:grabbing; }
+.hero-slide-queue .hero-queue-row.is-dragging { opacity:.5; }
+.hero-slide-queue .hero-queue-row.is-drop-target { outline:2px solid var(--ink); outline-offset:-2px; }
+.hero-queue-preview { display:flex; align-items:center; gap:12px; min-width:0; background:transparent; color:var(--ink); border:0; text-align:left; cursor:pointer; min-height:64px; padding:0; }
+.hero-queue-preview img { flex:none; width:48px; height:64px; object-fit:cover; }
+.hero-queue-preview .merch-slide-copy { min-width:0; }
+.hero-queue-preview strong { font-size:14px; }
+.hero-queue-visibility { display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; min-height:44px; }
+.hero-queue-visibility input { accent-color:var(--ink); width:18px; height:18px; }
+.hero-slide-queue .merch-slide-actions { grid-column:2 / -1; }
+.hero-slide-queue .merch-slide-actions button { min-height:36px; padding:7px 12px; }
+.hero-slide-queue :is(button,input):focus-visible { outline:2px solid var(--ink); outline-offset:3px; }
+@media(max-width:450px) { .hero-slide-queue .hero-queue-row { grid-template-columns:44px minmax(0,1fr); } .hero-queue-visibility { grid-column:2; } .hero-slide-queue .merch-slide-actions { grid-column:2; } }
 .admin-react-page :where(.operation-main > span, .operation-main > small, .system-row-main > span, .system-row-main > small, .care-conversation-head .muted) { overflow-wrap: anywhere; }
 .admin-react-page :where(.admin-form-grid, .form-row, .employee-access-fields, .merch-form-grid) { gap: 18px; }
 .admin-react-page fieldset { border-radius: 8px; min-width: 0; }

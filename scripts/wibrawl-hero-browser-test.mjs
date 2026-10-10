@@ -20,7 +20,7 @@ const token=await worker.signSession(owner,env);
 const browser=await chromium.launch(),errors=[];
 const output='tmp/wibrawl-hero-review';mkdirSync(output,{recursive:true});
 try {
-  const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});
+  const context=await browser.newContext({viewport:{width:1440,height:1000},hasTouch:true,reducedMotion:'reduce'});
   await context.route('**/api/**',async route=>{
     const url=new URL(route.request().url()),path=url.pathname;let data={};
     if(path==='/api/hero'||path.startsWith('/api/admin/hero')) {
@@ -47,10 +47,11 @@ try {
   assert.equal(await page.locator('#hero-slide-form .merch-product-options').getByText('Glamia exclusive',{exact:true}).count(),0);
   assert.equal(await page.locator('.merch-preview-arrow svg').count(),0,'Wibrawl controls are text only');
   await page.getByLabel('Headline',{exact:true}).fill('Your next favourite tee');
+  await page.getByLabel('Hero imagery',{exact:true}).selectOption('campaign');
   await page.getByLabel('Tagline',{exact:true}).fill('A new drop for your world.');
   await page.getByLabel('CTA label',{exact:true}).fill('Shop the drop');
   await page.locator('select[name=cta_category]').selectOption('Tees');
-  await page.locator('.merch-product-options label').filter({hasText:'Wibrawl exclusive'}).click();
+  await page.locator('#hero-slide-form .merch-product-options label').filter({hasText:'Wibrawl exclusive'}).click();
   await page.getByRole('button',{name:'Publish slide',exact:true}).click();
   await page.locator('.merch-slide-row').filter({hasText:'Your next favourite tee'}).waitFor();
   assert.equal(db.prepare("SELECT storefront FROM hero_slides").get().storefront,'wibrawl');
@@ -63,8 +64,62 @@ try {
   assert.equal(await page.locator('.merch-slide-row').count(),0);
   await selector.selectOption('wibrawl');
   await page.locator('.merch-slide-row').waitFor();
-  await page.screenshot({path:output+'/admin-wibrawl.png',fullPage:true});
-  await worker.createHeroSlide(new Request(base+'/api/admin/hero?storefront=wibrawl',{method:'POST',body:JSON.stringify({title:'An extra long headline for the fandoms the rivalries and every world that brings us together',tagline:'Your passions, your tees.',product_ids:['wb','both'],words:['Gaming','Anime'],cta_label:'Explore tees'})}),env);
+  await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:output+'/admin-wibrawl.png',fullPage:true});
+  await worker.createHeroSlide(new Request(base+'/api/admin/hero?storefront=wibrawl',{method:'POST',body:JSON.stringify({title:'An extra long headline for the fandoms the rivalries and every world that brings us together',tagline:'Your passions, your tees.',product_ids:['wb','both'],layout:'collage',words:['YOUR VIBE','NO FILTER'],cta_label:'Explore tees'})}),env);
+  await worker.createHeroSlide(new Request(base+'/api/admin/hero?storefront=wibrawl',{method:'POST',body:JSON.stringify({title:'Make it yours.',tagline:'An everyday fit with a little more you.',layout:'split',product_ids:['both'],cta_label:'Explore the edit'})}),env);
+  await page.goto(base+'/admin/hero?wibrawl-preview=1');
+  await page.getByRole('heading',{name:'Hero Studio',exact:true}).waitFor();
+  assert.equal(await page.getByRole('combobox',{name:'Hero storefront'}).inputValue(),'wibrawl');
+  await page.locator('.hero-queue-row').nth(2).waitFor();
+  await page.getByRole('heading',{name:'Cinematic Reel Studio',exact:true}).waitFor();
+  const wbLinks=await page.locator('.admin-workspace-nav button').evaluateAll(nodes=>nodes.map(n=>n.textContent));
+  // Actual mouse drag: last slide becomes first. Keyboard handles then restore order.
+  const dragHandle=page.getByRole('button',{name:'Reorder Make it yours.',exact:true});
+  await dragHandle.scrollIntoViewIfNeeded();
+  const first=page.locator('.hero-queue-row').first();
+  await first.scrollIntoViewIfNeeded();
+  const from=await dragHandle.boundingBox(),to=await first.boundingBox();
+  await page.mouse.move(from.x+from.width/2,from.y+from.height/2);
+  await page.mouse.down();await page.mouse.move(to.x+to.width/2,to.y+to.height/2,{steps:12});await page.mouse.up();
+  await page.waitForFunction(()=>document.querySelector('.hero-queue-row strong')?.textContent==='1. Make it yours.');
+  await page.waitForFunction(()=>!document.querySelector('.hero-drag-handle').disabled);
+  assert.equal(db.prepare("SELECT title FROM hero_slides WHERE storefront='wibrawl' ORDER BY position").get().title,'Make it yours.');
+  await dragHandle.focus();await page.keyboard.press('ArrowDown');
+  await page.getByText('Slide order saved. Top plays first.',{exact:true}).waitFor();
+  await page.waitForFunction(()=>document.querySelectorAll('.hero-queue-row strong')[1]?.textContent==='2. Make it yours.');
+  await page.waitForFunction(()=>!document.querySelector('.hero-drag-handle').disabled);
+  await dragHandle.focus();await page.keyboard.press('ArrowDown');
+  await page.waitForFunction(()=>document.querySelectorAll('.hero-queue-row strong')[2]?.textContent==='3. Make it yours.');
+  await page.waitForFunction(()=>!document.querySelector('.hero-drag-handle').disabled);
+  await page.reload();await page.locator('.hero-queue-row').nth(2).waitFor();
+  assert.equal(await page.locator('.hero-queue-row strong').first().innerText(),'1. Wear your world together');
+  const ids=db.prepare("SELECT id FROM hero_slides WHERE storefront='wibrawl' ORDER BY position").all().map(row=>row.id);
+  const show=page.locator('.hero-queue-visibility input');
+  await show.nth(1).uncheck();await page.waitForFunction(()=>!document.querySelector('.hero-drag-handle').disabled);
+  await page.goto(base+'/?wibrawl-preview=1');
+  await page.getByRole('heading',{name:'Wear your world together',exact:true}).waitFor();
+  assert.equal(await page.locator('.wibrawl-carousel-pages button').count(),2);
+  for(const id of ids)await worker.routeApi(new Request(base+'/api/admin/hero/'+id+'?storefront=wibrawl',{method:'PATCH',headers:{cookie:`mm_session=${token}`,Origin:base,"X-Requested-With":"Glamia"},body:JSON.stringify({active:false})}),env,new URL(base+'/api/admin/hero/'+id+'?storefront=wibrawl'),{});
+  await page.reload();await page.locator('.wibrawl-home').waitFor();await page.waitForFunction(()=>!document.querySelector('.wibrawl-hero-loading'));
+  assert.equal(await page.locator('.wibrawl-carousel').count(),0,'Hiding all slides hides the whole hero');
+  for(const id of ids)await worker.routeApi(new Request(base+'/api/admin/hero/'+id+'?storefront=wibrawl',{method:'PATCH',headers:{cookie:`mm_session=${token}`,Origin:base,"X-Requested-With":"Glamia"},body:JSON.stringify({active:true})}),env,new URL(base+'/api/admin/hero/'+id+'?storefront=wibrawl'),{});
+  await page.goto(base+'/admin/hero');await page.getByRole('heading',{name:'Hero Studio',exact:true}).waitFor();
+  assert.deepEqual(await page.locator('.admin-workspace-nav button').evaluateAll(nodes=>nodes.map(n=>n.textContent)),wbLinks,'Both domains have the same admin navigation');
+  await page.getByRole('combobox',{name:'Hero storefront'}).selectOption('wibrawl');
+  await page.locator('.hero-queue-row').nth(2).waitFor();
+  await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:output+'/admin-wibrawl.png',fullPage:true});
+  await page.setViewportSize({width:390,height:900});
+  const touchHandle=page.getByRole('button',{name:'Reorder Make it yours.',exact:true});
+  await touchHandle.scrollIntoViewIfNeeded();await page.locator('.hero-queue-row').first().scrollIntoViewIfNeeded();
+  const touchFrom=await touchHandle.boundingBox(),touchTo=await page.locator('.hero-queue-row').first().boundingBox();
+  assert.equal(await touchHandle.evaluate(node=>getComputedStyle(node).touchAction),'none');
+  const cdp=await context.newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:touchFrom.x+touchFrom.width/2,y:touchFrom.y+touchFrom.height/2,id:1}]});
+  for(let step=1;step<=12;step++)await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:touchTo.x+touchTo.width/2,y:touchFrom.y+touchFrom.height/2+(touchTo.y+touchTo.height/2-touchFrom.y-touchFrom.height/2)*step/12,id:1}]});
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await page.waitForFunction(()=>document.querySelector('.hero-queue-row strong')?.textContent==='1. Make it yours.');
+  for(let step=0;step<2;step++) { await page.waitForFunction(()=>!document.querySelector('.hero-drag-handle').disabled);await touchHandle.focus();await page.keyboard.press('ArrowDown');await page.waitForFunction(index=>document.querySelectorAll('.hero-queue-row strong')[index]?.textContent===`${index+1}. Make it yours.`,step+1); }
+  await cdp.detach();await page.setViewportSize({width:1440,height:1000});
   for(const [label,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:360,height:800}]]) {
     await page.setViewportSize(viewport);
     await page.goto(base+'/?wibrawl-preview=1');
@@ -78,14 +133,29 @@ try {
       assert.deepEqual(result.violations.map(v=>v.id),[],`${label} ${theme} carousel accessibility`);
       assert.equal(await page.locator('.wibrawl-carousel button svg').count(),0);
       assert.equal(await page.getByRole('button',{name:'Pause carousel',exact:true}).count(),0,'Reduced motion disables autoplay');
-      await page.screenshot({path:`${output}/${label}-${theme.toLowerCase()}.png`,fullPage:true});
-      await page.getByRole('button',{name:'Previous hero slide',exact:true}).click();
+      await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:`${output}/${label}-${theme.toLowerCase()}.png`,fullPage:true});
+      await page.getByRole('button',{name:'Next hero slide',exact:true}).click();
+      await page.getByRole('heading',{name:'Make it yours.',exact:true}).waitFor();
+      assert.equal(await page.locator('[data-layout=split]').count(),1);
+      if(label==='desktop')assert.ok((await page.locator('.wibrawl-edited-hero').boundingBox()).height<700,'Split hero fits the first screen');
+      await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:`${output}/${label}-${theme.toLowerCase()}-split.png`,fullPage:true});
+      const splitAxe=await new AxeBuilder({page}).include('.wibrawl-carousel').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();
+      assert.deepEqual(splitAxe.violations.map(v=>v.id),[]);
+      await page.getByRole('button',{name:'Next hero slide',exact:true}).click();
+      assert.equal(await page.locator('[data-layout=poster]').count(),1);
+      await page.evaluate(()=>scrollTo(0,0));await page.screenshot({path:`${output}/${label}-${theme.toLowerCase()}-poster.png`,fullPage:true});
+      const posterAxe=await new AxeBuilder({page}).include('.wibrawl-carousel').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();
+      assert.deepEqual(posterAxe.violations.map(v=>v.id),[]);
       await page.getByRole('link',{name:'Shop the drop',exact:true}).click();
       await page.waitForURL('**/category/Tees');
       await page.goto(base+'/?wibrawl-preview=1');
       await page.getByRole('heading',{name:'Wear your world together',exact:true}).waitFor();
     }
   }
+  await page.goto(base+'/about?wibrawl-preview=1');
+  await page.getByRole('heading',{name:'YOUR VIBE. YOUR IDENTITY.'}).waitFor();
+  assert.equal(await page.locator('.wibrawl-culture-strip').count(),0);
+  assert.doesNotMatch(await page.locator('.wibrawl-about').innerText(),/gaming|anime|sports|movies|music|memes/i);
   assert.deepEqual(errors,[]);
   console.log('Hero Studio storefront switching, product filtering, create/edit, live display, CTA, mobile themes and carousel accessibility passed.');
 } finally {await browser.close();db.close();}
