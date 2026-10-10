@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="symbol-title symbol-description">
+<title id="symbol-title">Wibrawl symbol</title>
+<desc id="symbol-description">An original angular avatar with a focused eye, a cheeky wink and an upward grin. Motion streaks suggest competitive speed; a detached pixel adds an arcade detail. Single-colour black. No lettering. Transparent background.</desc>
+<defs><mask id="wibrawl-face-000000" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256"><rect width="256" height="256" fill="#FFFFFF"/><path d="M79 103L127 91L121 111L83 119Z" fill="#000000"/><path d="M150 99Q174 82 194 103L184 116Q174 105 156 113Z" fill="#000000"/><path d="M86 143Q128 159 191 126L180 150Q147 186 114 177Q97 169 86 143Z" fill="#000000"/></mask></defs>
+<g mask="url(#wibrawl-face-000000)"><path fill="#000000" d="M96 43L164 31Q183 28 196 43L221 73Q233 87 227 104L206 172Q202 187 188 194L140 219Q127 226 115 219L71 194Q56 185 54 167L49 116Q47 101 58 87L83 53Q88 46 96 43Z"/></g>
+<path fill="#000000" d="M98 149Q132 158 177 138L170 151Q133 169 106 161Z"/>
+<path fill="#000000" d="M19 89H56L42 108H6Z"/><path fill="#000000" d="M17 129H39L42 148H8Z"/><path fill="#000000" d="M64 40L79 37L82 52L67 55Z"/>
+</svg>
