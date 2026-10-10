@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 256" role="img" aria-labelledby="title description">
+<title id="title">WiBrawl — WB Flow, gaming neon palette</title>
+<desc id="description">The approved WB shape recoloured entirely in neon yellow, blue and a small pink detail. Yellow is dominant. Designed for the dark Gaming theme. Transparent background.</desc>
+<g transform="translate(8 6)"><g fill="#DDFF39"><path d="M22 58Q20 38 41 38H44Q63 38 66 57L79 134L101 93Q106 84 116 84H124Q134 84 138 95L154 135L171 56Q175 38 200 38H213L177 181Q173 199 155 199H150Q136 199 130 183L117 154L103 182Q95 199 80 199H75Q57 199 52 180Z"/>
+<path fill-rule="evenodd" d="M188 43L200 38H226C259 38 280 55 280 81C280 101 271 115 254 122C275 129 289 146 289 165C289 187 269 199 236 199H162ZM213 69L207 102H223C240 102 249 96 249 85C249 75 242 69 226 69ZM200 133L193 173H228C246 173 258 168 258 155C258 142 246 133 228 133Z"/></g><path fill="#246BFF" d="M171 56Q175 38 200 38H213L207 65H169Z"/>
+<path fill="#FF3BB5" d="M226 113H269Q263 119 254 122L265 129H224Z"/></g>
+</svg>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 256" role="img" aria-labelledby="title description">
+<title id="title">WiBrawl — WB Shift, sports neon palette</title>
+<desc id="description">The approved WB shape recoloured entirely in neon yellow, blue and a small pink detail. Yellow is dominant. A blue edge supports the light website theme. Transparent background.</desc>
+<g transform="translate(8 6)"><g fill="#DDFF39" stroke="#246BFF" stroke-width="4" stroke-linejoin="round" paint-order="stroke fill"><path d="M28 54H63L74 141L98 102H119L138 141L156 54H190L158 199H132L109 154L84 199H56Z"/>
+<path fill-rule="evenodd" d="M169 54H227L260 76L254 111L235 126L253 143L244 180L216 199H156ZM196 80L190 111H213L224 101L227 90L214 80ZM184 141L178 173H207L218 163L221 151L207 141Z"/></g><path fill="#246BFF" d="M156 54H190L180 98H147Z"/><path fill="#FF3BB5" d="M246 172L244 180L231 189L226 180Z"/></g>
+</svg>
