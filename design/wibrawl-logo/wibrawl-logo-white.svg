@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 968 180" role="img" aria-labelledby="logo-title logo-description">
+<title id="logo-title">Wibrawl — Neon Fold</title>
+<desc id="logo-description">An angular folded W in neon blue, pink and yellow beside custom Wibrawl lettering. Transparent background.</desc>
+<g transform="translate(4 6)"><path fill="#FFFFFF" d="M14 20H48L72 101L99 20H133L90 148H56Z"/>
+<path fill="#FFFFFF" d="M112 20H146L170 101L197 20H231L188 148H154Z"/>
+<path fill="#FFFFFF" d="M99 20H133L124 47H90Z"/></g>
+<g transform="translate(292 40)"><path transform="translate(0 0)" fill="#FFFFFF" fill-rule="evenodd" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/>
+<path transform="translate(126 0)" fill="#FFFFFF" fill-rule="evenodd" d="M0 0H22V100H0Z"/>
+<path transform="translate(160 0)" fill="#FFFFFF" fill-rule="evenodd" d="M0 0H62L80 18V38L68 50L80 62V82L62 100H0ZM22 19V42H53L59 36V25L53 19ZM22 59V81H54L60 75V65L54 59Z"/>
+<path transform="translate(252 0)" fill="#FFFFFF" fill-rule="evenodd" d="M0 0H62L80 18V43L62 60L84 100H58L37 60H22V100H0ZM22 20V41H53L59 35V26L53 20Z"/>
+<path transform="translate(348 0)" fill="#FFFFFF" fill-rule="evenodd" d="M0 100L31 0H59L90 100H66L60 78H30L24 100ZM36 58H54L45 27Z"/>
+<path transform="translate(450 0)" fill="#FFFFFF" fill-rule="evenodd" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/>
+<path transform="translate(576 0)" fill="#FFFFFF" fill-rule="evenodd" d="M0 0H22V79H70V100H0Z"/></g>
+</svg>

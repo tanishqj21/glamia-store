@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 224" role="img" aria-labelledby="logo-title logo-description">
+<title id="logo-title">Wibrawl — Label Code</title>
+<desc id="logo-description">A compact WB monogram with a yellow connection and a stacked Wibrawl wordmark. Transparent background.</desc>
+<g transform="translate(0 16)"><path fill="#00C8FF" d="M20 20H45L58 113L77 54H98L116 113L132 20H157L132 174H109L87 107L65 174H43Z"/>
+<path fill="#FF3096" fill-rule="evenodd" d="M160 20H206L230 44V76L216 90L232 107V150L208 174H144L149 148H194L207 135V116L197 106H156L161 81H195L205 71V55L195 45H155Z"/>
+<path fill="#F4FF38" d="M77 54H98L105 77H70Z"/></g>
+<g transform="translate(280 28) scale(.85)"><path transform="translate(0 0)" fill="#F7F8F5" fill-rule="evenodd" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/>
+<path transform="translate(126 0)" fill="#F7F8F5" fill-rule="evenodd" d="M0 0H22V100H0Z"/></g>
+<g transform="translate(280 130) scale(.76)"><path transform="translate(0 0)" fill="#F7F8F5" fill-rule="evenodd" d="M0 0H62L80 18V38L68 50L80 62V82L62 100H0ZM22 19V42H53L59 36V25L53 19ZM22 59V81H54L60 75V65L54 59Z"/>
+<path transform="translate(88 0)" fill="#F7F8F5" fill-rule="evenodd" d="M0 0H62L80 18V43L62 60L84 100H58L37 60H22V100H0ZM22 20V41H53L59 35V26L53 20Z"/>
+<path transform="translate(180 0)" fill="#F7F8F5" fill-rule="evenodd" d="M0 100L31 0H59L90 100H66L60 78H30L24 100ZM36 58H54L45 27Z"/>
+<path transform="translate(278 0)" fill="#F7F8F5" fill-rule="evenodd" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/>
+<path transform="translate(400 0)" fill="#F7F8F5" fill-rule="evenodd" d="M0 0H22V79H70V100H0Z"/></g>
+</svg>
