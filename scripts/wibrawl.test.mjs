@@ -126,5 +126,8 @@ test('direct product links render the Wibrawl header and footer before JavaScrip
   const html = await response.text();
   assert.match(html,/wibrawl-wordmark/); assert.match(html,/wibrawl-footer/);
   assert.ok(!html.includes('id="initial-loader"'));
-  assert.match(html,/\/wibrawl\/favicon.png/);
+  assert.match(html,/\/wibrawl\/favicon.svg/);
+  assert.match(html,/\/wibrawl\/logo.svg/);
+  assert.match(html,/<link rel="icon" type="image\/svg\+xml" sizes="any" href="\/wibrawl\/favicon.svg\?v=afterimage"/);
+  assert.doesNotMatch(html,/<link[^>]+href="\/wibrawl\/(?:favicon|icon-192)\.png"/);
 });

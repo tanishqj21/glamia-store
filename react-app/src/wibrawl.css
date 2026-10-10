@@ -7,9 +7,7 @@
 :root[data-brand="wibrawl"] .initial-loader { background:var(--bg); color:var(--ink); }
 :root[data-brand="wibrawl"] .initial-loader-glow { display:none; }
 :root[data-brand="wibrawl"] .initial-loader-brand { font-family:Jost,sans-serif; font-weight:600; letter-spacing:-.04em; }
-:root[data-brand="wibrawl"] .initial-loader-brand img { display:none; }
-:root[data-brand="wibrawl"] .initial-loader-brand span { font-size:0; }
-:root[data-brand="wibrawl"] .initial-loader-brand span::before { content:"WIBRAWL"; font-size:46px; }
+:root[data-brand="wibrawl"] .initial-loader-brand img.wibrawl-logo { display:block; width:min(280px,75vw); height:auto; }
 :root[data-brand="wibrawl"] .initial-loader-caption { color:var(--accent-text); }
 :root[data-brand="wibrawl"] .initial-loader-line { background:var(--line); width:80px; }
 :root[data-brand="wibrawl"] .initial-loader-line span { background:var(--accent); }
@@ -18,8 +16,8 @@
 .wibrawl-shell .site-header:not(.admin-site-header) .header-tools { display:contents; }
 .wibrawl-shell .site-header:not(.admin-site-header) .menu-button { grid-column:1; grid-row:1; width:40px; height:44px; }
 .wibrawl-shell .wordmark.wibrawl-wordmark { color:var(--ink); font-family:Jost,sans-serif; font-size:28px; font-weight:600; letter-spacing:-.055em; gap:9px; line-height:1; }
+.wibrawl-shell .wordmark.wibrawl-wordmark .wibrawl-logo { display:block; width:212px; height:auto; max-width:100%; }
 .wibrawl-shell .site-header:not(.admin-site-header) .wordmark { grid-column:2; justify-self:start; }
-.wibrawl-mark { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; flex:none; background:var(--accent); color:#18221a; font:600 16px/1 Jost,sans-serif; letter-spacing:-.08em; border-radius:4px; }
 .wibrawl-shell .site-header:not(.admin-site-header) .search-suggest { grid-column:3; grid-row:1; width:100%; max-width:410px; justify-self:center; }
 .wibrawl-shell .search-box { max-width:none; border-radius:4px; background:var(--surface); }
 .wibrawl-shell .search-box input { font-size:13px; }
@@ -134,6 +132,7 @@
 .wibrawl-manifesto div>p { color:var(--muted); max-width:410px; font-size:16px; line-height:1.6; margin:0 0 28px; }
 .wibrawl-shell .site-footer { background:var(--surface); color:var(--ink); border-top:1px solid var(--line); margin-top:0; padding:54px clamp(24px,5vw,76px); }
 .wibrawl-shell .footer-mark { font-family:Jost,sans-serif; color:var(--ink); font-size:30px; font-weight:600; letter-spacing:-.05em; }
+.wibrawl-shell .footer-mark .wibrawl-logo { display:block; width:260px; height:auto; max-width:100%; }
 .wibrawl-shell .site-footer>p,.wibrawl-shell .footer-nav-groups a,.wibrawl-shell .footer-socials-copy small { color:var(--muted); }
 .wibrawl-shell .footer-nav-groups a:hover,.wibrawl-shell .footer-policy-nav>span { color:var(--ink); }
 :root[data-brand="wibrawl"] .wibrawl-shell .footer-policy-nav>span { color:var(--ink); }
@@ -173,6 +172,7 @@
 @media (max-width:1100px) {
   .wibrawl-shell .site-header:not(.admin-site-header) { gap:12px; padding-inline:24px; grid-template-columns:36px auto minmax(160px,1fr) auto auto 40px; }
   .wibrawl-shell .wordmark.wibrawl-wordmark { font-size:24px; gap:7px; }
+  .wibrawl-shell .wordmark.wibrawl-wordmark .wibrawl-logo { width:184px; }
   .wibrawl-shell .account-menu-name { display:none; }
   .wibrawl-shell .header-credits { padding-inline:8px; }
   .wibrawl-hero-actions { gap:8px; }
@@ -208,7 +208,7 @@
 @media (max-width:600px) {
   .wibrawl-shell .site-header:not(.admin-site-header) { padding-inline:16px; gap:8px; }
   .wibrawl-shell .wordmark.wibrawl-wordmark { font-size:23px; }
-  .wibrawl-mark { width:29px; height:29px; font-size:14px; }
+  .wibrawl-shell .wordmark.wibrawl-wordmark .wibrawl-logo { width:clamp(120px,calc(100vw - 220px),170px); }
   .wibrawl-guest-account summary { padding:8px; font-size:11px; gap:6px; }
   .wibrawl-account-plus { display:none; }
   .wibrawl-navigation { display:grid; grid-template-columns:1fr; gap:7px; padding:6px 16px 10px; }

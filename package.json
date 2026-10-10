@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "react:dev": "vite --config react-app/vite.config.js",
-    "prereact:build": "node scripts/prepare-cart-styles.mjs",
+    "prereact:build": "node scripts/prepare-wibrawl-brand.mjs && node scripts/prepare-cart-styles.mjs",
     "react:build": "vite build --config react-app/vite.config.js",
     "media:optimize": "node scripts/optimize-product-media.mjs",
     "postreact:build": "node scripts/prepare-storefront-styles.mjs && node scripts/check-assets.mjs",

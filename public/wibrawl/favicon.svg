@@ -1,1 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" rx="48" fill="#c3f35e"/><text x="256" y="322" text-anchor="middle" font-family="Arial Black,Arial,sans-serif" font-size="200" font-weight="900" letter-spacing="-16" fill="#18221a">WB</text></svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+<title id="title">Wibrawl WB</title>
+<rect width="256" height="256" rx="32" fill="#101413"/>
+<g transform="translate(27 70) scale(1.1) skewX(-10)">
+<g transform="translate(0 7)"><path fill="#FF3096" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/><path transform="translate(124 0)" fill="#FF3096" fill-rule="evenodd" d="M0 0H62L80 18V38L68 50L80 62V82L62 100H0ZM22 19V42H53L59 36V25L53 19ZM22 59V81H54L60 75V65L54 59Z"/></g>
+<path fill="#00C8FF" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/><path transform="translate(124 0)" fill="#00C8FF" fill-rule="evenodd" d="M0 0H62L80 18V38L68 50L80 62V82L62 100H0ZM22 19V42H53L59 36V25L53 19ZM22 59V81H54L60 75V65L54 59Z"/>
+<path fill="#C3F35E" d="M92 0H114L110.48 16H89.22Z"/>
+</g>
+</svg>
