@@ -17,6 +17,14 @@
 .wibrawl-shell .site-header:not(.admin-site-header) .menu-button { grid-column:1; grid-row:1; width:40px; height:44px; }
 .wibrawl-shell .wordmark.wibrawl-wordmark { color:var(--ink); font-family:Jost,sans-serif; font-size:28px; font-weight:600; letter-spacing:-.055em; gap:9px; line-height:1; }
 .wibrawl-shell .wordmark.wibrawl-wordmark .wibrawl-logo { display:block; width:212px; height:auto; max-width:100%; }
+/* The hover glow follows the SVG lettering, with no surrounding badge. */
+.wibrawl-logo-glow { display:block; position:relative; isolation:isolate; }
+.wibrawl-logo-glow::after { background:conic-gradient(from var(--wibrawl-glow-angle,270deg),#00c8ff,#ff3096 120deg,#c3f35e 240deg,#00c8ff); content:""; inset:0; mask:url('/wibrawl/logo.svg') center / contain no-repeat; opacity:0; pointer-events:none; position:absolute; transition:opacity .2s ease; }
+.wibrawl-shell .wordmark.wibrawl-wordmark .wibrawl-logo { transition:filter .2s ease; }
+.wibrawl-wordmark:is(:hover,:focus-visible) .wibrawl-logo-glow::after { opacity:.45; }
+.wibrawl-wordmark:is(:hover,:focus-visible) .wibrawl-logo { filter:drop-shadow(-3px 0 4px rgb(0 200 255 / 55%)) drop-shadow(3px 1px 4px rgb(255 48 150 / 45%)) drop-shadow(0 -2px 4px rgb(195 243 94 / 40%)); }
+@media (prefers-reduced-motion:reduce) { .wibrawl-logo-glow::after,.wibrawl-shell .wordmark.wibrawl-wordmark .wibrawl-logo { transition:none; } }
+
 .wibrawl-shell .site-header:not(.admin-site-header) .wordmark { grid-column:2; justify-self:start; }
 .wibrawl-shell .site-header:not(.admin-site-header) .search-suggest { grid-column:3; grid-row:1; width:100%; max-width:410px; justify-self:center; }
 .wibrawl-shell .search-box { max-width:none; border-radius:4px; background:var(--surface); }
@@ -54,6 +62,11 @@
 .wibrawl-shell .drawer-category[open] > summary .drawer-expand { transform:rotate(45deg); }
 .wibrawl-drawer-collections { display:grid; border-bottom:1px solid var(--line); margin-bottom:20px; padding-bottom:20px; }
 .wibrawl-drawer-collections a { padding:10px 0; text-decoration:none; font-weight:600; }
+.wibrawl-shell .drawer-glamia-link { align-items:flex-start; border-top:1px solid var(--line); color:var(--ink); display:flex; flex-direction:column; gap:10px; margin-top:24px; padding:24px 0 8px; text-decoration:none; }
+.wibrawl-shell .drawer-glamia-link > span { color:var(--muted); font-size:12px; letter-spacing:.08em; }
+.wibrawl-shell .drawer-glamia-link .glamia-logo { display:block; height:auto; width:164px; }
+.wibrawl-shell .drawer-glamia-link:hover { color:var(--accent-text); }
+
 .wibrawl-shell .drawer-category .ui-icon { display:none; }
 .wibrawl-home { max-width:1600px; margin-inline:auto; }
 .wibrawl-carousel { touch-action:pan-y pinch-zoom; }
