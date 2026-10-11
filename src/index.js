@@ -896,10 +896,16 @@ async function getSitemap(request, env) {
   let productRows = [];
   try {
     const result = await env.DB.prepare(`
-      SELECT id, product_code, name, category, subcategory, images_json, image_url, thumbnail_url, updated_at, created_at
-      FROM products
-      WHERE status = 'live' AND COALESCE(storefront_visibility, 'glamia') IN ${visibility}
-      ORDER BY updated_at DESC, created_at DESC
+      SELECT p.id, p.product_code, p.name, p.category, p.subcategory, p.images_json, p.image_url, p.thumbnail_url, p.updated_at, p.created_at
+      FROM products p
+      WHERE p.status = 'live' AND COALESCE(p.storefront_visibility, 'glamia') IN ${visibility}
+        AND NOT EXISTS (
+          SELECT 1 FROM merchant_product_details details
+          WHERE details.product_id = p.id
+            AND CASE WHEN json_valid(details.metadata_json)
+              THEN json_type(details.metadata_json, '$.isSample') ELSE 'null' END = 'true'
+        )
+      ORDER BY p.updated_at DESC, p.created_at DESC
     `).all();
     productRows = result.results || [];
   } catch {

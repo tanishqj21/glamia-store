@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { localDatabase, workerFunctions } from './lib/worker-fixture.mjs';
 import { isWibrawlUrl, preferredWibrawlTheme, WIBRAWL_ORIGIN } from '../src/storefront-identity.js';
 
-const worker = await workerFunctions(['listProducts', 'getProduct', 'validateCoupon', 'listAvailableCoupons', 'createCoupon', 'createOrder', 'renderPublicPage', 'getSitemap', 'withSecurityHeaders', 'canonicalProductPath', 'formatProduct']);
+const worker = await workerFunctions(['listProducts', 'getProduct', 'validateCoupon', 'listAvailableCoupons', 'createCoupon', 'createOrder', 'renderPublicPage', 'getSitemap', 'getRobots', 'withSecurityHeaders', 'canonicalProductPath', 'formatProduct']);
 const buyer = { email: 'buyer@example.com', name: 'Buyer', role: 'seller' };
 const req = (origin, body, path = '/api/orders') => new Request(origin + path, { method: 'POST', body: JSON.stringify(body) });
 function fixture(t) {
@@ -96,6 +96,38 @@ test('sitemaps contain only products assigned to their storefront', async t => {
   assert.ok(wb.includes(path('wb'))); assert.ok(wb.includes(path('shared'))); assert.ok(!wb.includes(path('gm')));
   const gm = await (await worker.getSitemap(new Request('https://glamiastore.com/sitemap.xml'),env)).text();
   assert.ok(gm.includes(path('gm'))); assert.ok(!gm.includes(path('wb')));
+});
+
+test('sitemaps exclude flagged samples and include them when reclassified as real listings', async t => {
+  const {db,env} = fixture(t);
+  for (const [id, visibility] of [['sample-wb','wibrawl'],['sample-gm','glamia'],['sample-shared','both']]) {
+    db.prepare(`INSERT INTO products(id,seller_email,name,category,brand,price,mrp,stock,color,sizes_json,image_url,description,status,storefront_visibility)
+      VALUES(?, 'seller@example.com', ?, 'Sample only category', 'Fixture', 100, 100, 10, 'Black', '[]', '/fixture.png', 'Sample fixture', 'live', ?)`).run(id,id,visibility);
+    db.prepare('INSERT INTO merchant_product_details(product_id,metadata_json) VALUES(?,?)').run(id,JSON.stringify({isSample:true}));
+  }
+  // Unrelated or malformed Google metadata must not hide real catalog entries.
+  db.prepare('INSERT INTO merchant_product_details(product_id,metadata_json) VALUES(?,?)').run('wb','invalid legacy metadata');
+  const path = id => worker.canonicalProductPath(worker.formatProduct(db.prepare('SELECT * FROM products WHERE id=?').get(id)));
+  for (const origin of [WIBRAWL_ORIGIN,'https://glamiastore.com']) {
+    const xml=await (await worker.getSitemap(new Request(origin+'/sitemap.xml'),env)).text();
+    assert.ok(xml.includes(path(origin===WIBRAWL_ORIGIN?'wb':'gm')));
+    assert.ok(xml.includes(path('shared')));
+    for(const id of ['sample-wb','sample-gm','sample-shared'])assert.ok(!xml.includes(path(id)));
+    assert.ok(!xml.includes('/category/Sample%20only%20category'));
+    const locations=[...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map(match=>match[1]);
+    assert.ok(locations.every(loc=>loc.startsWith(origin+'/')));
+  }
+  db.prepare('UPDATE merchant_product_details SET metadata_json=? WHERE product_id=?').run(JSON.stringify({isSample:false}),'sample-wb');
+  const xml=await (await worker.getSitemap(new Request(WIBRAWL_ORIGIN+'/sitemap.xml'),env)).text();
+  assert.ok(xml.includes(path('sample-wb')));
+  assert.ok(xml.includes('/category/Sample%20only%20category'));
+});
+
+test('each storefront advertises its own sitemap in robots.txt', async () => {
+  for(const origin of [WIBRAWL_ORIGIN,'https://glamiastore.com']) {
+    const robots=await (await worker.getRobots(new Request(origin+'/robots.txt'))).text();
+    assert.ok(robots.includes(`Sitemap: ${origin}/sitemap.xml`));
+  }
 });
 
 test('production CSP permits the exact built theme scripts', () => {
