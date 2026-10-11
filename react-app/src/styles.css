@@ -858,3 +858,11 @@ html, body, .site-header, .site-footer, .product-image, .product-modal, .cinemat
 }
 
 /* Admin workspace: keep frequent destinations visible and put the rest in a readable menu. */
+
+/* Glamia's original ribbon G and outlined LAMIA lettering scale as one vector. */
+.wordmark .glamia-logo, .footer-mark .glamia-logo { display: block; flex: none; width: clamp(170px, 16.9vw, 221px); height: auto; }
+.initial-loader-brand img.glamia-loader-logo { width: clamp(210px, 23vw, 257px); height: auto; }
+@media (max-width: 600px) {
+  .wordmark .glamia-logo { width: 164px; }
+  .admin-site-header .wordmark .glamia-logo { width: 145px; }
+}

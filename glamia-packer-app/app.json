@@ -14,12 +14,12 @@
     "android": {
       "package": "com.glamia.packing",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#11221b"
+        "foregroundImage": "./assets/glamia-adaptive.png",
+        "backgroundColor": "#151515"
       }
     },
     "web": {
-      "favicon": "./assets/icon.png"
+      "favicon": "./assets/glamia-favicon.svg"
     },
     "plugins": [
       "expo-secure-store"

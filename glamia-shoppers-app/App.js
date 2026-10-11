@@ -1,3 +1,4 @@
+import { GlamiaLogo } from "./src/GlamiaLogo";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -209,7 +210,7 @@ function Field({ label, value, onChangeText, placeholder, multiline = false, key
 }
 
 function Brand({ compact = false }) {
-  return <View style={[styles.brandRow, compact && styles.brandRowCompact]}><View style={styles.brandMark}><Text style={styles.brandMarkText}>G</Text></View><View><Text style={styles.brandWord}>GLAMIA</Text><Text style={styles.brandSub}>STORE</Text></View></View>;
+  return <View style={[styles.brandRow, compact && styles.brandRowCompact]}><View><GlamiaLogo width={compact ? 175 : 205} height={40} color={COLORS.ink} /><Text style={styles.brandSub}>STORE</Text></View></View>;
 }
 
 function ThemeToggle() {

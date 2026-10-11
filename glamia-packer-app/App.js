@@ -1,3 +1,4 @@
+import { GlamiaLogo } from "./src/GlamiaLogo";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -65,7 +66,7 @@ function LoginScreen({ onLoggedIn }) {
 
   return <SafeAreaView style={styles.safe}><StatusBar style="dark" />
     <KeyboardAvoidingView style={styles.loginWrap} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <View style={styles.brandMark}><Image source={require("./assets/icon.png")} style={styles.brandLogo} resizeMode="contain" /></View>
+      <GlamiaLogo width={230} height={48} style={{ marginBottom: 28 }} />
       <Text style={styles.kicker}>GLAMIA OPERATIONS</Text>
       <Text style={styles.loginTitle}>Ready the next order.</Text>
       <Text style={styles.loginCopy}>Sign in with the employee ID given to you by an admin. This app is only for packing operations.</Text>
@@ -162,7 +163,7 @@ function PackingScreen({ employee, onSignedOut }) {
   async function signOut() { await employeeLogout(); onSignedOut(); }
 
   return <SafeAreaView style={styles.safe}><StatusBar style="dark" />
-    <View style={styles.appHeader}><View style={styles.headerBrand}><Image source={require("./assets/icon.png")} style={styles.headerLogo} resizeMode="contain" /><View><Text style={styles.brandWord}>GLAMIA</Text><Text style={styles.headerSub}>PACKING DESK</Text></View></View><View style={styles.headerActions}><Text style={styles.employeeName}>{employee?.name || "Employee"}</Text><Pressable onPress={signOut} accessibilityRole="button"><Text style={styles.signOut}>Sign out</Text></Pressable></View></View>
+    <View style={styles.appHeader}><View style={styles.headerBrand}><View><GlamiaLogo width={180} height={36} color={palette.ink} /><Text style={styles.headerSub}>PACKING DESK</Text></View></View><View style={styles.headerActions}><Text style={styles.employeeName}>{employee?.name || "Employee"}</Text><Pressable onPress={signOut} accessibilityRole="button"><Text style={styles.signOut}>Sign out</Text></Pressable></View></View>
     <View style={styles.queueIntro}><View><Text style={styles.kicker}>FULFILMENT</Text><Text style={styles.queueTitle}>{filter === "unpacked" ? "Orders to pack" : "Packed orders"}</Text></View><Pressable onPress={() => loadOrders(true)} disabled={refreshing} style={styles.refreshButton}><Text style={styles.refreshText}>{refreshing ? "Refreshing…" : "Refresh"}</Text></Pressable></View>
     <View style={styles.tabs} accessibilityRole="tablist"><Pressable style={[styles.tab, filter === "unpacked" && styles.activeTab]} onPress={() => setFilter("unpacked")} accessibilityRole="tab" accessibilityState={{ selected: filter === "unpacked" }}><Text style={[styles.tabText, filter === "unpacked" && styles.activeTabText]}>To pack</Text></Pressable><Pressable style={[styles.tab, filter === "packed" && styles.activeTab]} onPress={() => setFilter("packed")} accessibilityRole="tab" accessibilityState={{ selected: filter === "packed" }}><Text style={[styles.tabText, filter === "packed" && styles.activeTabText]}>Packed</Text></Pressable></View>
     {error ? <View style={styles.errorBanner}><Text style={styles.error}>{error}</Text><Pressable onPress={() => loadOrders(true)}><Text style={styles.retry}>Try again</Text></Pressable></View> : null}

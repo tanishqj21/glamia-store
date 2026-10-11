@@ -15,12 +15,13 @@
     "android": {
       "package": "com.glamia.store",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/glamia-icon.png",
+        "foregroundImage": "./assets/glamia-adaptive.png",
         "backgroundColor": "#151515"
       }
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/glamia-favicon.svg"
     },
     "plugins": [
       "expo-secure-store",

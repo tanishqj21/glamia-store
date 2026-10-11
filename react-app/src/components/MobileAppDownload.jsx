@@ -31,7 +31,7 @@ export function MobileAppDownload() {
 
   return <section className="mobile-app-download" aria-labelledby="mobile-app-download-title">
     <div className="mobile-app-download-heading">
-      <img src="/glamia-g-favicon.png" alt="" width="42" height="42" />
+      <img src="/glamia/g.svg" alt="" width="42" height="42" />
       <div><p className="eyebrow">Glamia on mobile</p><h2 id="mobile-app-download-title">Your edit, on the go.</h2></div>
     </div>
     <p>Get the Glamia shopper app for Android.</p>
