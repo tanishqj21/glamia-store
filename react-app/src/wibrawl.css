@@ -21,8 +21,8 @@
 .wibrawl-logo-glow { display:block; position:relative; isolation:isolate; }
 .wibrawl-logo-glow::after { background:conic-gradient(from var(--wibrawl-glow-angle,270deg),#00c8ff,#ff3096 120deg,#c3f35e 240deg,#00c8ff); content:""; inset:0; mask:url('/wibrawl/logo.svg') center / contain no-repeat; opacity:0; pointer-events:none; position:absolute; transition:opacity .2s ease; }
 .wibrawl-shell .wordmark.wibrawl-wordmark .wibrawl-logo { transition:filter .2s ease; }
-.wibrawl-wordmark:is(:hover,:focus-visible) .wibrawl-logo-glow::after { opacity:.12; }
-.wibrawl-wordmark:is(:hover,:focus-visible) .wibrawl-logo { filter:drop-shadow(0 0 1px rgb(0 200 255 / 18%)); }
+.wibrawl-wordmark:is(:hover,:focus-visible) .wibrawl-logo-glow::after { opacity:.28; }
+.wibrawl-wordmark:is(:hover,:focus-visible) .wibrawl-logo { filter:drop-shadow(-1px 0 2px rgb(0 200 255 / 35%)) drop-shadow(1px 0 2px rgb(255 48 150 / 28%)) drop-shadow(0 -1px 2px rgb(195 243 94 / 25%)); }
 @media (prefers-reduced-motion:reduce) { .wibrawl-logo-glow::after,.wibrawl-shell .wordmark.wibrawl-wordmark .wibrawl-logo { transition:none; } }
 
 .wibrawl-shell .site-header:not(.admin-site-header) .wordmark { grid-column:2; justify-self:start; }
