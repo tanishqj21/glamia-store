@@ -173,7 +173,7 @@ test('Wibrawl homepage sends its active hero and scoped public settings before J
   assert.match(html, /id="wibrawl-title"/);
   assert.match(html, /YOUR VIBE\. YOUR RULES\./);
   assert.match(html, /class="wibrawl-campaign-figure"/);
-  assert.match(html, /imagesrcset="[^\"]+streetwear-campaign-480.webp/);
+  assert.match(html, /imagesrcset="[^\"]+streetwear-campaign-480.avif/);
   assert.ok(!html.includes('id="initial-loader"'));
   const bootstrap = JSON.parse(html.match(/id="glamia-storefront-bootstrap">([^]*?)<\/script>/)[1]);
   assert.equal(bootstrap.storefront,'wibrawl');

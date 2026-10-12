@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { collectionNames, WIBRAWL_HERO_LAYOUTS } from '../../../src/storefront-identity.js';
 import { Link } from './Header';
 import { Icon } from './Icon';
-import { WIBRAWL_CAMPAIGN_IMAGE, WIBRAWL_CAMPAIGN_SRCSET, WIBRAWL_CAMPAIGN_SIZES } from '../../../src/wibrawl-media';
+import { WIBRAWL_CAMPAIGN_IMAGE, WIBRAWL_CAMPAIGN_SRCSET, WIBRAWL_CAMPAIGN_SIZES, WIBRAWL_CAMPAIGN_AVIF_SRCSET } from '../../../src/wibrawl-media';
 
 export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
   const [index, setIndex] = useState(0);
@@ -58,7 +58,7 @@ export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
         <div className="wibrawl-hero-actions"><Link className="wibrawl-primary-action" href={slide.cta_category ? `/category/${encodeURIComponent(slide.cta_category)}` : '/just-arrived'} onNavigate={onNavigate}>{slide.cta_label || 'Shop the edit'}</Link></div>
       </div>
       <div className="wibrawl-hero-stage">
-        {campaign ? <figure className="wibrawl-campaign-figure" key={slide.id}><img src={WIBRAWL_CAMPAIGN_IMAGE} srcSet={WIBRAWL_CAMPAIGN_SRCSET} sizes={WIBRAWL_CAMPAIGN_SIZES} width="1440" height="960" alt="Wibrawl campaign concept: two models in oversized graphic tees on a rooftop." fetchPriority="high" decoding="async" /><figcaption>Campaign concept · styling inspiration</figcaption></figure> : <div key={slide.id} className={`wibrawl-hero-visual wibrawl-hero-frames wibrawl-hero-frames-${slide.frames.length}`}>
+        {campaign ? <figure className="wibrawl-campaign-figure" key={slide.id}><picture><source type="image/avif" srcSet={WIBRAWL_CAMPAIGN_AVIF_SRCSET} sizes={WIBRAWL_CAMPAIGN_SIZES} /><img src={WIBRAWL_CAMPAIGN_IMAGE} srcSet={WIBRAWL_CAMPAIGN_SRCSET} sizes={WIBRAWL_CAMPAIGN_SIZES} width="1440" height="960" alt="Wibrawl campaign concept: two models in oversized graphic tees on a rooftop." fetchPriority="high" decoding="async" /></picture><figcaption>Campaign concept · styling inspiration</figcaption></figure> : <div key={slide.id} className={`wibrawl-hero-visual wibrawl-hero-frames wibrawl-hero-frames-${slide.frames.length}`}>
           {slide.frames.map((frame, position) => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate} aria-label={`Shop ${frame.name}`}><img src={frame.image} alt={frame.name} width="960" height="1200" fetchPriority={position === 0 ? 'high' : 'auto'} decoding="async" /></Link>)}
         </div>}
         <span className="wibrawl-hero-stamp" aria-hidden="true">W.</span>

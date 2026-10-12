@@ -15,7 +15,7 @@ import { purchasedReturnLines, supportLineReferences } from './support-return-ac
 import { storefrontCss, wibrawlStorefrontCss, wibrawlStorefrontStyleHash, storefrontStyleHash, storefrontScriptHashes, storefrontStyleFiles, storefrontDeferredStyleFile, storefrontRoutePreloads, storefrontRouteCriticalStyles } from './storefront-styles.js';
 import { inlineProductImage } from './product-image-bootstrap.js';
 import { normalizeWibrawlReels } from './wibrawl-reels.js';
-import { WIBRAWL_CAMPAIGN_IMAGE, WIBRAWL_CAMPAIGN_SRCSET, WIBRAWL_CAMPAIGN_SIZES } from './wibrawl-media.js';
+import { WIBRAWL_CAMPAIGN_SIZES, WIBRAWL_CAMPAIGN_AVIF, WIBRAWL_CAMPAIGN_AVIF_SRCSET } from './wibrawl-media.js';
 import { WIBRAWL_HOSTNAME, WIBRAWL_ORIGIN, STOREFRONT_ORIGINS, WIBRAWL_HERO_LAYOUTS, storefrontForUrl } from './storefront-identity.js';
 
 const SESSION_COOKIE = "mm_session";
@@ -103,7 +103,7 @@ const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
 const CANONICAL_ORIGIN = "https://glamiastore.com";
 const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com", WIBRAWL_HOSTNAME]);
 const storefrontForRequest = storefrontForUrl;
-const PUBLIC_CACHE_VERSION = `2026-10-12-storefront-first-screen-v47-${storefrontStyleHash.slice(0, 12)}-${wibrawlStorefrontStyleHash.slice(0, 12)}`;
+const PUBLIC_CACHE_VERSION = `2026-10-12-storefront-first-screen-v48-${storefrontStyleHash.slice(0, 12)}-${wibrawlStorefrontStyleHash.slice(0, 12)}`;
 const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
 const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 const PHONEPE_SANDBOX_BASE = "https://api-preprod.phonepe.com/apis/pg-sandbox";
@@ -869,7 +869,7 @@ async function renderPublicPage(request, env, ctx) {
     const data = JSON.stringify(serializedBootstrap).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     const firstImage = bootstrap.hero?.slides?.[0]?.frames?.[0]?.image;
     if (storefront === 'wibrawl' && bootstrap.hero.slides[0]?.imagery === 'campaign') {
-      headExtras += `<link rel="preload" as="image" href="${WIBRAWL_CAMPAIGN_IMAGE}" imagesrcset="${WIBRAWL_CAMPAIGN_SRCSET}" imagesizes="${WIBRAWL_CAMPAIGN_SIZES}" fetchpriority="high" />`;
+      headExtras += `<link rel="preload" as="image" type="image/avif" href="${WIBRAWL_CAMPAIGN_AVIF}" imagesrcset="${WIBRAWL_CAMPAIGN_AVIF_SRCSET}" imagesizes="${WIBRAWL_CAMPAIGN_SIZES}" fetchpriority="high" />`;
     }
     // A relative uploaded asset is safe to preload; external/user-supplied
     // URLs are left to the image element and the existing CSP.
