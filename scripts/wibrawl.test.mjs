@@ -173,10 +173,14 @@ test('Wibrawl homepage sends its active hero and scoped public settings before J
   assert.match(html, /id="wibrawl-title"/);
   assert.match(html, /YOUR VIBE\. YOUR RULES\./);
   assert.match(html, /class="wibrawl-campaign-figure"/);
-  assert.match(html, /imagesrcset="[^\"]+streetwear-campaign-480.avif/);
+  assert.match(html, /<source[^>]+srcSet="data:image\/avif;base64,/);
+  assert.equal((html.match(/data:image\/avif;base64,/g) || []).length, 1, 'Campaign bytes must appear once, without a duplicate in bootstrap JSON');
+  assert.ok(!/<link[^>]+as="image"[^>]+streetwear-campaign/.test(html));
   assert.ok(!html.includes('id="initial-loader"'));
   const bootstrap = JSON.parse(html.match(/id="glamia-storefront-bootstrap">([^]*?)<\/script>/)[1]);
   assert.equal(bootstrap.storefront,'wibrawl');
+  assert.equal(bootstrap.hero.campaign_image_from_dom,true);
+  assert.ok(!bootstrap.hero.slides[0].campaign_image);
   assert.equal(bootstrap.hero.slides[0].frames[0].id,'wb');
   assert.ok(!Object.hasOwn(bootstrap,'user') && !Object.hasOwn(bootstrap.settings,'fulfillment'));
   const css = html.match(/id="glamia-storefront-styles">([^]*?)<\/style>/)[1];
