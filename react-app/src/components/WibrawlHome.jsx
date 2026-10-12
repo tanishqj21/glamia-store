@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { collectionNames, WIBRAWL_HERO_LAYOUTS } from '../../../src/storefront-identity.js';
 import { Link } from './Header';
 import { Icon } from './Icon';
-import { WIBRAWL_CAMPAIGN_IMAGE, WIBRAWL_CAMPAIGN_SRCSET, WIBRAWL_CAMPAIGN_SIZES, WIBRAWL_CAMPAIGN_AVIF_SRCSET } from '../../../src/wibrawl-media';
+import { WIBRAWL_CAMPAIGN_IMAGE, WIBRAWL_CAMPAIGN_SRCSET, WIBRAWL_CAMPAIGN_SIZES, WIBRAWL_CAMPAIGN_AVIF_SRCSET, wibrawlProductLinkImage } from '../../../src/wibrawl-media';
 
 export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
   const [index, setIndex] = useState(0);
@@ -68,7 +68,7 @@ export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
         </div>}
       </div>
     </div>
-    {campaign && <div className="wibrawl-hero-product-links"><span>Explore this edit</span>{slide.frames.map(frame => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate}><img src={frame.image} alt="" width="40" height="48" loading="lazy" decoding="async" />{frame.name}</Link>)}</div>}
+    {campaign && <div className="wibrawl-hero-product-links"><span>Explore this edit</span>{slide.frames.map(frame => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate}><img src={wibrawlProductLinkImage(frame.image)} alt="" width="40" height="48" loading="lazy" decoding="async" />{frame.name}</Link>)}</div>}
   </section>;
 }
 

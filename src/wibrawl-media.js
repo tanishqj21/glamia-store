@@ -5,3 +5,10 @@ export const WIBRAWL_CAMPAIGN_SRCSET = '/wibrawl/streetwear-campaign-480.webp 48
 export const WIBRAWL_CAMPAIGN_SIZES = '(max-width: 700px) 100vw, (max-width: 1600px) 52vw, 832px';
 export const WIBRAWL_CAMPAIGN_AVIF = '/wibrawl/streetwear-campaign-1440.avif';
 export const WIBRAWL_CAMPAIGN_AVIF_SRCSET = '/wibrawl/streetwear-campaign-480.avif 480w, /wibrawl/streetwear-campaign-720.avif 720w, /wibrawl/streetwear-campaign-960.avif 960w, /wibrawl/streetwear-campaign-1440.avif 1440w';
+
+// Only the bundled concept images have these small variants. Uploaded product
+// images keep their existing source; full hero frames keep their original size.
+export function wibrawlProductLinkImage(source) {
+  return /^\/wibrawl\/(gaming|sports)-campaign-(?:640|960)\.webp$/.test(source)
+    ? source.replace(/-(?:640|960)\.webp$/, '-96.webp') : source;
+}
