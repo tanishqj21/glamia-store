@@ -233,6 +233,11 @@ export default {
       if (request.method === "GET" && url.pathname.startsWith("/data/tax/")) {
         return withSecurityHeaders(await env.ASSETS.fetch(request));
       }
+      // Versioned analytics helpers contain three path segments, like a
+      // canonical product URL. Serve them before the product/SEO router.
+      if (["GET", "HEAD"].includes(request.method) && url.pathname.startsWith("/analytics/")) {
+        return withSecurityHeaders(await env.ASSETS.fetch(request));
+      }
       if (url.pathname.startsWith("/api/")) {
         if (["GET", "HEAD"].includes(request.method) && url.pathname.startsWith("/api/assets/products/")) {
           return withSecurityHeaders(await cachedProductImage(request, env, url, ctx));

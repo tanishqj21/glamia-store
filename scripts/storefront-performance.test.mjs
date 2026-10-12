@@ -12,6 +12,22 @@ function fixture(t) {
   return result;
 }
 
+test('versioned analytics scripts reach static assets without a product lookup', async () => {
+  const worker = await workerFunctions([]);
+  for (const origin of ['https://glamiastore.com', 'https://wibrawl.glamiastore.com']) {
+    const assets = [];
+    const env = { DB: { prepare() { throw Error('Analytics assets must not query products'); } }, ASSETS: { fetch: async request => {
+      assets.push(request.url);
+      return new Response('/* analytics fixture */', { headers: { 'Content-Type': 'text/javascript' } });
+    } } };
+    const url = origin + '/analytics/partytown-1.0.0/partytown.js';
+    const response = await worker.default.fetch(new Request(url), env, {});
+    assert.equal(response.status,200);
+    assert.equal(response.headers.get('Content-Type'),'text/javascript');
+    assert.deepEqual(assets,[url]);
+  }
+});
+
 test('product first screen is server rendered using only public fields and safe bootstrap JSON', async t => {
   const { db, env } = fixture(t);
   const worker = await workerFunctions(['renderPublicPage', 'canonicalProductPath', 'formatProduct']);
