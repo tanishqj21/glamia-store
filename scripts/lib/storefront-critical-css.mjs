@@ -4,14 +4,20 @@ import postcss from 'postcss';
 // inline CSS. The unmodified full stylesheet still loads before React mounts.
 const shellClass = /^(?:app-shell|skip-link|sr-only|announce(?:-.+)?|site-header|menu-button|tool-button|quick-links|wordmark|header-tools|header-credits|search-box|search-suggest(?:-.+)?|login-link|account(?:-.+)?|heart-link|nav(?:-.+)?|menu(?:-.+)?|cinematic-(?:home(?:-.+)?|copy|words|stage|frame(?:-.+)?|arrow|prev|next|progress)|hero-gradient(?:-.+)?|primary-action|secondary-action|text-link|eyebrow|trust-(?:strip(?:-.+)?|promise)|campaign-feature(?:-.+)?|event-theme-.+|homepage-editorial(?:-.+)?|active|muted)$/;
 
-export function criticalStorefrontCss(css, additionalClass = () => false) {
+export function criticalStorefrontCss(css, additionalClass = () => false, { storefront = 'both' } = {}) {
   const root = postcss.parse(css);
   root.walkComments(comment => comment.remove());
   root.walkRules(rule => {
     // Keyframe selectors are not document selectors.
     if (rule.parent.type === 'atrule' && /keyframes$/i.test(rule.parent.name)) return;
     const selectors = postcss.list.comma(rule.selector).filter(selector => {
-      const classes = [...selector.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map(match => match[1]);
+      // A public rule such as .site-header:not(.admin-site-header) must stay:
+      // the negated private class is not a dependency of the visible shell.
+      const positiveSelector = selector.replace(/:not\([^)]*\)/g, '');
+      const classes = [...positiveSelector.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map(match => match[1]);
+      if (classes.some(name => /^(?:admin-|wibrawl-admin-|wibrawl-preview-)/.test(name))) return false;
+      if (storefront === 'glamia' && (/data-brand=["']?wibrawl/.test(selector) || classes.some(name => /^wibrawl-/.test(name) && !['wibrawl-store-link', 'wibrawl-store-pill'].includes(name)))) return false;
+      if (storefront === 'wibrawl' && classes.some(name => /^(?:cinematic-(?:home|copy|words|stage|frame|arrow|prev|next|progress)|homepage-editorial|campaign-feature)/.test(name))) return false;
       return classes.every(name => shellClass.test(name) || additionalClass(name) || /^(?:site-footer|footer(?:-.+)?|wibrawl(?:-.+)?)$/.test(name) || ['ui-icon', 'theme-toggle', 'cart-link', 'cart-count', 'glamia-logo'].includes(name));
     });
     if (selectors.length) rule.selector = selectors.join(',');

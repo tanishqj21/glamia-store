@@ -12,9 +12,10 @@ import { selectedVariantCopy, linkedSpecificationCopy } from './product-trust.js
 import { customerPromises,deliveryPromise,shippingPolicyPromise } from './customer-promises.js';
 import { attachCancellationRefunds, cancellationRefundView } from "./cancellation-refunds.js";
 import { purchasedReturnLines, supportLineReferences } from './support-return-access.js';
-import { storefrontCss, storefrontStyleHash, storefrontScriptHashes, storefrontStyleFiles, storefrontDeferredStyleFile, storefrontRoutePreloads, storefrontRouteCriticalStyles } from './storefront-styles.js';
+import { storefrontCss, wibrawlStorefrontCss, wibrawlStorefrontStyleHash, storefrontStyleHash, storefrontScriptHashes, storefrontStyleFiles, storefrontDeferredStyleFile, storefrontRoutePreloads, storefrontRouteCriticalStyles } from './storefront-styles.js';
 import { inlineProductImage } from './product-image-bootstrap.js';
 import { normalizeWibrawlReels } from './wibrawl-reels.js';
+import { WIBRAWL_CAMPAIGN_IMAGE, WIBRAWL_CAMPAIGN_SRCSET, WIBRAWL_CAMPAIGN_SIZES } from './wibrawl-media.js';
 import { WIBRAWL_HOSTNAME, WIBRAWL_ORIGIN, STOREFRONT_ORIGINS, WIBRAWL_HERO_LAYOUTS, storefrontForUrl } from './storefront-identity.js';
 
 const SESSION_COOKIE = "mm_session";
@@ -102,7 +103,7 @@ const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
 const CANONICAL_ORIGIN = "https://glamiastore.com";
 const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com", WIBRAWL_HOSTNAME]);
 const storefrontForRequest = storefrontForUrl;
-const PUBLIC_CACHE_VERSION = `2026-10-08-announcement-sparkle-v45-${storefrontStyleHash.slice(0, 12)}`;
+const PUBLIC_CACHE_VERSION = `2026-10-12-storefront-first-screen-v46-${storefrontStyleHash.slice(0, 12)}-${wibrawlStorefrontStyleHash.slice(0, 12)}`;
 const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
 const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 const PHONEPE_SANDBOX_BASE = "https://api-preprod.phonepe.com/apis/pg-sandbox";
@@ -632,14 +633,15 @@ async function renderPublicPage(request, env, ctx) {
   const productSettingsPromise = (legacyProductMatch || seoProductMatch || (catalogPath.has(path) && path !== '/')) && !CRAWLER_UA.test(request.headers.get('User-Agent') || '')
     ? timed('settings', () => getStorefrontSettings(env, false, storefront).then(response => response.json())).catch(() => null)
     : null;
-  const heroPromise = path === "/" && storefront !== "wibrawl" && !CRAWLER_UA.test(request.headers.get("User-Agent") || "")
-    ? timed('hero', () => listHeroSlides(env).then(response => response.json())).catch(() => null)
+  const heroPromise = path === "/" && !CRAWLER_UA.test(request.headers.get("User-Agent") || "")
+    ? timed('hero', () => listHeroSlides(env, false, storefront).then(response => response.json())).catch(() => null)
     : null;
   const shellResponse = await timed('shell', () => env.ASSETS.fetch(new URL("/index.html", url)));
   if (!shellResponse.ok) return null;
   let html = await shellResponse.text();
   if (storefront === 'wibrawl') {
     html = html
+      .replace('<html lang="en">', '<html lang="en" data-brand="wibrawl" data-theme="light">')
       .replace('<link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg?v=glamia-vector" />', '<link rel="icon" type="image/svg+xml" sizes="any" href="/wibrawl/favicon.svg?v=afterimage" />')
       .replace('<link rel="apple-touch-icon" href="/glamia-g-favicon.png" />', '')
       .replace('<div class="initial-loader-brand" role="img" aria-label="Glamia"><img class="glamia-loader-logo" src="/glamia/logo-light.svg" alt="" width="257" height="50" /></div>', '<div class="initial-loader-brand" role="img" aria-label="Wibrawl"><img class="wibrawl-logo" src="/wibrawl/logo.svg" alt="" width="280" height="59" /></div>');
@@ -648,9 +650,9 @@ async function renderPublicPage(request, env, ctx) {
   const isBot = CRAWLER_UA.test(request.headers.get("User-Agent") || "");
   // Only public presentation data is embedded. Session/account data always
   // remains in private, uncached API responses.
-  const bootstrapPromise = path === "/" && storefront !== "wibrawl" && !isBot
+  const bootstrapPromise = path === "/" && !isBot
     ? Promise.all([heroPromise, homepageSettingsPromise])
-      .then(([hero, settings]) => hero && settings ? { hero, settings } : null)
+      .then(([hero, settings]) => hero && settings ? { hero, settings, storefront } : null)
       .catch(() => null)
     : null;
 
@@ -824,7 +826,7 @@ async function renderPublicPage(request, env, ctx) {
     // second network round trip. Larger/external media keeps its normal URL.
     const firstFrame = bootstrap.hero?.slides?.[0]?.frames?.[0];
     const originalHeroImage = firstFrame?.image;
-    if (firstFrame?.image?.startsWith('/api/assets/products/')) {
+    if (bootstrap.hero.slides[0]?.imagery !== 'campaign' && firstFrame?.image?.startsWith('/api/assets/products/')) {
       try {
         // Reuse the immutable public-image edge cache instead of doing an R2
         // round trip each time the short-lived homepage cache expires.
@@ -844,7 +846,7 @@ async function renderPublicPage(request, env, ctx) {
     for (const file of storefrontStyleFiles) {
       html = html.replace(new RegExp(`<link[^>]+href="/${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>`, 'g'), `<link rel="preload" as="style" href="/${escapeHtml(storefrontDeferredStyleFile)}" data-glamia-storefront-css />`);
     }
-    headExtras += `<style id="glamia-storefront-styles">${storefrontCss}</style>`;
+    headExtras += `<style id="glamia-storefront-styles">${storefront === "wibrawl" ? wibrawlStorefrontCss : storefrontCss}</style>`;
     try {
       const renderedShell = await timed('render', async () => {
         const { renderHomepageShell } = await import('./homepage-shell.jsx');
@@ -861,9 +863,12 @@ async function renderPublicPage(request, env, ctx) {
     } : bootstrap;
     const data = JSON.stringify(serializedBootstrap).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     const firstImage = bootstrap.hero?.slides?.[0]?.frames?.[0]?.image;
+    if (storefront === 'wibrawl' && bootstrap.hero.slides[0]?.imagery === 'campaign') {
+      headExtras += `<link rel="preload" as="image" href="${WIBRAWL_CAMPAIGN_IMAGE}" imagesrcset="${WIBRAWL_CAMPAIGN_SRCSET}" imagesizes="${WIBRAWL_CAMPAIGN_SIZES}" fetchpriority="high" />`;
+    }
     // A relative uploaded asset is safe to preload; external/user-supplied
     // URLs are left to the image element and the existing CSP.
-    if (firstImage?.startsWith("/api/assets/") && !firstImage.startsWith("//")) {
+    if (bootstrap.hero.slides[0]?.imagery !== 'campaign' && firstImage?.startsWith("/api/assets/") && !firstImage.startsWith("//")) {
       headExtras += `<link rel="preload" as="image" href="${escapeHtml(firstImage)}" fetchpriority="high" />`;
     }
     headExtras += `<script type="application/json" id="glamia-storefront-bootstrap">${data}</script>`;
@@ -874,7 +879,7 @@ async function renderPublicPage(request, env, ctx) {
     .replace("</head>", `${metaTags}${headExtras}${isBot || renderedFirstScreen ? '' : storefrontResourceHints(path, storefront)}</head>`);
   // The common font characters are already in the verified first-screen CSS.
   // Keep the ordinary font files for all other characters and private routes.
-  if (renderedFirstScreen || (path === '/' && storefront !== 'wibrawl' && !isBot)) html = html.replace(/<link\b[^>]*\bas="font"[^>]*>/g, '');
+  if (renderedFirstScreen || (path === '/' && bootstrap && !isBot)) html = html.replace(/<link\b[^>]*\bas="font"[^>]*>/g, '');
   if (storefront === 'wibrawl') html = html.replace(/<link\b[^>]*href="\/fonts\/cormorant[^>]*\bas="font"[^>]*>/g, '');
   if (isBot && botContent) {
     html = html
@@ -11599,6 +11604,7 @@ function withSecurityHeaders(response) {
   headers.set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
   headers.set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'sha256-QDL1JU0g6O+naM0GHg1SrXz5jfV62Pk3CmUPnu1n1kY=' 'sha256-On1TqejLHzYPtlgCG4EQtHKn2f1u8Plk+C210XpYbec=' https://accounts.google.com https://www.googletagmanager.com https://checkout.razorpay.com https://static.cloudflareinsights.com; style-src 'self' 'sha256-RU4sU0AaS8IBGZx8XrGt/pa9A5SLA3dQszGeqT5L3Kw=' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' https://glamiastore.com https://www.glamiastore.com https://wibrawl.glamiastore.com https://accounts.google.com https://www.googleapis.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://api.razorpay.com https://cloudflareinsights.com; frame-src https://accounts.google.com https://api.razorpay.com https://*.razorpay.com; form-action 'self'");
   headers.set("Content-Security-Policy", headers.get("Content-Security-Policy").replace("style-src 'self'", `style-src 'self' 'sha256-${storefrontStyleHash}'`));
+  headers.set("Content-Security-Policy", headers.get("Content-Security-Policy").replace("style-src 'self'", `style-src 'self' 'sha256-${wibrawlStorefrontStyleHash}'`));
   for (const hash of storefrontScriptHashes) headers.set('Content-Security-Policy', headers.get('Content-Security-Policy').replace("script-src 'self'", `script-src 'self' 'sha256-${hash}'`));
   headers.set('Content-Security-Policy', headers.get('Content-Security-Policy').replace("style-src 'self'", "style-src 'self' https://accounts.google.com/gsi/style"));
   headers.set("Content-Security-Policy", headers.get("Content-Security-Policy").replace("font-src 'self'", "font-src 'self' data:"));

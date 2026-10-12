@@ -8,7 +8,7 @@ export function restoreFirstScreenMedia(data, rootDocument) {
     return candidate && candidate.length <= 65600 ? candidate : null;
   };
   if (data.hero?.first_image_from_dom) {
-    const image = readImage('#root .cinematic-home .cinematic-frame img');
+    const image = readImage('#root .cinematic-home .cinematic-frame img, #root .wibrawl-hero-frames img');
     const frame = data.hero.slides?.[0]?.frames?.[0];
     if (image && frame) frame.image = image;
   }

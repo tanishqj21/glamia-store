@@ -19,6 +19,6 @@ export function CreditsBalance({ user, onNavigate, showWhenSignedOut = false }) 
     return () => { active = false; window.removeEventListener("glamia-credits-changed", visible); document.removeEventListener("visibilitychange", visible); };
   }, [user?.email]);
   if (!user && !showWhenSignedOut) return null;
-  const label = !user ? "Sign in to view store credits" : `Store credits${balance === null ? "" : `, ${money(balance)}`}`;
+  const label = !user ? "Log in to view store credits" : `Store credits${balance === null ? "" : `, ${money(balance)}`}`;
   return <button className="header-credits" type="button" onClick={() => onNavigate("/credits")} aria-label={label}><span aria-hidden="true">₹</span><strong>{!user ? "Log in" : balance === null ? "…" : balance.toLocaleString("en-IN")}</strong><small>Credits</small></button>;
 }

@@ -141,11 +141,12 @@ test('production CSP permits the exact built theme scripts', () => {
   assert.ok(csp.includes('https://accounts.google.com/gsi/style'));
 });
 
-test('the homepage discovers its application and display font without preloading an inactive hero', async t => {
+test('the homepage discovers its application and embeds its display font without preloading an inactive hero', async t => {
   const {env} = fixture(t);
   const html = await (await worker.renderPublicPage(new Request(WIBRAWL_ORIGIN),env)).text();
   assert.match(html, /rel="modulepreload"[^>]+\/assets\/main-/);
-  assert.match(html, /href="\/fonts\/jost-[^"]+" as="font"/);
+  assert.match(html, /data:font\/woff2;base64,/);
+  assert.ok(!/<link[^>]+as="font"/.test(html));
   assert.ok(!/<link[^>]+href="\/fonts\/cormorant[^>]+as="font"/.test(html));
   assert.doesNotMatch(html, /preload.imageSrcset/);
 });
@@ -162,4 +163,24 @@ test('direct product links render the Wibrawl header and footer before JavaScrip
   assert.match(html,/\/wibrawl\/logo.svg/);
   assert.match(html,/<link rel="icon" type="image\/svg\+xml" sizes="any" href="\/wibrawl\/favicon.svg\?v=afterimage"/);
   assert.doesNotMatch(html,/<link[^>]+href="\/wibrawl\/(?:favicon|icon-192)\.png"/);
+});
+
+test('Wibrawl homepage sends its active hero and scoped public settings before JavaScript', async t => {
+  const {db,env} = fixture(t);
+  db.prepare(`INSERT INTO hero_slides(id,eyebrow,title,tagline,cta_label,product_ids_json,storefront,imagery,active,position)
+    VALUES('first-screen','The Wibrawl edit','YOUR VIBE. YOUR RULES.','Wear it your way.','Shop the edit','["wb"]','wibrawl','campaign',1,0)`).run();
+  const html = await (await worker.renderPublicPage(new Request(WIBRAWL_ORIGIN),env)).text();
+  assert.match(html, /id="wibrawl-title"/);
+  assert.match(html, /YOUR VIBE\. YOUR RULES\./);
+  assert.match(html, /class="wibrawl-campaign-figure"/);
+  assert.match(html, /imagesrcset="[^\"]+streetwear-campaign-480.webp/);
+  assert.ok(!html.includes('id="initial-loader"'));
+  const bootstrap = JSON.parse(html.match(/id="glamia-storefront-bootstrap">([^]*?)<\/script>/)[1]);
+  assert.equal(bootstrap.storefront,'wibrawl');
+  assert.equal(bootstrap.hero.slides[0].frames[0].id,'wb');
+  assert.ok(!Object.hasOwn(bootstrap,'user') && !Object.hasOwn(bootstrap.settings,'fulfillment'));
+  const css = html.match(/id="glamia-storefront-styles">([^]*?)<\/style>/)[1];
+  assert.ok(css.includes('.wibrawl-hero') && !css.includes('.cinematic-copy'));
+  assert.ok(!css.includes('font-family:"Cormorant Garamond";font-style:normal;font-weight:400 600;font-display:swap;src:url(data:'));
+  assert.ok(worker.withSecurityHeaders(new Response(html)).headers.get('Content-Security-Policy').includes(`'sha256-${createHash('sha256').update(css).digest('base64')}'`));
 });

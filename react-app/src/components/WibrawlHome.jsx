@@ -2,15 +2,16 @@ import React, { useEffect, useRef, useState } from 'react';
 import { collectionNames, WIBRAWL_HERO_LAYOUTS } from '../../../src/storefront-identity.js';
 import { Link } from './Header';
 import { Icon } from './Icon';
+import { WIBRAWL_CAMPAIGN_IMAGE, WIBRAWL_CAMPAIGN_SRCSET, WIBRAWL_CAMPAIGN_SIZES } from '../../../src/wibrawl-media';
 
 export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
   const [index, setIndex] = useState(0);
   const swipe = useRef(null);
   const suppressClickUntil = useRef(0);
-  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [reducedMotion, setReducedMotion] = useState(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [visible, setVisible] = useState(() => !document.hidden);
+  const [visible, setVisible] = useState(() => typeof document === 'undefined' || !document.hidden);
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     const motion = event => setReducedMotion(event.matches);
@@ -57,7 +58,7 @@ export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
         <div className="wibrawl-hero-actions"><Link className="wibrawl-primary-action" href={slide.cta_category ? `/category/${encodeURIComponent(slide.cta_category)}` : '/just-arrived'} onNavigate={onNavigate}>{slide.cta_label || 'Shop the edit'}</Link></div>
       </div>
       <div className="wibrawl-hero-stage">
-        {campaign ? <figure className="wibrawl-campaign-figure" key={slide.id}><img src="/wibrawl/streetwear-campaign-1440.webp" srcSet="/wibrawl/streetwear-campaign-720.webp 720w, /wibrawl/streetwear-campaign-1440.webp 1440w" sizes="(max-width: 700px) 100vw, 60vw" width="1440" height="960" alt="Wibrawl campaign concept: two models in oversized graphic tees on a rooftop." fetchPriority="high" decoding="async" /><figcaption>Campaign concept · styling inspiration</figcaption></figure> : <div key={slide.id} className={`wibrawl-hero-visual wibrawl-hero-frames wibrawl-hero-frames-${slide.frames.length}`}>
+        {campaign ? <figure className="wibrawl-campaign-figure" key={slide.id}><img src={WIBRAWL_CAMPAIGN_IMAGE} srcSet={WIBRAWL_CAMPAIGN_SRCSET} sizes={WIBRAWL_CAMPAIGN_SIZES} width="1440" height="960" alt="Wibrawl campaign concept: two models in oversized graphic tees on a rooftop." fetchPriority="high" decoding="async" /><figcaption>Campaign concept · styling inspiration</figcaption></figure> : <div key={slide.id} className={`wibrawl-hero-visual wibrawl-hero-frames wibrawl-hero-frames-${slide.frames.length}`}>
           {slide.frames.map((frame, position) => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate} aria-label={`Shop ${frame.name}`}><img src={frame.image} alt={frame.name} width="960" height="1200" fetchPriority={position === 0 ? 'high' : 'auto'} decoding="async" /></Link>)}
         </div>}
         <span className="wibrawl-hero-stamp" aria-hidden="true">W.</span>
@@ -67,7 +68,7 @@ export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
         </div>}
       </div>
     </div>
-    {campaign && <div className="wibrawl-hero-product-links"><span>Explore this edit</span>{slide.frames.map(frame => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate}><img src={frame.image} alt="" width="40" height="48" />{frame.name}</Link>)}</div>}
+    {campaign && <div className="wibrawl-hero-product-links"><span>Explore this edit</span>{slide.frames.map(frame => <Link key={frame.id} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate}><img src={frame.image} alt="" width="40" height="48" loading="lazy" decoding="async" />{frame.name}</Link>)}</div>}
   </section>;
 }
 

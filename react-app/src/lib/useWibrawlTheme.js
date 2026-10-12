@@ -5,12 +5,14 @@ function savedTheme() {
   try { return localStorage.getItem('wibrawl-theme'); } catch { return null; }
 }
 
-export function useWibrawlTheme() {
+export function useWibrawlTheme(hydrating = false) {
   const explicitChoice = useRef(savedTheme());
-  const [theme, setTheme] = useState(() => preferredWibrawlTheme(savedTheme(), window.matchMedia?.('(prefers-color-scheme: dark)').matches));
+  // Match the public HTML before restoring the visitor's private preference.
+  const [theme, setTheme] = useState(() => hydrating ? 'sports' : preferredWibrawlTheme(savedTheme(), window.matchMedia?.('(prefers-color-scheme: dark)').matches));
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const sync = () => setTheme(preferredWibrawlTheme(explicitChoice.current, media.matches));
+    sync();
     const syncStorage = event => { if (event.key === 'wibrawl-theme' || event.key === null) { explicitChoice.current = savedTheme(); sync(); } };
     media.addEventListener('change', sync);
     window.addEventListener('storage', syncStorage);
