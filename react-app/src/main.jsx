@@ -1,4 +1,5 @@
 import { normalizeProduct } from './lib/productPresentation';
+import { appendAnalyticsTag } from './lib/analyticsWorker';
 import { restoreFirstScreenMedia } from './lib/storefrontBootstrap';
 import { Header } from './components/Header';
 import { WibrawlHome, WibrawlAbout } from './components/WibrawlHome';
@@ -89,7 +90,7 @@ function ensureGoogleAnalytics(measurementId) {
     tag.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(id)}`;
     tag.dataset.glamiaGoogleTag = "true";
     window.__glamiaGoogleTagScheduled = true;
-    const append = () => document.head.appendChild(tag);
+    const append = () => appendAnalyticsTag(tag);
     const schedule = () => window.requestIdleCallback ? window.requestIdleCallback(append, { timeout: 2000 }) : window.setTimeout(append, 0);
     if (document.readyState === "complete") schedule();
     else window.addEventListener("load", schedule, { once: true });
