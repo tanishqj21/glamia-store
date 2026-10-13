@@ -1,4 +1,6 @@
 import { lazy, useEffect, useMemo, useRef, useState } from "react";
+import { OrderYearSelect } from './OrderYearSelect';
+import { groupOrdersByYear } from '../lib/orderYears';
 import { apiFetch } from "../lib/api";
 import { storefrontForUrl } from "../../../src/storefront-identity.js";
 import { canUseAdminArea } from "../lib/workspaceAccess";
@@ -814,7 +816,7 @@ function DashboardView({ dashboard, orders, notifications, onNavigate, user }) {
   );
 }
 
-function OrdersView({ orders, user, onNavigate, onOrderChanged, hasMoreOrders = false, orderTotal = orders.length, loadingMore = false, onLoadMore }) {
+function OrdersView({ orders, user, onNavigate, onOrderChanged, hasMoreOrders = false, orderTotal = orders.length, loadingMore = false, onLoadMore, orderYear = "all", orderYears = [], onOrderYearChange }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [quickFilter, setQuickFilter] = useState("all");
@@ -838,7 +840,7 @@ function OrdersView({ orders, user, onNavigate, onOrderChanged, hasMoreOrders = 
   }, [orders]);
   async function openOriginal(path) {
     const id=new URL(path,window.location.origin).searchParams.get('order');
-    setQuery('');setStatus('all');setQuickFilter('all');
+    setQuery('');setStatus('all');setQuickFilter('all');if(orderYear!=='all')onOrderYearChange('all');
     if(!orders.some(order=>order.id===id)) {
       try {
         const response=await apiFetch(`/api/orders?scope=admin&order=${encodeURIComponent(id)}&limit=1`);
@@ -893,10 +895,10 @@ function OrdersView({ orders, user, onNavigate, onOrderChanged, hasMoreOrders = 
     <div className="orders-overview-grid" aria-label="Order overview">
       {[{ key: "all", label: "All orders", count: counts.all, tone: "blue", note: "Total queue" }, { key: "attention", label: "Needs attention", count: counts.attention, tone: "amber", note: "Packing or payment" }, { key: "transit", label: "In transit", count: counts.transit, tone: "violet", note: "Shipped orders" }, { key: "complete", label: "Completed", count: counts.complete, tone: "green", note: "Delivered orders" }].map((item) => <button type="button" key={item.key} className={`orders-overview-card tone-${item.tone} ${quickFilter === item.key ? "is-active" : ""}`} onClick={() => { setQuickFilter(item.key); setStatus("all"); }} aria-pressed={quickFilter === item.key}><span className="orders-overview-icon" aria-hidden="true"><i /></span><span><strong>{item.count}</strong><small>{item.label}</small><em>{item.note}</em></span></button>)}
     </div>
-    <div className="admin-filters orders-filter-bar"><label className="orders-search-field" htmlFor="adminOrderSearch"><span>Find an order</span><input id="adminOrderSearch" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Order number, customer, or email" /></label><label className="orders-status-field" htmlFor="adminOrderStatus"><span>Status</span><select id="adminOrderStatus" value={status} onChange={(event) => { setStatus(event.target.value); setQuickFilter("all"); }} aria-label="Filter orders by status"><option value="all">All statuses</option><optgroup label="Fulfilment">{["pending", "confirmed", "shipped", "delivered", "cancelled"].map((value) => <option key={value} value={value}>{label(value)}</option>)}</optgroup><optgroup label="Packing"><option value="packing:packed">Packed</option><option value="packing:unpacked">Awaiting pack</option></optgroup></select></label></div>
+    <div className="admin-filters orders-filter-bar"><OrderYearSelect value={orderYear} years={orderYears} onChange={onOrderYearChange} disabled={loadingMore} /><label className="orders-search-field" htmlFor="adminOrderSearch"><span>Find an order</span><input id="adminOrderSearch" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Order number, customer, or email" /></label><label className="orders-status-field" htmlFor="adminOrderStatus"><span>Status</span><select id="adminOrderStatus" value={status} onChange={(event) => { setStatus(event.target.value); setQuickFilter("all"); }} aria-label="Filter orders by status"><option value="all">All statuses</option><optgroup label="Fulfilment">{["pending", "confirmed", "shipped", "delivered", "cancelled"].map((value) => <option key={value} value={value}>{label(value)}</option>)}</optgroup><optgroup label="Packing"><option value="packing:packed">Packed</option><option value="packing:unpacked">Awaiting pack</option></optgroup></select></label></div>
     {message && <p className="inline-note" role="status">{message}</p>}
     <div className="orders-results-heading"><span><strong>{filtered.length}</strong> {filtered.length === 1 ? "order" : "orders"} in view</span><small>Click an order to view details and edit its status</small></div>
-    <div className="admin-order-list">{filtered.map((order, index) => {
+    <div className="admin-order-list">{groupOrdersByYear(filtered).map(group => <section className="orders-year-group" key={group.year} aria-label={`${group.year} orders`}><h3 className="orders-year-heading">{group.year}</h3>{group.orders.map((order, index) => {
       const values = draft(order); const isOpen = expanded === order.id; const orderStatus = order.status || "pending"; const paymentStatus = order.payment_status || "pending"; const isCancelled = orderStatus === "cancelled"; const isPacked = !isCancelled && order.packing_status === "packed"; const itemCount = (order.items || []).reduce((total, item) => total + Number(item.quantity || 0), 0); const customer = order.customer_name || order.customer_email || "Customer"; const initials = customer.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "C"; const progressIndex = isCancelled ? -1 : orderStatus === "delivered" ? 3 : orderStatus === "shipped" ? 2 : isPacked ? 1 : 0;
       return <article id={`order-${order.id}`} className={`admin-order-card order-status-${orderStatus} ${isOpen ? "is-expanded" : ""}`} key={order.id}>
          <ReplacementOrderBadge order={order}/>
@@ -910,7 +912,7 @@ function OrdersView({ orders, user, onNavigate, onOrderChanged, hasMoreOrders = 
         {isOpen && <CancellationRefundCard order={order} admin canManage={Boolean(user?.is_owner)} onChanged={onOrderChanged}/>}
         {isOpen && canUseAdminArea(user, "/admin/returns") && <AdminOrderAfterSales key={order.id} order={order} onNavigate={onNavigate} />}
       </article>;
-    })}{!filtered.length && <div className="empty-state">No matching orders.</div>}</div>
+    })}</section>)}{!filtered.length && <div className="empty-state">No matching orders.</div>}</div>
     {hasMoreOrders && <div className="admin-load-more"><span>Showing {orders.length} of {orderTotal} orders. Search and filters apply to the loaded orders.</span><button type="button" className="secondary-action" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? "Loading older orders…" : "Load older orders"} <span aria-hidden="true">↓</span></button></div>}
   </section>;
 }
@@ -1400,6 +1402,8 @@ function NotificationsView({ notifications, onNotificationsChanged, onNavigate }
 
 export function AdminWorkspace({ route, onNavigate, user }) {
   const [retryVersion, setRetryVersion] = useState(0);
+  const [orderYear, setOrderYear] = useState("all");
+  const [orderYears, setOrderYears] = useState([]);
   const [dashboard, setDashboard] = useState(null); const [orders, setOrders] = useState([]); const [orderPagination, setOrderPagination] = useState(null); const [notifications, setNotifications] = useState([]); const [unreadCount, setUnreadCount] = useState(0); const [products, setProducts] = useState([]); const [productPagination, setProductPagination] = useState(null); const [categories, setCategories] = useState([]); const [subcategories, setSubcategories] = useState([]); const [customers, setCustomers] = useState([]); const [loadingMore, setLoadingMore] = useState(""); const [error, setError] = useState(""); const [errorRoute, setErrorRoute] = useState(""); const [loadedRoute, setLoadedRoute] = useState("");
   useEffect(() => {
     let active = true;
@@ -1415,7 +1419,7 @@ export function AdminWorkspace({ route, onNavigate, user }) {
         if (needs.notifications) addRequest("notifications", "/api/admin/notifications");
         else addRequest("notificationCount", "/api/admin/notifications/count");
       }
-      if (needs.orders && (canUseAdminArea(user, "/admin/orders") || canUseAdminArea(user, "/admin/labels") || canUseAdminArea(user, "/admin"))) addRequest("orders", paginateOrders ? `/api/orders?scope=admin&limit=${ADMIN_PAGE_SIZES.orders}&page=1` : "/api/orders?scope=admin");
+      if (needs.orders && (canUseAdminArea(user, "/admin/orders") || canUseAdminArea(user, "/admin/labels") || canUseAdminArea(user, "/admin"))) addRequest("orders", paginateOrders ? `/api/orders?scope=admin&limit=${ADMIN_PAGE_SIZES.orders}&page=1&year=${orderYear}` : "/api/orders?scope=admin");
       if (needs.products) addRequest("products", paginateProducts ? `/api/products?scope=admin&limit=${ADMIN_PAGE_SIZES.products}&page=1` : "/api/products?scope=admin");
       if (needs.categories) addRequest("categories", "/api/categories");
       if (needs.customers) addRequest("customers", "/api/admin/customers");
@@ -1449,6 +1453,7 @@ export function AdminWorkspace({ route, onNavigate, user }) {
       if (needs.orders) {
         setOrders(responseData.orders?.orders || []);
         setOrderPagination(responseData.orders?.pagination || null);
+        setOrderYears(responseData.orders?.years || []);
       }
       if (needs.products) {
         setProducts(responseData.products?.products || []);
@@ -1481,7 +1486,7 @@ export function AdminWorkspace({ route, onNavigate, user }) {
       window.clearInterval(refreshTimer);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [route, user, onNavigate, retryVersion]);
+  }, [route, user, onNavigate, retryVersion, orderYear]);
   useEffect(() => {
     if (route === "/admin" || route === "/admin/notifications") {
       setUnreadCount(notifications.filter((item) => !item.read_at && !item.dismissed_at).length);
@@ -1510,7 +1515,7 @@ export function AdminWorkspace({ route, onNavigate, user }) {
     try {
       const nextPage = Number(pagination.page || 1) + 1;
       const input = kind === "orders"
-        ? `/api/orders?scope=admin&limit=${ADMIN_PAGE_SIZES.orders}&page=${nextPage}`
+        ? `/api/orders?scope=admin&limit=${ADMIN_PAGE_SIZES.orders}&page=${nextPage}&year=${orderYear}`
         : `/api/products?scope=admin&limit=${ADMIN_PAGE_SIZES.products}&page=${nextPage}`;
       const response = await apiFetch(input, { cacheTtl: ADMIN_CACHE_TTLS[kind] || 0 });
       const data = await response.json();
@@ -1532,5 +1537,5 @@ export function AdminWorkspace({ route, onNavigate, user }) {
   async function refreshCatalog() { const response = await apiFetch("/api/categories", { cacheTtl: ADMIN_CACHE_TTLS.categories }); const data = await response.json(); if (response.ok) { setCategories(data.categories || []); setSubcategories(data.subcategories || []); } }
   const loading = loadedRoute !== route;
   if (route === "/admin/completed-orders") return <AdminShell user={user} route={route} onNavigate={onNavigate} notifications={notifications} unreadCount={unreadCount}>{loading || !canUseAdminArea(user, route) ? <div className="loading-card">Preparing purchase history…</div> : <CompletedOrdersView onNavigate={onNavigate} />}</AdminShell>;
-return <AdminShell user={user} route={route} onNavigate={onNavigate} notifications={notifications} unreadCount={unreadCount}>{error && errorRoute === route ? <section className="admin-panel admin-wide-panel"><p className="eyebrow">Connection problem</p><h2>This section could not load.</h2><p className="inline-error" role="alert">{error}</p><p className="muted">Your session is still active. Retry this section without leaving the console.</p><button className="primary-action" type="button" onClick={() => { setError(""); setLoadedRoute(""); setRetryVersion(value => value + 1); }}>Retry loading</button></section> : loading ? <div className="loading-card">Preparing your console…</div> : route === "/admin" ? <DashboardView user={user} dashboard={dashboard} orders={orders} notifications={notifications} onNavigate={onNavigate} /> : route === "/admin/storefront" ? <StorefrontSettingsView /> : route === "/admin/about" ? <AdminAboutView /> : route === "/admin/events" ? <EventsView categories={categories} subcategories={subcategories} /> : route === "/admin/labels" ? <LabelsView orders={orders} onOrderChanged={changeOrder} /> : route === "/admin/hero" ? <HeroStudioView products={products} categories={categories} user={user} /> : route === "/admin/tax" ? <TaxComplianceView /> : route === "/admin/add-product" ? <AddListingView categories={categories} subcategories={subcategories} onNavigate={onNavigate} /> : route === "/admin/bulk-listing" ? <BulkListingView categories={categories} subcategories={subcategories} /> : route === "/admin/orders" ? <OrdersView user={user} onNavigate={onNavigate} orders={orders} onOrderChanged={changeOrder} orderTotal={orderPagination?.total ?? orders.length} hasMoreOrders={Boolean(orderPagination?.has_more)} loadingMore={loadingMore === "orders"} onLoadMore={() => loadMore("orders")} /> : route === "/admin/products" ? <ManageProductsView products={products} categories={categories} subcategories={subcategories} onProductChanged={changeProduct} onProductDeleted={removeProduct} onNavigate={onNavigate} productTotal={productPagination?.total ?? products.length} hasMoreProducts={Boolean(productPagination?.has_more)} loadingMore={loadingMore === "products"} onLoadMore={() => loadMore("products")} /> : route === "/admin/inventory" ? <InventoryView products={products} onProductChanged={changeProduct} productTotal={productPagination?.total ?? products.length} hasMoreProducts={Boolean(productPagination?.has_more)} loadingMore={loadingMore === "products"} onLoadMore={() => loadMore("products")} /> : route === "/admin/customers" ? <CustomersView user={user} /> : route === "/admin/employees" ? <EmployeesView user={user} /> : route === "/admin/reviews" ? <ReviewsView /> : route === "/admin/questions" ? <QuestionsView /> : route === "/admin/credits" ? <AdminCreditsView /> : route === "/admin/coupons" ? <CouponsView products={products} categories={categories} subcategories={subcategories} customers={customers} /> : route === "/admin/deals" ? <DealsView products={products} onProductChanged={changeProduct} /> : route === "/admin/categories" ? <CategoriesView categories={categories} subcategories={subcategories} onCatalogChanged={refreshCatalog} /> : route === "/admin/returns" ? <ReturnsView user={user} /> : route === "/admin/support" ? <SupportView /> : route === "/admin/system" ? <SystemView /> : route === "/admin/manage-store" ? <ManageStoreView user={user} onNavigate={onNavigate} /> : <NotificationsView notifications={notifications} onNotificationsChanged={changeNotifications} onNavigate={onNavigate} />}</AdminShell>;
+return <AdminShell user={user} route={route} onNavigate={onNavigate} notifications={notifications} unreadCount={unreadCount}>{error && errorRoute === route ? <section className="admin-panel admin-wide-panel"><p className="eyebrow">Connection problem</p><h2>This section could not load.</h2><p className="inline-error" role="alert">{error}</p><p className="muted">Your session is still active. Retry this section without leaving the console.</p><button className="primary-action" type="button" onClick={() => { setError(""); setLoadedRoute(""); setRetryVersion(value => value + 1); }}>Retry loading</button></section> : loading ? <div className="loading-card">Preparing your console…</div> : route === "/admin" ? <DashboardView user={user} dashboard={dashboard} orders={orders} notifications={notifications} onNavigate={onNavigate} /> : route === "/admin/storefront" ? <StorefrontSettingsView /> : route === "/admin/about" ? <AdminAboutView /> : route === "/admin/events" ? <EventsView categories={categories} subcategories={subcategories} /> : route === "/admin/labels" ? <LabelsView orders={orders} onOrderChanged={changeOrder} /> : route === "/admin/hero" ? <HeroStudioView products={products} categories={categories} user={user} /> : route === "/admin/tax" ? <TaxComplianceView /> : route === "/admin/add-product" ? <AddListingView categories={categories} subcategories={subcategories} onNavigate={onNavigate} /> : route === "/admin/bulk-listing" ? <BulkListingView categories={categories} subcategories={subcategories} /> : route === "/admin/orders" ? <OrdersView orderYear={orderYear} orderYears={orderYears} onOrderYearChange={year => { setOrderYear(year); setLoadedRoute(""); }} user={user} onNavigate={onNavigate} orders={orders} onOrderChanged={changeOrder} orderTotal={orderPagination?.total ?? orders.length} hasMoreOrders={Boolean(orderPagination?.has_more)} loadingMore={loadingMore === "orders"} onLoadMore={() => loadMore("orders")} /> : route === "/admin/products" ? <ManageProductsView products={products} categories={categories} subcategories={subcategories} onProductChanged={changeProduct} onProductDeleted={removeProduct} onNavigate={onNavigate} productTotal={productPagination?.total ?? products.length} hasMoreProducts={Boolean(productPagination?.has_more)} loadingMore={loadingMore === "products"} onLoadMore={() => loadMore("products")} /> : route === "/admin/inventory" ? <InventoryView products={products} onProductChanged={changeProduct} productTotal={productPagination?.total ?? products.length} hasMoreProducts={Boolean(productPagination?.has_more)} loadingMore={loadingMore === "products"} onLoadMore={() => loadMore("products")} /> : route === "/admin/customers" ? <CustomersView user={user} /> : route === "/admin/employees" ? <EmployeesView user={user} /> : route === "/admin/reviews" ? <ReviewsView /> : route === "/admin/questions" ? <QuestionsView /> : route === "/admin/credits" ? <AdminCreditsView /> : route === "/admin/coupons" ? <CouponsView products={products} categories={categories} subcategories={subcategories} customers={customers} /> : route === "/admin/deals" ? <DealsView products={products} onProductChanged={changeProduct} /> : route === "/admin/categories" ? <CategoriesView categories={categories} subcategories={subcategories} onCatalogChanged={refreshCatalog} /> : route === "/admin/returns" ? <ReturnsView user={user} /> : route === "/admin/support" ? <SupportView /> : route === "/admin/system" ? <SystemView /> : route === "/admin/manage-store" ? <ManageStoreView user={user} onNavigate={onNavigate} /> : <NotificationsView notifications={notifications} onNotificationsChanged={changeNotifications} onNavigate={onNavigate} />}</AdminShell>;
 }

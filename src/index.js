@@ -103,7 +103,7 @@ const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
 const CANONICAL_ORIGIN = "https://glamiastore.com";
 const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com", WIBRAWL_HOSTNAME]);
 const storefrontForRequest = storefrontForUrl;
-const PUBLIC_CACHE_VERSION = `2026-10-12-storefront-first-screen-v50-${storefrontStyleHash.slice(0, 12)}-${wibrawlStorefrontStyleHash.slice(0, 12)}`;
+const PUBLIC_CACHE_VERSION = `2026-10-14-order-year-groups-v51-${storefrontStyleHash.slice(0, 12)}-${wibrawlStorefrontStyleHash.slice(0, 12)}`;
 const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
 const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 const PHONEPE_SANDBOX_BASE = "https://api-preprod.phonepe.com/apis/pg-sandbox";
@@ -6665,6 +6665,11 @@ async function listOrders(env, user, scope, searchParams = new URLSearchParams()
     const selectedOrder=String(searchParams.get('order')||'').trim().slice(0,128);
     if(selectedOrder){filters.push('o.id=?');args.push(selectedOrder);}
     if (completed) filters.push("(b.order_id IS NOT NULL OR (o.order_type='replacement' AND o.status='delivered'))");
+    const year = String(searchParams.get('year') || 'all');
+    if (year !== 'all' && (!/^\d{4}$/.test(year) || Number(year) < 1900)) return json({ error: 'Invalid order year' }, 400);
+    const yearExpression = "strftime('%Y', o.created_at, '+5 hours', '+30 minutes')";
+    const { results: years } = await env.DB.prepare(`SELECT ${yearExpression} AS year, COUNT(*) AS count FROM orders o LEFT JOIN order_bills b ON b.order_id=o.id WHERE NOT ${paymentIncompleteOrderPredicate('o', true)} ${completed ? "AND (b.order_id IS NOT NULL OR (o.order_type='replacement' AND o.status='delivered'))" : ''} AND ${yearExpression} IS NOT NULL GROUP BY year ORDER BY year DESC`).all();
+    if (year !== 'all') { filters.push(`${yearExpression} = ?`); args.push(year); }
     if (query) { filters.push("(o.order_number LIKE ? OR o.customer_email LIKE ? OR o.customer_name LIKE ?)"); args.push(...Array(3).fill(`%${query}%`)); }
     const where = filters.join(" AND ");
     const requestedLimit = Number(searchParams.get("limit"));
@@ -6679,11 +6684,11 @@ async function listOrders(env, user, scope, searchParams = new URLSearchParams()
       ORDER BY ${completed ? "COALESCE(b.issued_at,o.delivered_at,o.created_at)" : "o.created_at"} DESC, o.id DESC${limit ? " LIMIT ? OFFSET ?" : ""}
     `).bind(...args, ...(limit ? [limit, offset] : [])).all();
     const orders = await attachCancellationRefunds(env,results.map(formatOrder));
-    if (!limit) return json({ orders });
-    const total = query || completed || selectedOrder
+    if (!limit) return json({ orders, years, selected_year: year });
+    const total = query || completed || selectedOrder || year !== 'all'
       ? Number((await env.DB.prepare(`SELECT COUNT(*) AS count FROM orders o LEFT JOIN order_bills b ON b.order_id = o.id WHERE ${where}`).bind(...args).first())?.count || 0)
       : await cachedCount(env, "admin-orders", `SELECT COUNT(*) AS count FROM orders o WHERE NOT ${paymentIncompleteOrderPredicate("o", true)}`);
-    return json({ orders, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + orders.length < total } });
+    return json({ orders, years, selected_year: year, pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)), has_more: offset + orders.length < total } });
   }
   const { results } = await env.DB.prepare(`
     SELECT o.*, b.bill_number, b.issued_at AS bill_issued_at FROM orders o LEFT JOIN order_bills b ON b.order_id = o.id

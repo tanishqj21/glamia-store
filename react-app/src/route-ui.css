@@ -54,6 +54,7 @@
 .credits-wallet .credits-referral-panel > small { color: var(--muted); display: block; line-height: 1.6; margin-top: 10px; }
 .completed-order-search { align-items: end; display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0; }
 .completed-order-search label { display: grid; flex: 1; gap: 8px; min-width: min(260px, 100%); }
+.completed-order-search select { background: var(--surface); border: 1px solid var(--line); color: var(--ink); min-height: 48px; padding: 12px; width: 100%; }
 .completed-order-search input { background: var(--surface); border: 1px solid var(--line); color: var(--ink); min-height: 48px; padding: 12px; width: 100%; }
 .completed-order-list article { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 24px; justify-content: space-between; padding: 24px 0; }
 .completed-order-list article > div:first-child { min-width: 0; overflow-wrap: anywhere; }
@@ -560,7 +561,9 @@ body.cart-removal-open { overflow: hidden; }
 .orders-overview-card strong { color: var(--overview-color); font-size: 26px; line-height: 1; }
 .orders-overview-card small { color: var(--ink); font-size: 12px; font-weight: 700; }
 .orders-overview-card em { color: var(--muted); font-size: 10px; font-style: normal; line-height: 1.35; }
-.orders-filter-bar { align-items: end; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) 190px; margin: 0 0 18px; }
+.orders-filter-bar { align-items: end; display: grid; gap: 12px; grid-template-columns: 150px minmax(0, 1fr) 190px; margin: 0 0 18px; }
+.orders-year-group { display: grid; gap: 14px; }
+.orders-year-heading { border-bottom: 1px solid var(--line); color: var(--ink); font-family: inherit; font-size: 18px; margin: 8px 0; padding-bottom: 12px; }
 .orders-filter-bar label { color: var(--muted); display: grid; font-size: 10px; font-weight: 700; gap: 7px; letter-spacing: .1em; text-transform: uppercase; }
 .orders-filter-bar input, .orders-filter-bar select { border-radius: 8px; min-height: 46px; padding: 12px 14px; transition: border-color .2s ease, box-shadow .2s ease; }
 .orders-filter-bar input:focus, .orders-filter-bar select:focus { border-color: var(--accent-strong); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-strong) 18%, transparent); outline: none; }
