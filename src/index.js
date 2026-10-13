@@ -423,7 +423,7 @@ function buildProductCode(brandCode, category, subcategory, sequence, prefixBefo
   return `${prefix}-${categoryCode}-${subcategoryCode}-${sequenceCode}${suffix}`;
 }
 
-/* Order numbers: GM-<DDMMYYYY IST>-<product initials>-<5-digit sequence>,
+/* Order numbers: GM/WB-<DDMMYYYY IST>-<product initials>-<5-digit sequence>,
    e.g. GM-12092026-MSW-00001. The sequence lives in the counters table and is
    bumped atomically per order; gaps are possible when a checkout fails after
    the number is taken, which is expected for sequential identifiers. */
@@ -451,7 +451,7 @@ function buildOrderNumber(initials, sequence, storefront = "glamia") {
   const tail = sequence == null
     ? crypto.randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()
     : String(sequence).padStart(5, "0");
-  return (storefront === "wibrawl" ? "VB" : "GM") + "-" + istDateString() + "-" + initials + "-" + tail;
+  return (storefront === "wibrawl" ? "WB" : "GM") + "-" + istDateString() + "-" + initials + "-" + tail;
 }
 
 const DEFAULT_PAGE_DESCRIPTION = "Shop curated apparel and accessories from independent ateliers — free and fast shipping across India, with secure payments available.";
@@ -8790,7 +8790,7 @@ async function createReplacementOrder(env, originalOrder, exchangeItem, replacem
   };
   const id = crypto.randomUUID();
   const sequence = await nextOrderSequence(env);
-  const orderNumber = buildOrderNumber(productNameInitials(item.name), sequence, String(originalOrder.order_number || "").startsWith("VB-") ? "wibrawl" : "glamia");
+  const orderNumber = buildOrderNumber(productNameInitials(item.name), sequence, /^(?:WB|VB)-/.test(String(originalOrder.order_number || "")) ? "wibrawl" : "glamia");
   const trackingToken = crypto.randomUUID().replace(/-/g, "");
   const reservation = { id: crypto.randomUUID(), productId: product.id, size: replacementSize, quantity };
   const replacementDelivery = deliveryPromise(parseSettingObject(originalOrder.shipping_json).state, (await storefrontSettingsObject(env)).customer_experience);

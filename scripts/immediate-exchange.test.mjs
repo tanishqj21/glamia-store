@@ -19,6 +19,20 @@ async function fixture(t){
 }
 const patch=body=>new Request('http://localhost/local',{method:'PATCH',body:JSON.stringify(body)});
 
+for (const [originalPrefix, replacementPrefix] of [['WB', 'WB'], ['VB', 'WB'], ['GM', 'GM']]) {
+  test(`exchange from ${originalPrefix} keeps its storefront and creates a ${replacementPrefix} replacement`, async t => {
+    const f = await fixture(t);
+    const originalNumber = `${originalPrefix}-13102026-ILS-00001`;
+    f.db.prepare("UPDATE orders SET order_number=? WHERE id='manual-order'").run(originalNumber);
+    const response = await f.submit();
+    assert.equal(response.status, 201, await response.clone().text());
+    const data = await response.json();
+    assert.ok(data.replacement_order.order_number.startsWith(`${replacementPrefix}-`));
+    assert.equal(f.db.prepare("SELECT order_number FROM orders WHERE id='manual-order'").get().order_number, originalNumber);
+    assert.equal(f.networkCalls(), 0);
+  });
+}
+
 test('concurrent submissions create one replacement/stock debit/audit and notify admin to arrange pickup',async t=>{
   const f=await fixture(t);
   const responses=await Promise.all([f.submit(),f.submit(),f.create(exchange)]);

@@ -56,7 +56,7 @@ test('coupons validate and list against Wibrawl inventory', async t => {
   assert.equal((await worker.validateCoupon(req('https://glamiastore.com',body),env,buyer)).status,400);
 });
 
-test('real credit checkout creates VB orders and keeps GM orders separate', async t => {
+test('real credit checkout creates WB orders and keeps GM orders separate', async t => {
   const {db,env} = fixture(t);
   const purchase = (origin,id,token) => worker.createOrder(req(origin, {
     items:[{id,quantity:1}], payment_method:'store_credit',credits_used:100,
@@ -65,7 +65,7 @@ test('real credit checkout creates VB orders and keeps GM orders separate', asyn
   }), env, buyer);
   const wbResponse = await purchase(WIBRAWL_ORIGIN,'wb','wb');
   assert.equal(wbResponse.status,201,await wbResponse.clone().text());
-  assert.match((await wbResponse.json()).order.order_number,/^VB-/);
+  assert.match((await wbResponse.json()).order.order_number,/^WB-/);
   const gmResponse = await purchase('https://glamiastore.com','gm','gm');
   assert.equal(gmResponse.status,201);
   assert.match((await gmResponse.json()).order.order_number,/^GM-/);
