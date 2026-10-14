@@ -111,7 +111,6 @@
 .admin-react-page .events-list-heading h3 { font-size: 32px; }
 .admin-react-page .events-studio-grid > *, .admin-react-page .coupon-studio-grid > * { min-width: 0; }
 .admin-react-page .event-row-actions { max-width: 310px; }
-.admin-react-page .event-row-actions button { background: var(--surface); border: 1px solid var(--line); }
 .admin-react-page .event-row-actions .danger-link { color: var(--order-red); }
 .admin-react-page .admin-about-timeline-heading { flex-wrap: wrap; }
 @media (max-width: 1100px) {
