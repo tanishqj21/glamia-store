@@ -1,0 +1,3 @@
+# Preserve inline-script bytes and their CSP hashes on Windows checkouts.
+react-app/index.html text eol=lf
+public/index.html text eol=lf

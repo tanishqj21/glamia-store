@@ -1,11 +1,18 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { criticalStorefrontCss, deferredStorefrontCss } from './lib/storefront-critical-css.mjs';
 
 // Keep server-rendered styles exactly aligned with Vite's reviewed entry CSS.
 const manifest = JSON.parse(readFileSync('public/.vite/manifest.json', 'utf8'));
+const htmlPath = 'public/index.html';
+const originalHtml = readFileSync(htmlPath, 'utf8');
+const builtHtml = originalHtml.replace(/\r\n?/g, '\n');
+if (builtHtml !== originalHtml) {
+  writeFileSync(htmlPath + '.normalized.tmp', builtHtml);
+  renameSync(htmlPath + '.normalized.tmp', htmlPath);
+}
 // The theme boot scripts must run before paint without weakening the CSP.
-const scriptHashes = [...readFileSync('public/index.html', 'utf8').matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
+const scriptHashes = [...builtHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
   .filter(([, attributes, code]) => !/\bsrc\s*=/.test(attributes) && code.trim())
   .map(([, , code]) => createHash('sha256').update(code).digest('base64'));
 // Static asset responses need the same reviewed inline-script hashes as Worker HTML.

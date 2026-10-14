@@ -27,4 +27,11 @@ The requested website Test button, ₹1 simulated checkout, API helpers and draf
 - Production build and complete 54-chunk asset graph passed. Website/backend lint had no errors; existing React effect warnings remain.
 - Evidence is preserved in the main workspace under `tmp/ist-cleanup-2026-10-15` and `test-results/ist-seconds`.
 
-Deployment and live verification are recorded after release below.
+## Release
+
+- Code commit: `0a88e6f`, pushed to `codex/wibrawl-storefront` and fast-forwarded into the main workspace.
+- Cloudflare version: `a4b24005-b348-479c-aed1-017dbcd26898`.
+- Live health and homepage checks returned 200 on both domains, with explicit IST timestamps including seconds and the new `assets/index-_V-8zewO.js` entry. Both domains return 404 for the cancelled `/api/test-mode` endpoint.
+- The local main workspace additionally archived 2,913 obsolete generated chunks using the same compatibility rules. The local app edits remain alongside the existing native work; no native release was made.
+- Canonical LF line endings and build-time normalization preserve CSP script hashes in future Windows checkouts.
+
