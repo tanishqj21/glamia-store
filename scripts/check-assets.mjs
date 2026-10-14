@@ -1,6 +1,7 @@
 // Verify the complete build graph before archiving obsolete generated chunks.
 import { readFileSync, readdirSync, statSync, mkdirSync, renameSync } from "node:fs";
 import { resolve, relative, basename, isAbsolute } from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -33,8 +34,18 @@ for (const file of htmlAssets) if (!referenced.has(file)) throw new Error(`HTML 
 
 // Preserve a seven-day compatibility window for already-open tabs and lazy-loaded routes.
 const cutoff = Date.now() - 7 * 86400000;
+// Checkout mtimes are fresh even for obsolete bundles. Keep every asset referenced
+// by a manifest committed during the compatibility window, using Git as evidence.
+let tracked = null, recentlyReferenced = null;
+try {
+  tracked = new Set(execFileSync('git', ['ls-files', 'public/assets'], { cwd: root, encoding: 'utf8', windowsHide: true }).trim().split(/\r?\n/).map(path => basename(path)));
+  const history = execFileSync('git', ['log', '--since=' + new Date(cutoff).toISOString(), '--format=', '-p', '--', 'public/.vite/manifest.json'], { cwd: root, encoding: 'utf8', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
+  recentlyReferenced = new Set([...history.matchAll(/assets\/([\w-]+-[\w-]{8}\.(?:js|css))/g)].map(match => match[1]));
+} catch { /* Outside a Git checkout, retain the conservative mtime policy. */ }
 const stale = readdirSync(assetsDir).filter(file => /^[\w-]+-[\w-]{8}\.(js|css)$/.test(file)
-  && !referenced.has(file) && statSync(inside(assetsDir, file)).mtimeMs < cutoff);
+  && !referenced.has(file) && (tracked?.has(file)
+    ? !recentlyReferenced.has(file)
+    : statSync(inside(assetsDir, file)).mtimeMs < cutoff));
 if (process.argv.includes("--delete")) throw new Error("Destructive cleanup was removed; use --archive instead.");
 if (process.argv.includes("--archive") && stale.length) {
   const archive = inside(resolve(root, "tmp"), `asset-archive-${Date.now()}`);

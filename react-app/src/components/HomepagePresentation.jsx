@@ -1,3 +1,4 @@
+import { EventCountdown } from './EventCountdown';
 import React, { useEffect, useState } from 'react';
 import { productUrl, formatIST } from '../lib/commerce';
 import { Icon } from './Icon';
@@ -18,7 +19,7 @@ function StorePromises({ settings }) {
 
 function CampaignFeature({ campaign, onNavigate }) {
   if (!campaign?.active || campaign.show_on_home === false) return null;
-  return <section className={`campaign-feature event-theme-${campaign.theme || "graphite"}`} aria-label="Current Glamia event"><div className="campaign-feature-copy"><span className="campaign-feature-kicker">GLAMIA / {campaign.type || "the edit"}</span><span className="campaign-feature-symbol" aria-hidden="true">✳</span><p className="campaign-feature-overline">The moment is here</p><h2>{campaign.headline}</h2><p className="campaign-feature-message">{campaign.message}</p><div className="campaign-feature-actions"><button type="button" onClick={() => onNavigate(campaign.cta_href || "/offers")}>{campaign.cta_label || "Explore the edit"} </button>{campaign.coupon_code && <span className="campaign-feature-code">USE CODE <strong>{campaign.coupon_code}</strong></span>}</div></div><div className="campaign-feature-aside"><span>THE GLAMIA EDIT</span><strong>{campaign.name || "Made for the moment"}</strong><small>{campaign.ends_at ? `Until ${formatIST(campaign.ends_at)}` : "Discover it while it's here"}</small></div></section>;
+  return <section className={`campaign-feature event-theme-${campaign.theme || "graphite"}`} aria-label="Current Glamia event"><div className="campaign-feature-copy"><span className="campaign-feature-kicker">GLAMIA / {campaign.type || "the edit"}</span><span className="campaign-feature-symbol" aria-hidden="true">✳</span><p className="campaign-feature-overline">The moment is here</p><h2>{campaign.headline}</h2><p className="campaign-feature-message">{campaign.message}</p><div className="campaign-feature-actions"><button type="button" onClick={() => onNavigate(campaign.cta_href || "/offers")}>{campaign.cta_label || "Explore the edit"} </button>{campaign.coupon_code && <span className="campaign-feature-code">USE CODE <strong>{campaign.coupon_code}</strong></span>}</div></div><div className="campaign-feature-aside"><span>THE GLAMIA EDIT</span><strong>{campaign.name || "Made for the moment"}</strong><EventCountdown endsAt={campaign.ends_at} /><small>{campaign.ends_at ? `Until ${formatIST(campaign.ends_at)}` : "Discover it while it's here"}</small></div></section>;
 }
 
 function CinematicHero({ slides = [], ready = false, onNavigate }) {

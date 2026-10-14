@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { apiFetch } from '../lib/api';
-import { money } from '../lib/commerce';
-import { refundDate } from '../lib/refundTracking';
+import { money, refundDate } from '../lib/commerce';
 import '../return-lifecycle.css';
 
 const copy = {

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
-import { money } from "../lib/commerce";
-import { refundDate } from "../lib/refundTracking";
+import { money, refundDate } from '../lib/commerce';
 
 const label = value => String(value || "Not available").replaceAll("_", " ");
 

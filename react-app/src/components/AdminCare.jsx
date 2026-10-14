@@ -1,6 +1,6 @@
+import { formatIST, money } from '../lib/commerce';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
-import { money } from "../lib/commerce";
 import { AdminReturnLogistics } from './AdminReturnLogistics';
 import { AdminReturnModal } from './AdminReturnModal';
 import { AdminComplaintCompletion } from './AdminComplaintCompletion';
@@ -8,7 +8,7 @@ import { useOrderActions } from '../lib/useOrderActions';
 import { reportAdminError } from '../lib/adminFeedback';
 import { SupportOrderContext } from './SupportOrderContext';
 
-function date(value) { return value ? new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—"; }
+function date(value) { return value ? formatIST(value) : "—"; }
 
 function useResource(path, key) {
   const [items, setItems] = useState([]);

@@ -8,6 +8,14 @@ const manifest = JSON.parse(readFileSync('public/.vite/manifest.json', 'utf8'));
 const scriptHashes = [...readFileSync('public/index.html', 'utf8').matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
   .filter(([, attributes, code]) => !/\bsrc\s*=/.test(attributes) && code.trim())
   .map(([, , code]) => createHash('sha256').update(code).digest('base64'));
+// Static asset responses need the same reviewed inline-script hashes as Worker HTML.
+const headersPath = 'public/_headers';
+const staticHeaders = readFileSync(headersPath, 'utf8');
+const updatedHeaders = staticHeaders.replace(/script-src[^;]+;/, directive => directive
+  .replace(/\s+'sha256-[^']+'/g, '')
+  .replace('script-src', 'script-src ' + scriptHashes.map(hash => "'sha256-" + hash + "'").join(' ')))
+  .replace(/frame-src(?! 'self')/, "frame-src 'self'");
+if (updatedHeaders !== staticHeaders) writeFileSync(headersPath, updatedHeaders);
 const entry = Object.values(manifest).find(item => item.isEntry);
 if (!entry?.css?.length) throw new Error('Storefront entry CSS missing');
 const mainEntry = Object.keys(manifest).find(key => /(?:^|\/)main\.jsx$/.test(key));

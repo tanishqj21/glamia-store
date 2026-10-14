@@ -1,3 +1,4 @@
+import { APP_TIME_ZONE, IST_OFFSET_MS, istDayKey, toISTTimestamp, parseStoredTimestamp, parseISTInput, istTimestampReplacer } from './time-zone.js';
 import { canManageEmployee, publicProductView, readBoundedBody, validSessionClaims } from "./security.js";
 import { merchantAdmin, processMerchantSync, scheduleMerchantSync } from "./google-merchant.js";
 import { creditAuthority, creditWallet, creditAdminData, grantStoreCredits, saveCreditSettings, decideCreditRefund, ensureReferralCode, claimSignupReferral, validateReferral, qualifyCreditReferral } from "./store-credits.js";
@@ -103,7 +104,7 @@ const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
 const CANONICAL_ORIGIN = "https://glamiastore.com";
 const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com", WIBRAWL_HOSTNAME]);
 const storefrontForRequest = storefrontForUrl;
-const PUBLIC_CACHE_VERSION = `2026-10-14-order-year-groups-v51-${storefrontStyleHash.slice(0, 12)}-${wibrawlStorefrontStyleHash.slice(0, 12)}`;
+const PUBLIC_CACHE_VERSION = `2026-10-15-ist-seconds-v53-${storefrontStyleHash.slice(0, 12)}-${wibrawlStorefrontStyleHash.slice(0, 12)}`;
 const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
 const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 const PHONEPE_SANDBOX_BASE = "https://api-preprod.phonepe.com/apis/pg-sandbox";
@@ -427,7 +428,7 @@ function buildProductCode(brandCode, category, subcategory, sequence, prefixBefo
    e.g. GM-12092026-MSW-00001. The sequence lives in the counters table and is
    bumped atomically per order; gaps are possible when a checkout fails after
    the number is taken, which is expected for sequential identifiers. */
-const IST_OFFSET_MS = 5 * 60 * 60 * 1000 + 30 * 60 * 1000;
+
 
 function istDateString(now = new Date()) {
   const ist = new Date(now.getTime() + IST_OFFSET_MS);
@@ -716,7 +717,7 @@ async function renderPublicPage(request, env, ctx) {
       publicProduct.first_image_inline = await timed('image', () => inlineProductImage(publicProduct, env, origin));
       const productSettings = await productSettingsPromise;
       const bootstrapProduct = publicProduct.first_image_inline ? { ...publicProduct, first_image_inline: { source: publicProduct.first_image_inline.source, from_dom: true } } : publicProduct;
-      const payload = JSON.stringify({ path, product: bootstrapProduct, settings: productSettings }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+      const payload = JSON.stringify({ path, product: bootstrapProduct, settings: productSettings }, istTimestampReplacer).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
       headExtras += `<script type="application/json" id="glamia-product-bootstrap">${payload}</script>`;
       try {
         const { renderProductShell } = await import('./product-shell.jsx');
@@ -871,7 +872,7 @@ async function renderPublicPage(request, env, ctx) {
       ...bootstrap,
       hero: { ...bootstrap.hero, campaign_image_from_dom: true, slides: bootstrap.hero.slides.map((slide, index) => index === 0 ? { ...slide, campaign_image: undefined } : slide) }
     } : bootstrap;
-    const data = JSON.stringify(serializedBootstrap).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    const data = JSON.stringify(serializedBootstrap, istTimestampReplacer).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     const firstImage = bootstrap.hero?.slides?.[0]?.frames?.[0]?.image;
     // A relative uploaded asset is safe to preload; external/user-supplied
     // URLs are left to the image element and the existing CSP.
@@ -3251,8 +3252,8 @@ function normalizeAnnouncementItems(value, strict = false) {
     const startsAt = String(item?.starts_at ?? item?.startsAt ?? "").trim();
     const endsAt = String(item?.ends_at ?? item?.endsAt ?? "").trim();
     if (!text && !startsAt && !endsAt) continue;
-    const startMs = startsAt ? Date.parse(startsAt) : 0;
-    const endMs = endsAt ? Date.parse(endsAt) : NaN;
+    const startMs = startsAt ? (strict ? parseISTInput(startsAt) : parseStoredTimestamp(startsAt)).getTime() : 0;
+    const endMs = endsAt ? (strict ? parseISTInput(endsAt) : parseStoredTimestamp(endsAt)).getTime() : NaN;
     if (!text || !endsAt || !Number.isFinite(endMs) || (startsAt && !Number.isFinite(startMs)) || (startsAt && endMs <= startMs)) {
       if (strict) throw httpError(`Scheduled announcement ${index + 1} needs text, a valid start time, and an end time after it`, 400);
       continue;
@@ -3260,8 +3261,8 @@ function normalizeAnnouncementItems(value, strict = false) {
     items.push({
       id: String(item?.id || `announcement-${index + 1}`).trim().slice(0, 100),
       text,
-      starts_at: startsAt,
-      ends_at: endsAt
+      starts_at: startsAt ? new Date(startMs).toISOString() : "",
+      ends_at: new Date(endMs).toISOString()
     });
   }
   return items;
@@ -3561,7 +3562,7 @@ function normalizeEventRow(row) {
 function normalizeEventDate(value, label) {
   const text = String(value || "").trim();
   if (!text) return null;
-  const date = new Date(text);
+  const date = parseISTInput(text);
   if (Number.isNaN(date.getTime())) throw httpError(`${label} is invalid`, 400);
   return date.toISOString();
 }
@@ -4171,7 +4172,7 @@ function validProfileDob(value) {
   const dob = String(value || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) return false;
   const parsed = new Date(`${dob}T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === dob && parsed <= new Date();
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === dob && dob <= istDayKey();
 }
 
 function profileIsComplete(row) {
@@ -4248,7 +4249,7 @@ async function updateProfile(request, env, user) {
   if (dob) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) throw httpError("Date of birth must be a valid date", 400);
     const parsedDob = new Date(`${dob}T00:00:00Z`);
-    if (Number.isNaN(parsedDob.getTime()) || parsedDob.toISOString().slice(0, 10) !== dob || parsedDob > new Date()) {
+    if (Number.isNaN(parsedDob.getTime()) || parsedDob.toISOString().slice(0, 10) !== dob || dob > istDayKey()) {
       throw httpError("Date of birth must be a valid past date", 400);
     }
   }
@@ -4648,7 +4649,7 @@ function normalizePreorderConfig(input = {}, current = {}) {
   const releaseInput = input.preorder_release_at === undefined ? current.preorder_release_at : input.preorder_release_at;
   let releaseAt = null;
   if (releaseInput !== null && releaseInput !== undefined && String(releaseInput).trim()) {
-    const date = new Date(String(releaseInput));
+    const date = input.preorder_release_at === undefined ? parseStoredTimestamp(releaseInput) : parseISTInput(releaseInput);
     if (Number.isNaN(date.getTime())) throw httpError("Pre-order release time is invalid", 400);
     releaseAt = date.toISOString();
   }
@@ -4927,7 +4928,7 @@ async function updateProduct(request, env, id, adminUser = null, ctx) {
       next.deal_starts_at = null;
       next.deal_price = null;
     } else {
-      const date = new Date(body.deal_ends_at);
+      const date = parseISTInput(body.deal_ends_at);
       if (Number.isNaN(date.getTime())) return json({ error: "Invalid deal end date" }, 400);
       next.deal_ends_at = date.toISOString();
       if (body.deal_starts_at === undefined && !next.deal_starts_at) next.deal_starts_at = new Date().toISOString();
@@ -4937,7 +4938,7 @@ async function updateProduct(request, env, id, adminUser = null, ctx) {
     if (body.deal_starts_at === null || body.deal_starts_at === "") {
       next.deal_starts_at = null;
     } else {
-      const date = new Date(body.deal_starts_at);
+      const date = parseISTInput(body.deal_starts_at);
       if (Number.isNaN(date.getTime())) return json({ error: "Invalid deal start date" }, 400);
       next.deal_starts_at = date.toISOString();
     }
@@ -5922,7 +5923,7 @@ async function hasValidFileSignature(file, type) {
 }
 
 async function reserveUploadQuota(env, email, bytes) {
-  const usageDate = new Date().toISOString().slice(0, 10);
+  const usageDate = istDayKey();
   const result = await env.DB.prepare(`
     INSERT INTO upload_usage (user_email, usage_date, bytes) VALUES (?, ?, ?)
     ON CONFLICT(user_email, usage_date) DO UPDATE SET bytes = upload_usage.bytes + excluded.bytes
@@ -5932,7 +5933,7 @@ async function reserveUploadQuota(env, email, bytes) {
 }
 
 async function releaseUploadQuota(env, email, bytes) {
-  const usageDate = new Date().toISOString().slice(0, 10);
+  const usageDate = istDayKey();
   await env.DB.prepare("UPDATE upload_usage SET bytes = MAX(0, bytes - ?) WHERE user_email = ? AND usage_date = ?")
     .bind(bytes, String(email).toLowerCase(), usageDate).run();
 }
@@ -9509,7 +9510,7 @@ async function createSupportTicket(request, env, user) {
   }
   else if(body.item_line_ids?.length)return json({error:'Choose an order before choosing items'},400);
   const id = crypto.randomUUID();
-  const ticketNumber = `GM-SUP-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${id.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+  const ticketNumber = `GM-SUP-${istDayKey().replace(/-/g, "")}-${id.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
   await env.DB.prepare("INSERT INTO support_tickets (id, ticket_number, customer_email, customer_name, order_id, subject, message,referenced_line_ids_json) VALUES (?, ?, ?, ?, ?, ?, ?,?)")
     .bind(id, ticketNumber, email, name, orderId, subject, message,JSON.stringify(referenceLineIds)).run();
   await env.DB.prepare("INSERT INTO support_messages (id, ticket_id, sender_role, sender_email, message) VALUES (?, ?, 'customer', ?, ?)")
@@ -9626,7 +9627,7 @@ async function exportBackup(env, adminUser) {
     "support_tickets", "support_messages", "order_return_access", "order_return_access_events", "product_questions", "restock_subscriptions", "email_delivery_log",
     "admin_notifications", "admin_audit_log", "employee_audit_log", "employees", "employee_sessions", "cart_adds", "wishlist_adds", "upload_usage", "page_views", "counters"
   ];
-  const backup = { generated_at: new Date().toISOString(), tables: {} };
+  const backup = { generated_at: toISTTimestamp(new Date()), tables: {} };
   const tableResults = await env.DB.batch(tables.map(table => env.DB.prepare(`SELECT * FROM ${table}`)));
   tables.forEach((table, index) => { backup.tables[table] = tableResults[index].results || []; });
   await writeAuditLog(env, adminUser?.email, "export_backup", "backup", null, { tables, generated_at: backup.generated_at });
@@ -9634,7 +9635,7 @@ async function exportBackup(env, adminUser) {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store, private",
-      "Content-Disposition": `attachment; filename="glamia-backup-${new Date().toISOString().slice(0, 10)}.json"`
+      "Content-Disposition": `attachment; filename="glamia-backup-${istDayKey()}.json"`
     }
   });
 }
@@ -10149,7 +10150,7 @@ function formatInr(value) {
 }
 
 function formatOrderDate(value) {
-  const date = new Date(value);
+  const date = parseStoredTimestamp(value);
   return Number.isNaN(date.getTime()) ? String(value || "") : date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
 }
 
@@ -10892,8 +10893,8 @@ async function saveCoupon(request, env, existingCode = "") {
   if (emailTargets.some(email => !isValidCouponEmail(email))) {
     return json({ error: "Every eligible email address must be valid" }, 400);
   }
-  const startsAt = body.starts_at ? new Date(body.starts_at) : null;
-  const endsAt = body.ends_at ? new Date(body.ends_at) : null;
+  const startsAt = body.starts_at ? parseISTInput(body.starts_at) : null;
+  const endsAt = body.ends_at ? parseISTInput(body.ends_at) : null;
   const usageLimit = body.usage_limit === "" || body.usage_limit === null || body.usage_limit === undefined
     ? null
     : Math.floor(Number(body.usage_limit));
@@ -11592,11 +11593,12 @@ function base64UrlEncodeBytes(bytes) {
 }
 
 function json(data, status = 200, headers = {}) {
-  return new Response(JSON.stringify(data), {
+  return new Response(JSON.stringify(data, istTimestampReplacer), {
     status,
     headers: {
       "Content-Type": "application/json",
-      ...headers
+      ...headers,
+      "X-Application-Time-Zone": APP_TIME_ZONE
     }
   });
 }

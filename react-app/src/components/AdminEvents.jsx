@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
+import { istDateTimeInput, parseISTInput } from '../../../src/time-zone.js';
 import { formatIST } from "../lib/commerce";
 
 const EVENT_TYPES = [
@@ -77,18 +78,12 @@ const EMPTY_EVENT = {
   notify_customers: false
 };
 
-function inputDate(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return String(value).slice(0, 16);
-  const offset = date.getTimezoneOffset();
-  return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16);
-}
+const inputDate = istDateTimeInput;
 
 function storedDate(value) {
   const text = String(value || "").trim();
   if (!text) return "";
-  const date = new Date(text);
+  const date = parseISTInput(text);
   return Number.isFinite(date.getTime()) ? date.toISOString() : text;
 }
 
@@ -217,7 +212,7 @@ export function EventsView({ categories = [], subcategories = [] }) {
     setMessage("");
     try {
       const original = events.find((item) => item.id === editingId);
-      // datetime-local displays minutes; copy edits must retain the stored precision.
+      // The editor displays seconds; copy edits must retain stored fractional precision.
       const scheduleDate = (value, saved) => original && value === inputDate(saved) ? saved || "" : storedDate(value);
       const payload = { ...draft, starts_at: scheduleDate(draft.starts_at, original?.starts_at), ends_at: scheduleDate(draft.ends_at, original?.ends_at) };
       const response = await apiFetch(editingId ? `/api/admin/events/${encodeURIComponent(editingId)}` : "/api/admin/events", {
@@ -299,7 +294,7 @@ export function EventsView({ categories = [], subcategories = [] }) {
           {selectedDestination === "custom" && <label className="events-field-wide"><span>Custom page path</span><input name="cta_href" value={draft.cta_href} onChange={updateField} maxLength="180" placeholder="/category/Women" pattern="/(?!/).*" title="Enter an internal path beginning with /" required /></label>}
         </div>
       </section>
-      <section className="events-form-section"><div className="events-form-section-title"><span>03</span><div><h4>Timing & placement</h4><p>Publish now or set a future window.</p></div></div><div className="events-form-grid"><label><span>Publishing state</span><select name="status" value={draft.status} onChange={updateField}><option value="draft">Draft</option><option value="published">Published</option><option value="archived">Archived</option></select></label><label><span>Starts at <small>optional</small></span><input type="datetime-local" name="starts_at" value={draft.starts_at} onChange={updateField} /></label><label><span>Ends at <small>optional</small></span><input type="datetime-local" name="ends_at" min={draft.starts_at || undefined} value={draft.ends_at} onChange={updateField} /></label></div><div className="events-options"><label><input type="checkbox" name="show_on_home" checked={draft.show_on_home} onChange={updateField} /><span><strong>Show on the storefront</strong><small>Feature this event on the website and Store app home screens.</small></span></label><label><input type="checkbox" name="show_after_sign_in" checked={draft.show_after_sign_in} onChange={updateField} /><span><strong>Show after sign-in</strong><small>Welcome returning website shoppers with this event.</small></span></label><label><input type="checkbox" name="show_once" checked={draft.show_once} onChange={updateField} /><span><strong>Only once per device</strong><small>Remember when the sign-in message has already appeared.</small></span></label><label><input type="checkbox" name="notify_customers" checked={draft.notify_customers} onChange={updateField} /><span><strong>Notify opted-in shoppers</strong><small>Send one push alert when this event goes live. Shoppers can turn event alerts off in the Store app.</small></span></label></div><p className="form-hint">A published event appears during its date window. When windows overlap, the most recent active event takes priority.</p></section>
+      <section className="events-form-section"><div className="events-form-section-title"><span>03</span><div><h4>Timing & placement</h4><p>Publish now or set a future window.</p></div></div><div className="events-form-grid"><label><span>Publishing state</span><select name="status" value={draft.status} onChange={updateField}><option value="draft">Draft</option><option value="published">Published</option><option value="archived">Archived</option></select></label><label><span>Starts at <small>IST · optional</small></span><input type="datetime-local" step="1" name="starts_at" value={draft.starts_at} onChange={updateField} /></label><label><span>Ends at <small>IST · optional</small></span><input type="datetime-local" step="1" name="ends_at" min={draft.starts_at || undefined} value={draft.ends_at} onChange={updateField} /></label></div><div className="events-options"><label><input type="checkbox" name="show_on_home" checked={draft.show_on_home} onChange={updateField} /><span><strong>Show on the storefront</strong><small>Feature this event on the website and Store app home screens.</small></span></label><label><input type="checkbox" name="show_after_sign_in" checked={draft.show_after_sign_in} onChange={updateField} /><span><strong>Show after sign-in</strong><small>Welcome returning website shoppers with this event.</small></span></label><label><input type="checkbox" name="show_once" checked={draft.show_once} onChange={updateField} /><span><strong>Only once per device</strong><small>Remember when the sign-in message has already appeared.</small></span></label><label><input type="checkbox" name="notify_customers" checked={draft.notify_customers} onChange={updateField} /><span><strong>Notify opted-in shoppers</strong><small>Send one push alert when this event goes live. Shoppers can turn event alerts off in the Store app.</small></span></label></div><p className="form-hint">A published event appears during its date window. When windows overlap, the most recent active event takes priority.</p></section>
       <div className="events-save-bar"><button type="submit" className="primary-action" disabled={busy}>{busy ? "Saving…" : editingId ? "Save changes" : "Create event"} </button><button type="button" className="secondary-action" onClick={() => setView("overview")} disabled={busy}>Back to overview</button></div></form><div className="events-preview-column"><div className="events-preview-heading"><span className="events-section-index">LIVE PREVIEW</span><p>How this event will appear on the storefront.</p></div><EventPreview event={draft} /><p className="events-preview-note">Preview only · Changes appear to shoppers after you save and the event is live.</p></div></div>}
   </section>;
 }

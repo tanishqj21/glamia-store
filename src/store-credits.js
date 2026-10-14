@@ -1,7 +1,8 @@
+import { istDayKey } from './time-zone.js';
 // Amounts are whole INR credits. The ledger and its SQLite triggers own balances.
 const emailOf = value => String(value || '').trim().toLowerCase();
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
-export const indiaCreditDay = (date = new Date()) => new Date(date.getTime() + 330 * 60_000).toISOString().slice(0, 10);
+export const indiaCreditDay = istDayKey;
 
 export function creditAuthority(actor, whitelisted = false) {
   const permission = whitelisted || (actor?.role === 'admin' && actor.employee_permissions?.credits === true);

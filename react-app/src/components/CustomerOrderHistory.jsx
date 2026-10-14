@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
-import { money } from "../lib/commerce";
+import { money, formatIST } from "../lib/commerce";
 import { ReplacementOrderBadge } from './OrderDetails';
 import { CancellationRefundCard } from './CancellationRefundCard';
 
 function date(value) {
-  const parsed = new Date(String(value || "").includes("T") ? value : `${String(value || "").replace(" ", "T")}Z`);
-  return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
+  return formatIST(value, {dateStyle:'medium',timeStyle:'medium'}) || '—';
 }
 
 export function CustomerOrderHistory({ customer, onBack }) {

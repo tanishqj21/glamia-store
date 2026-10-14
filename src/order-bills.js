@@ -29,7 +29,7 @@ export async function createOrderBillPdf({ order, seller = {}, issuedAt, fontByt
     const parsed = new Date(String(value).includes('T') ? value : `${String(value).replace(' ', 'T')}Z`);
     return Number.isNaN(parsed.getTime()) ? 'Not recorded' : parsed.toLocaleString('en-IN', {
       timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', hour12: true,
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
     }) + ' IST';
   };
   let page, y;

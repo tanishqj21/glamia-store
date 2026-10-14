@@ -155,7 +155,8 @@ test('capture after cancellation alerts orders staff once without resurrecting t
 });
 
 test('all first-party inline boot scripts have matching restrictive CSP hashes', async () => {
-  const html = readFileSync(new URL('../react-app/index.html', import.meta.url), 'utf8');
+  // Validate served bytes, rather than source line endings changed by Git on Windows.
+  const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
   const headers = readFileSync(new URL('../public/_headers', import.meta.url), 'utf8');
   const worker = await workerFunctions(['withSecurityHeaders']);
   const csp = worker.withSecurityHeaders(new Response()).headers.get('Content-Security-Policy');

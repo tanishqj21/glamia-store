@@ -1,6 +1,7 @@
+import { istDayKey } from '../../../src/time-zone.js';
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
-import { money, formatIST, productUrl } from "../lib/commerce";
+import { money, formatIST, productUrl, refundDate } from '../lib/commerce';
 import { AfterSalesDialog } from "./CustomerCare";
 import { PhoneField, composePhone, splitPhone } from "./PhoneField";
 import { MyReviewsPanel } from "./Reviews";
@@ -8,7 +9,6 @@ import { CustomerRefundTracker } from "./CustomerRefundTracker";
 import { CustomerExchangeTracker } from './CustomerReturnDetails';
 import { OrderDetails } from './OrderDetails';
 import { useCustomerReturns } from "../lib/useCustomerReturns";
-import { refundDate } from "../lib/refundTracking";
 import { CancellationRefundCard } from './CancellationRefundCard';
 import { useCancellationRefunds } from '../lib/useCancellationRefunds';
 import { AccountLayout } from './AccountLayout';
@@ -27,12 +27,12 @@ function capitalizeNamePart(value) {
 
 function calculateAge(value) {
   if (!value) return null;
-  const birthDate = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(birthDate.getTime()) || birthDate > new Date()) return null;
-  const today = new Date();
-  let age = today.getFullYear() - birthDate.getFullYear();
-  const birthdayPassed = today.getMonth() > birthDate.getMonth()
-    || (today.getMonth() === birthDate.getMonth() && today.getDate() >= birthDate.getDate());
+  const birthDate = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(birthDate.getTime()) || value > istDayKey()) return null;
+  const today = new Date(istDayKey() + 'T00:00:00Z');
+  let age = today.getUTCFullYear() - birthDate.getUTCFullYear();
+  const birthdayPassed = today.getUTCMonth() > birthDate.getUTCMonth()
+    || (today.getUTCMonth() === birthDate.getUTCMonth() && today.getUTCDate() >= birthDate.getUTCDate());
   if (!birthdayPassed) age -= 1;
   return age >= 0 ? age : null;
 }

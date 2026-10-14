@@ -1,3 +1,5 @@
+import { APP_TIME_ZONE, parseStoredTimestamp } from '../../../src/time-zone.js';
+
 export function sellingPrice(product, now = Date.now()) {
   const starts = product?.deal_starts_at ? Date.parse(product.deal_starts_at) : 0;
   const ends = Date.parse(product?.deal_ends_at || "");
@@ -40,9 +42,12 @@ export function readArray(key) {
 export function money(value) { return `₹${Number(value || 0).toLocaleString("en-IN")}`; }
 
 export function formatIST(value, options) {
-  const date = new Date(value);
+  const date = parseStoredTimestamp(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", ...options });
+  const clockOptions = { ...options };
+  if (clockOptions.timeStyle === 'short') clockOptions.timeStyle = 'medium';
+  if (!clockOptions.timeStyle && (clockOptions.hour || clockOptions.minute)) clockOptions.second = '2-digit';
+  return date.toLocaleString("en-IN", { ...clockOptions, timeZone: APP_TIME_ZONE });
 }
 
 /* Canonical product URLs use the product hierarchy:
@@ -69,4 +74,9 @@ export function productUrl(product) {
     ? `${publicCode}-${internalId}`
     : stableId;
   return `/${category}/${subcategory}/${slug}-${suffix.toLowerCase()}`;
+}
+
+export function refundDate(value) {
+  const text = value ? formatIST(value, { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+  return text ? text + ' IST' : '';
 }

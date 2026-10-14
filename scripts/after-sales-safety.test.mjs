@@ -148,7 +148,7 @@ test('closed unfunded request can be retried; active request cannot',async t=>{
 test('preflight error is a safe customer review state and both presentation models stay identical',()=>{
   const r={type:'refund',status:'received',refund_destination:'original',refund_state:'review_required'};
   assert.equal(refundTracking(r).title,'Refund needs review');
-  assert.equal(readFileSync(new URL('../glamia-shoppers-app/src/refundTracking.js',import.meta.url),'utf8').trim(),readFileSync(new URL('../react-app/src/lib/refundTracking.js',import.meta.url),'utf8').trim());
+  assert.equal(readFileSync(new URL('../glamia-shoppers-app/src/refundTracking.js',import.meta.url),'utf8').replace(/\r\n?/g,'\n').trim(),readFileSync(new URL('../react-app/src/lib/refundTracking.js',import.meta.url),'utf8').replace(/\r\n?/g,'\n').trim());
 });
 
 test('logistics are audited, labels require private storage and receipt requires verified funds',async t=>{

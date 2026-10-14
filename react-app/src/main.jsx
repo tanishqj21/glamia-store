@@ -1,3 +1,4 @@
+import { EventCountdown } from './components/EventCountdown';
 import { normalizeProduct } from './lib/productPresentation';
 import { appendAnalyticsTag } from './lib/analyticsWorker';
 import { restoreFirstScreenMedia } from './lib/storefrontBootstrap';
@@ -158,7 +159,7 @@ function SaleCampaignPopup({ campaign, onClose, onNavigate }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => { const node = dialog.current; node?.showModal(); return () => node?.close(); }, []);
   async function copyCode() { try { await navigator.clipboard.writeText(campaign.coupon_code); setCopied(true); } catch { setCopied(false); } }
-  return <dialog ref={dialog} className={`sale-popup event-theme-${campaign.theme || "graphite"}`} aria-labelledby="sale-popup-title" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target !== dialog.current) return; const bounds = dialog.current.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose(); }}><button type="button" className="sale-popup-close" onClick={onClose} aria-label="Close event message">×</button><span className="sale-popup-mark">GLAMIA / A NOTE FOR YOU</span><span className="sale-popup-symbol" aria-hidden="true">✳</span><div className="sale-popup-copy"><p className="sale-popup-overline">Welcome back</p><h2 id="sale-popup-title">{campaign.headline}</h2><p>{campaign.message}</p>{campaign.coupon_code && <div className="sale-popup-code"><small>YOUR CODE</small><strong>{campaign.coupon_code}</strong><button type="button" onClick={copyCode}>{copied ? "Copied" : "Copy code"}</button></div>}<div className="sale-popup-actions"><button type="button" className="primary-action" onClick={() => { onClose(); onNavigate(campaign.cta_href || "/offers"); }}>{campaign.cta_label || "Explore the edit"} </button><button type="button" className="sale-popup-later" onClick={onClose}>Maybe later</button></div></div></dialog>;
+  return <dialog ref={dialog} className={`sale-popup event-theme-${campaign.theme || "graphite"}`} aria-labelledby="sale-popup-title" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target !== dialog.current) return; const bounds = dialog.current.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose(); }}><button type="button" className="sale-popup-close" onClick={onClose} aria-label="Close event message">×</button><span className="sale-popup-mark">GLAMIA / A NOTE FOR YOU</span><span className="sale-popup-symbol" aria-hidden="true">✳</span><div className="sale-popup-copy"><p className="sale-popup-overline">Welcome back</p><h2 id="sale-popup-title">{campaign.headline}</h2><p>{campaign.message}</p><EventCountdown endsAt={campaign.ends_at} />{campaign.coupon_code && <div className="sale-popup-code"><small>YOUR CODE</small><strong>{campaign.coupon_code}</strong><button type="button" onClick={copyCode}>{copied ? "Copied" : "Copy code"}</button></div>}<div className="sale-popup-actions"><button type="button" className="primary-action" onClick={() => { onClose(); onNavigate(campaign.cta_href || "/offers"); }}>{campaign.cta_label || "Explore the edit"} </button><button type="button" className="sale-popup-later" onClick={onClose}>Maybe later</button></div></div></dialog>;
 }
 
 function NotFoundPage({ onNavigate }) {
@@ -188,8 +189,10 @@ function App() {
   const [eventClock, setEventClock] = useState(() => Date.now());
   useEffect(() => {
     if (!storefront?.active_event) return undefined;
-    const timer = window.setInterval(() => setEventClock(Date.now()), 60000);
-    return () => window.clearInterval(timer);
+    const ends = Date.parse(storefront.active_event.ends_at || '');
+    if (!Number.isFinite(ends)) return;
+    const timer = window.setTimeout(() => setEventClock(Date.now()), Math.max(0, Math.min(ends - Date.now() + 25, 2147483647)));
+    return () => window.clearTimeout(timer);
   }, [storefront?.active_event]);
   useEffect(() => {
     let lastRefresh = Date.now();

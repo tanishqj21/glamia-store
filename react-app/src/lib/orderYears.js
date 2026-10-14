@@ -1,8 +1,8 @@
-const yearFormatter = new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Asia/Kolkata' });
+import { APP_TIME_ZONE, parseStoredTimestamp } from '../../../src/time-zone.js';
+const yearFormatter = new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: APP_TIME_ZONE });
 
 export function orderCalendarYear(value) {
-  const source = String(value || '').replace(' ', 'T');
-  const date = new Date(/(?:Z|[+-]\d{2}:\d{2})$/i.test(source) ? source : source + 'Z');
+  const date = parseStoredTimestamp(value);
   return Number.isNaN(date.getTime()) ? 'Unknown year' : yearFormatter.format(date);
 }
 

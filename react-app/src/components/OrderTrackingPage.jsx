@@ -1,3 +1,4 @@
+import { formatIST } from '../lib/commerce';
 import { useState } from "react";
 import { apiFetch } from "../lib/api";
 import { CancellationRefundCard } from './CancellationRefundCard';
@@ -9,7 +10,7 @@ function statusLabel(value) {
 }
 
 function date(value) {
-  return value ? new Date(value).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—";
+  return value ? formatIST(value) : "—";
 }
 
 export function OrderTrackingPage() {

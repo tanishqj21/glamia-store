@@ -1,3 +1,4 @@
+import { istDayKey } from '../../../src/time-zone.js';
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { formatIST, money } from "../lib/commerce";
@@ -30,7 +31,7 @@ function downloadSalesCsv(sales) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `glamia-tax-sales-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `glamia-tax-sales-${istDayKey()}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }

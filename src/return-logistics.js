@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { parseISTInput, parseStoredTimestamp } from './time-zone.js';
 import { billLogoBytes } from './order-bills.js';
 const fail=(message,status=400)=>Object.assign(new Error(message),{status});
 const headers={'cache-control':'private, no-store','x-content-type-options':'nosniff','content-type':'application/pdf','referrer-policy':'no-referrer'};
@@ -19,8 +20,12 @@ export async function saveReturnLogistics(request,env,current,actor,context={}) 
   for(const key of ['carrier','tracking_number','pickup_at','pickup_window','next_update_at','tracking_url','instructions','inspection_note']) logistics[key]=String(body[key]??old[key]??'').trim().slice(0,key==='instructions'||key==='inspection_note'?1000:key==='tracking_url'?500:120);
   logistics.pickup_status=String(body.pickup_status??old.pickup_status??'not_booked');
   if(!['not_booked','scheduled','collected','in_transit','delivered','cancelled'].includes(logistics.pickup_status)) throw fail('Choose a valid pickup status');
-  if(logistics.pickup_at && !Number.isFinite(Date.parse(logistics.pickup_at))) throw fail('Choose a valid pickup date');
-  if(logistics.next_update_at&&!Number.isFinite(Date.parse(logistics.next_update_at)))throw fail('Choose a valid next-update date');
+  for (const [field, label] of [['pickup_at', 'pickup'], ['next_update_at', 'next-update']]) {
+    if (!logistics[field]) continue;
+    const date = body[field] === undefined ? parseStoredTimestamp(logistics[field]) : parseISTInput(logistics[field]);
+    if (!Number.isFinite(date.getTime())) throw fail(`Choose a valid ${label} date`);
+    logistics[field] = date.toISOString();
+  }
   if(logistics.tracking_url){
     let link;try{link=new URL(logistics.tracking_url);}catch{throw fail('Choose a valid courier tracking URL');}
     const hosts=['delhivery.com','bluedart.com','dtdc.in','dtdc.com','indiapost.gov.in','ekartlogistics.in','ecomexpress.in','xpressbees.com'];
@@ -160,5 +165,5 @@ export async function returnDocument(env,returned,type) {
 function receiptDate(value) {
   if(!value) return 'Not recorded';
   const raw=String(value),parsed=new Date(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)?raw.replace(' ','T')+'Z':raw);
-  return Number.isFinite(parsed.getTime())?parsed.toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true})+' IST':'Not recorded';
+  return Number.isFinite(parsed.getTime())?parsed.toLocaleString('en-IN',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true})+' IST':'Not recorded';
 }
