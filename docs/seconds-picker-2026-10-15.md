@@ -1,9 +1,7 @@
-# Explicit scheduling seconds — 15 October 2026
+# Scheduling seconds — 15 October 2026
 
-Added an always-visible 00–59 Seconds selector beside the native date/time input. Native browser calendar popups may omit seconds even when the field accepts second precision.
+All 11 scheduling fields use native date/time controls with one-second precision. The redundant standalone Seconds dropdown was removed at the user's request after the native picker showed its seconds column.
 
-The shared control covers all 11 scheduling fields: event starts/ends, coupon starts/ends, deal starts/ends, announcement starts/ends, pre-order release, return pickup and next customer update. Existing IST interpretation, required/minimum validation and unchanged fractional-second preservation remain intact. Narrow fields stack the controls to keep the complete date and time readable.
+Shared fields cover events, coupons, deals, announcements, pre-order release, return pickup and next customer update on both domains. IST interpretation, required/minimum validation and unchanged fractional-second preservation remain intact. The date/time input now uses the full available width.
 
-Validation: production build and 54-chunk graph passed; changed JavaScript had no lint errors; all 8 timezone/seconds unit cases passed. Browser checks on Glamia and WiBrawl in India, US and Japan timezones verify selecting :37/:59, saving the correct UTC instant, reopening the chosen seconds, :00 selection, unchanged fractional precision, mobile width, and light/dark themes. No browser page errors. Verification used local fixtures and an in-memory database, with no production order/payment writes.
-
-Evidence: `tmp/explicit-seconds-picker` and `test-results/explicit-seconds-picker` in the main workspace.
+Validation: production build, complete asset graph, 8 timezone/seconds tests and browser checks on both sites in India, US and Japan timezones. Browser checks cover native :37/:59 edits, saved instants, reopening, zero seconds, unchanged fractional precision, no duplicate Seconds control, mobile width and light/dark themes. No production order or payment writes.
