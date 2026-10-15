@@ -1,3 +1,4 @@
+import { ScheduledDateTimeField } from './ScheduledDateTimeField';
 import { istDateTimeInput, parseISTInput } from '../../../src/time-zone.js';
 import { useRef, useState } from 'react';
 import { apiFetch } from '../lib/api';
@@ -33,9 +34,9 @@ export function AdminReturnLogistics({request,onChanged,expanded=false}) {
     <label>Return tracking number<input disabled={Boolean(request.pickup_confirmed_at)} value={form.tracking_number||''} onChange={e=>field('tracking_number',e.target.value)} maxLength={120}/></label>
     <label>Official courier tracking URL<input type="url" value={form.tracking_url||''} onChange={e=>field('tracking_url',e.target.value)} maxLength={500} placeholder="https://courier.example/tracking"/><small>Delhivery, Blue Dart, DTDC, India Post, Ekart, Ecom Express or Xpressbees.</small></label>
     <label>Pickup time window<input value={form.pickup_window||''} onChange={e=>field('pickup_window',e.target.value)} maxLength={120} placeholder="For example, 10 am–2 pm IST"/></label>
-    <label>Next customer update (IST)<input type="datetime-local" step="1" value={istDateTimeInput(form.next_update_at)} onChange={e=>field('next_update_at',e.target.value?parseISTInput(e.target.value).toISOString():'')}/></label>
+    <ScheduledDateTimeField label={<>Next customer update (IST)</>} secondsLabel="Next customer update seconds (IST)" value={istDateTimeInput(form.next_update_at)} onChange={e=>field('next_update_at',e.target.value?parseISTInput(e.target.value).toISOString():'')} />
     <label>Pickup status<select value={form.pickup_status||'not_booked'} onChange={e=>field('pickup_status',e.target.value)}>{['not_booked','scheduled','collected','in_transit','delivered','cancelled'].map(value=><option key={value} value={value}>{value.replaceAll('_',' ')}</option>)}</select></label>
-    <label>Pickup date and time (IST)<input type="datetime-local" step="1" value={istDateTimeInput(form.pickup_at)} onChange={e=>field('pickup_at',e.target.value?parseISTInput(e.target.value).toISOString():'')}/></label>
+    <ScheduledDateTimeField label={<>Pickup date and time (IST)</>} secondsLabel="Pickup seconds (IST)" value={istDateTimeInput(form.pickup_at)} onChange={e=>field('pickup_at',e.target.value?parseISTInput(e.target.value).toISOString():'')} />
     <h4 className="logistics-wide logistics-section-title">Customer instructions</h4>
     <label className="logistics-wide">Return instructions<textarea value={form.instructions||''} onChange={e=>field('instructions',e.target.value)} maxLength={1000} placeholder="How should the customer pack and hand over the item?"/></label>
     <label className="logistics-wide">Customer-facing inspection result<textarea value={form.inspection_note||''} onChange={e=>field('inspection_note',e.target.value)} maxLength={1000}/></label>

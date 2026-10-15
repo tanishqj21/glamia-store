@@ -185,3 +185,17 @@
 .hero-slide-queue .wb-reel-queue-row.is-drop-target { outline:2px solid var(--ink); outline-offset:-2px; }
 .hero-slide-queue .wb-reel-queue-row.is-previewing { background:color-mix(in srgb,var(--accent) 6%,transparent); }
 @media(max-width:450px) { .hero-slide-queue .wb-reel-queue-row { grid-template-columns:44px minmax(0,1fr); } }
+
+/* The seconds selector is independent of native date-picker capabilities. */
+.admin-react-page .schedule-datetime-field { display:grid; gap:7px; min-width:0; }
+.admin-react-page .schedule-datetime-label { color:var(--muted); font-size:12px; font-weight:600; }
+.admin-react-page .schedule-datetime-controls { display:grid; grid-template-columns:minmax(0,1fr) 74px; align-items:end; gap:8px; min-width:0; }
+.admin-react-page .schedule-datetime-controls > input { font-size:12px; min-width:0; padding-inline:8px; }
+.admin-react-page .schedule-seconds-label { display:grid; gap:4px; min-width:0; }
+.admin-react-page .schedule-seconds-label > span { color:var(--muted); font-size:10px; font-weight:600; letter-spacing:.04em; }
+.admin-react-page .schedule-seconds-label select { font-variant-numeric:tabular-nums; padding-inline:8px; }
+.admin-react-page .schedule-datetime-field { container-type:inline-size; }
+@container (max-width: 300px) {
+  .admin-react-page .schedule-datetime-controls { grid-template-columns:minmax(0,1fr); }
+  .admin-react-page .schedule-seconds-label { width:96px; }
+}

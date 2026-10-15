@@ -16,7 +16,9 @@ try {
   db.exec('DELETE FROM events');
   db.prepare(`INSERT INTO events(id,slug,name,headline,message,type,status,theme,starts_at,ends_at,show_on_home,show_after_sign_in) VALUES('ist-fixture','ist-fixture','IST fixture','Local clock fixture','Clock test','sale','draft','graphite',?,?,1,0)`).run('2027-01-01T13:30:45.123Z','2027-01-02T13:30:45.123Z');
   const origin=`https://${brand==='wibrawl'?'wibrawl.':''}glamiastore.com`;
-  const context=await browser.newContext({timezoneId,viewport:{width:brand==='wibrawl'?390:1440,height:950}});
+  const theme=timezoneId==='Asia/Tokyo'?'dark':'light';
+  const context=await browser.newContext({timezoneId,colorScheme:theme,viewport:{width:brand==='wibrawl'?390:1440,height:950}});
+  await context.addInitScript(theme=>{localStorage.setItem('glamia-theme',theme);localStorage.setItem('wibrawl-theme',theme==='dark'?'gaming':'sports');},theme);
   let submitted; let clockCampaign=null;
   await context.route('**/*',async route=>{
    const url=new URL(route.request().url());if(url.origin!==origin)return route.abort();
@@ -37,19 +39,34 @@ try {
    return route.fulfill({body:readFileSync(file),contentType:mime[extname(file)]||'application/octet-stream'});
   });
   const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(origin+'/admin/events');
+  await expect(page.locator('html')).toHaveAttribute('data-theme',theme);
   await page.getByRole('button',{name:'Edit',exact:true}).first().click();
   const starts=page.locator('input[name="starts_at"]');
   await expect(starts).toHaveValue('2027-01-01T19:00:45');
   assert.equal(await starts.getAttribute('step'),'1');
+  const startSeconds=page.getByRole('combobox',{name:'Start seconds (IST)',exact:true});
+  const endSeconds=page.getByRole('combobox',{name:'End seconds (IST)',exact:true});
+  await expect(startSeconds).toHaveValue('45');
+  await expect(startSeconds.locator('option')).toHaveCount(60);
   await page.getByRole('button',{name:/Save changes/}).click();
   await expect.poll(()=>submitted?.starts_at).toBe('2027-01-01T19:00:45.123+05:30');
   // Copy edits retain the original fractional-second instant from the API.
   assert.equal(db.prepare("SELECT starts_at FROM events WHERE id='ist-fixture'").get().starts_at,'2027-01-01T13:30:45.123Z');
   await page.getByRole('button',{name:'Edit',exact:true}).first().click();
-  await starts.fill('2027-01-01T20:15:37');
+  await starts.fill('2027-01-01T20:15');
+  await startSeconds.selectOption('37');
+  await endSeconds.selectOption('59');
+  await expect(starts).toHaveValue('2027-01-01T20:15:37');
   submitted=null;await page.getByRole('button',{name:/Save changes/}).click();
   await expect.poll(()=>submitted?.starts_at).toBe('2027-01-01T14:45:37.000Z');
   assert.equal(db.prepare("SELECT starts_at FROM events WHERE id='ist-fixture'").get().starts_at,'2027-01-01T14:45:37.000Z');
+  assert.equal(db.prepare("SELECT ends_at FROM events WHERE id='ist-fixture'").get().ends_at,'2027-01-02T13:30:59.000Z');
+  await page.getByRole('button',{name:'Edit',exact:true}).first().click();
+  await expect(startSeconds).toHaveValue('37');await expect(endSeconds).toHaveValue('59');
+  await startSeconds.selectOption('00');
+  await expect(startSeconds).toHaveValue('00');
+  await startSeconds.selectOption('37');
+  await page.locator('.schedule-datetime-field').first().scrollIntoViewIfNeeded();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
   await page.screenshot({path:`test-results/ist-seconds/${brand}-${timezoneId.replaceAll('/','-')}.png`});
   if(brand==='glamia'&&timezoneId==='Asia/Kolkata'){
@@ -62,7 +79,7 @@ try {
     await page.clock.runFor(1000);await expect(countdown).toHaveText('Ends in 00h 01m 04s');
     await page.clock.fastForward(65000);await expect(countdown).toHaveText('Event ended');
    }
-   results.push({brand,timezoneId,seconds:true,unchangedPrecision:true,changedInstant:true});await context.close();
+   results.push({brand,theme,timezoneId,seconds:true,unchangedPrecision:true,changedInstant:true});await context.close();
  }
  assert.deepEqual(errors,[]);console.log(JSON.stringify({checks:results,pageErrors:errors},null,2));
 }finally{await browser.close();db.close();}

@@ -82,8 +82,8 @@
       "_jsx-runtime-D3jfb0Ew.js"
     ]
   },
-  "_ReturnStatusCard-YpbxMIkV.js": {
-    "file": "assets/ReturnStatusCard-YpbxMIkV.js",
+  "_ReturnStatusCard-CsQ7N6Kt.js": {
+    "file": "assets/ReturnStatusCard-CsQ7N6Kt.js",
     "name": "ReturnStatusCard",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
@@ -138,7 +138,7 @@
     "name": "workspaceAccess"
   },
   "index.html": {
-    "file": "assets/index-DZ8k5Rd3.js",
+    "file": "assets/index-DBlkAnTv.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -160,7 +160,7 @@
     ]
   },
   "src/components/AccountPages.jsx": {
-    "file": "assets/AccountPages-ClHae5ef.js",
+    "file": "assets/AccountPages-DRbaK5xu.js",
     "name": "AccountPages",
     "src": "src/components/AccountPages.jsx",
     "isDynamicEntry": true,
@@ -173,7 +173,7 @@
       "_Reviews-DXhxqzWO.js",
       "_Icon-QcDBXQVF.js",
       "_CancellationRefundCard-CvE_2IAw.js",
-      "_ReturnStatusCard-YpbxMIkV.js",
+      "_ReturnStatusCard-CsQ7N6Kt.js",
       "_OrderDetails-VXh7u0DP.js",
       "_AccountLayout-C1boTaS1.js"
     ]
@@ -190,7 +190,7 @@
     ]
   },
   "src/components/AdminCare.jsx": {
-    "file": "assets/AdminCare-2rJuouXR.js",
+    "file": "assets/AdminCare-D3bTPvl6.js",
     "name": "AdminCare",
     "src": "src/components/AdminCare.jsx",
     "isDynamicEntry": true,
@@ -201,7 +201,7 @@
       "_SupportOrderContext-BIchD_ev.js",
       "_Icon-QcDBXQVF.js",
       "_CancellationRefundCard-CvE_2IAw.js",
-      "_ReturnStatusCard-YpbxMIkV.js",
+      "_ReturnStatusCard-CsQ7N6Kt.js",
       "src/components/AdminWorkspace.jsx",
       "src/main.jsx"
     ]
@@ -229,18 +229,19 @@
     ]
   },
   "src/components/AdminEvents.jsx": {
-    "file": "assets/AdminEvents-DHyU8H2S.js",
+    "file": "assets/AdminEvents-IhdKQea6.js",
     "name": "AdminEvents",
     "src": "src/components/AdminEvents.jsx",
     "isDynamicEntry": true,
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
       "_api-B3Y_V1MI.js",
-      "_commerce-FdV6ZTsy.js"
+      "_commerce-FdV6ZTsy.js",
+      "src/components/AdminWorkspace.jsx"
     ]
   },
   "src/components/AdminMerchandising.jsx": {
-    "file": "assets/AdminMerchandising-DuBuKr_U.js",
+    "file": "assets/AdminMerchandising-D0kbVcK5.js",
     "name": "AdminMerchandising",
     "src": "src/components/AdminMerchandising.jsx",
     "isDynamicEntry": true,
@@ -251,11 +252,12 @@
       "_PhoneField-CBFKZnY2.js",
       "_Icon-QcDBXQVF.js",
       "_storefront-identity-B8BUjp8N.js",
+      "src/components/AdminWorkspace.jsx",
       "src/main.jsx"
     ]
   },
   "src/components/AdminOperations.jsx": {
-    "file": "assets/AdminOperations-DrSIzKKP.js",
+    "file": "assets/AdminOperations-C14rlxHE.js",
     "name": "AdminOperations",
     "src": "src/components/AdminOperations.jsx",
     "isDynamicEntry": true,
@@ -282,7 +284,7 @@
     ]
   },
   "src/components/AdminWorkspace.jsx": {
-    "file": "assets/AdminWorkspace-CUhspQbj.js",
+    "file": "assets/AdminWorkspace-BsFyCGo7.js",
     "name": "AdminWorkspace",
     "src": "src/components/AdminWorkspace.jsx",
     "isDynamicEntry": true,
@@ -313,11 +315,11 @@
       "src/components/AdminAbout.jsx"
     ],
     "css": [
-      "assets/AdminWorkspace-BxVWIj5_.css"
+      "assets/AdminWorkspace-Ds6Vd86U.css"
     ]
   },
   "src/components/BulkListingView.jsx": {
-    "file": "assets/BulkListingView-D0OzMsy0.js",
+    "file": "assets/BulkListingView-Kem_FEBW.js",
     "name": "BulkListingView",
     "src": "src/components/BulkListingView.jsx",
     "isDynamicEntry": true,
@@ -328,7 +330,7 @@
     ]
   },
   "src/components/CartPage.jsx": {
-    "file": "assets/CartPage-B3psCo4p.js",
+    "file": "assets/CartPage-X80KKBSS.js",
     "name": "CartPage",
     "src": "src/components/CartPage.jsx",
     "isDynamicEntry": true,
@@ -359,7 +361,7 @@
     ]
   },
   "src/components/CompletedOrders.jsx": {
-    "file": "assets/CompletedOrders-swRraf9g.js",
+    "file": "assets/CompletedOrders-D2g4C2Ha.js",
     "name": "CompletedOrders",
     "src": "src/components/CompletedOrders.jsx",
     "isDynamicEntry": true,
@@ -406,7 +408,7 @@
     ]
   },
   "src/components/ProductDetailPage.jsx": {
-    "file": "assets/ProductDetailPage-B0dHcfaM.js",
+    "file": "assets/ProductDetailPage-B501BJWI.js",
     "name": "ProductDetailPage",
     "src": "src/components/ProductDetailPage.jsx",
     "isDynamicEntry": true,
@@ -434,7 +436,7 @@
     ]
   },
   "src/components/QuickView.jsx": {
-    "file": "assets/QuickView-B9fAMXQa.js",
+    "file": "assets/QuickView-CzsRd4XH.js",
     "name": "QuickView",
     "src": "src/components/QuickView.jsx",
     "isDynamicEntry": true,
@@ -482,7 +484,7 @@
     ]
   },
   "src/main.jsx": {
-    "file": "assets/main-Dfv76JfR.js",
+    "file": "assets/main-JjjZKOt4.js",
     "name": "main",
     "src": "src/main.jsx",
     "isDynamicEntry": true,
