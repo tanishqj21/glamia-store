@@ -1,3 +1,4 @@
+import { readAboutPage, saveAboutPage } from '../src/about.js';
 // Real migrations and checkout functions; no live payments, inventory or users.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -75,7 +76,7 @@ test('real credit checkout creates WB orders and keeps GM orders separate', asyn
   assert.equal(db.prepare('SELECT balance FROM store_credit_accounts WHERE user_email=?').get(buyer.email).balance,800);
 });
 
-test('public sharing metadata and about copy identify Wibrawl', async t => {
+test('public sharing metadata identifies Wibrawl while About content is shared', async t => {
   const {env} = fixture(t);
   for (const path of ['/', '/about', '/best-sellers']) {
     const response = await worker.renderPublicPage(new Request(WIBRAWL_ORIGIN+path,{headers:{'User-Agent':'Googlebot'}}),env,new URL(WIBRAWL_ORIGIN+path));
@@ -84,7 +85,7 @@ test('public sharing metadata and about copy identify Wibrawl', async t => {
     assert.match(html, /og:site_name" content="Wibrawl/);
     assert.ok(html.includes(`rel="canonical" href="${WIBRAWL_ORIGIN}${path}"`));
     assert.ok(html.includes('/wibrawl/streetwear-campaign-1440.webp'));
-    if(path==='/about')assert.match(html,/Your vibe. Your identity./);
+    if(path==='/about')assert.ok(html.includes((await readAboutPage(env)).headline));
     if(path==='/best-sellers')assert.match(html,/Current Meta/);
   }
 });
@@ -187,4 +188,20 @@ test('Wibrawl homepage sends its active hero and scoped public settings before J
   assert.ok(css.includes('.wibrawl-hero') && !css.includes('.cinematic-copy'));
   assert.ok(!css.includes('font-family:"Cormorant Garamond";font-style:normal;font-weight:400 600;font-display:swap;src:url(data:'));
   assert.ok(worker.withSecurityHeaders(new Response(html)).headers.get('Content-Security-Policy').includes(`'sha256-${createHash('sha256').update(css).digest('base64')}'`));
+});
+
+test('both storefronts use the same saved About us timeline and reflect one edit', async t => {
+  const {env}=fixture(t);
+  const initial=await readAboutPage(env);
+  const story=await saveAboutPage(env,{...initial,headline:'Our shared story',introduction:'One story shared by both storefronts.',timeline:[...initial.timeline].reverse()},'owner@example.com');
+  const bodies=[];
+  for(const origin of ['https://glamiastore.com',WIBRAWL_ORIGIN]){
+    const url=new URL(origin+'/about');
+    const html=await (await worker.renderPublicPage(new Request(url,{headers:{'User-Agent':'Googlebot'}}),env,url)).text();
+    for(const text of [story.headline,story.introduction,...story.timeline.map(item=>item.title)])assert.ok(html.includes(text));
+    assert.ok(!html.includes('Your vibe. Your identity.'));
+    assert.ok(html.includes(`rel="canonical" href="${origin}/about"`));
+    bodies.push(html.match(/<main class="info-page">[\s\S]*?<\/main>/)?.[0]);
+  }
+  assert.ok(bodies[0]);assert.equal(bodies[0],bodies[1]);
 });

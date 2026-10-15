@@ -9,7 +9,7 @@ export function AboutTimeline({ page, preview = false }) {
   </div>;
 }
 
-export default function AboutPage() {
+export default function AboutPage({ brandName = "Glamia" }) {
   const [page, setPage] = useState(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -20,13 +20,13 @@ export default function AboutPage() {
       if (!response.ok) throw new Error(data.error || "About us could not be loaded");
       if (active) {
         setPage(data);
-        document.title = `${data.headline} | Glamia`;
+        document.title = `${data.headline} | ${brandName}`;
         const description = document.querySelector('meta[name="description"]');
         if (description) description.setAttribute("content", data.introduction);
       }
     }).catch(reason => { if (active) setError(reason.message || "About us could not be loaded"); });
     return () => { active = false; };
-  }, [attempt]);
+  }, [attempt, brandName]);
   if (error) return <main className="about-story-state"><p>{error}</p><button type="button" onClick={() => { setError(""); setAttempt(value => value + 1); }}>Try again</button></main>;
   if (!page) return <main className="about-story-state" role="status">Loading our story…</main>;
   return <main><AboutTimeline page={page} /></main>;

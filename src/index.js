@@ -800,13 +800,9 @@ async function renderPublicPage(request, env, ctx) {
     botContent = path === "/policies" || Object.values(standalonePolicyPaths).includes(path)
       ? policiesBotContent(Object.entries(standalonePolicyPaths).find(([, value]) => value === path)?.[0] || "",(await storefrontSettingsObject(env)).customer_experience)
       : `<main class="info-page"><p class="eyebrow">${brand}</p><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(info[1])}</p><p><a href="/best-sellers">Browse the collection</a> · <a href="/orders">Track your order</a></p></main>`;
-    if (path === "/about" && storefront === "wibrawl") {
-      title = "About Wibrawl | Wibrawl";
-      description = "Wibrawl is a space for self-expression through everyday graphic tees. Bold ideas, easy fits, and a little more you.";
-      botContent = `<main class="info-page"><p class="eyebrow">Meet Wibrawl</p><h1>Your vibe. Your identity.</h1><p>${description}</p><p>A brand from <a href="https://glamiastore.com">Glamia</a>.</p></main>`;
-    } else if (path === "/about") {
+    if (path === "/about") {
       const about = await readAboutPage(env);
-      title = `${about.headline} | Glamia`;
+      title = `${about.headline} | ${brand}`;
       description = about.introduction.slice(0, 220);
       botContent = `<main class="info-page"><p class="eyebrow">${escapeHtml(about.eyebrow)}</p><h1>${escapeHtml(about.headline)}</h1><p>${escapeHtml(about.introduction)}</p><ol>${about.timeline.map(item => `<li><p>${escapeHtml(item.period)}</p><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.body)}</p></li>`).join("")}</ol></main>`;
     }

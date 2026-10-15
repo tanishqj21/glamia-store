@@ -82,8 +82,8 @@
       "_jsx-runtime-D3jfb0Ew.js"
     ]
   },
-  "_ReturnStatusCard-DohHcM9p.js": {
-    "file": "assets/ReturnStatusCard-DohHcM9p.js",
+  "_ReturnStatusCard-CGZF_10T.js": {
+    "file": "assets/ReturnStatusCard-CGZF_10T.js",
     "name": "ReturnStatusCard",
     "imports": [
       "_jsx-runtime-D3jfb0Ew.js",
@@ -138,7 +138,7 @@
     "name": "workspaceAccess"
   },
   "index.html": {
-    "file": "assets/index-Dpr4O_NI.js",
+    "file": "assets/index-BYwEn0Qc.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -146,11 +146,11 @@
       "src/main.jsx"
     ],
     "css": [
-      "assets/index-De5WuN67.css"
+      "assets/index-CCpHS9Zn.css"
     ]
   },
   "src/components/AboutPage.jsx": {
-    "file": "assets/AboutPage-Cdy0T1U6.js",
+    "file": "assets/AboutPage-BeLStCwZ.js",
     "name": "AboutPage",
     "src": "src/components/AboutPage.jsx",
     "isDynamicEntry": true,
@@ -160,7 +160,7 @@
     ]
   },
   "src/components/AccountPages.jsx": {
-    "file": "assets/AccountPages-vNxKHrlv.js",
+    "file": "assets/AccountPages-ilWqEexo.js",
     "name": "AccountPages",
     "src": "src/components/AccountPages.jsx",
     "isDynamicEntry": true,
@@ -173,13 +173,13 @@
       "_Reviews-DXhxqzWO.js",
       "_Icon-QcDBXQVF.js",
       "_CancellationRefundCard-CvE_2IAw.js",
-      "_ReturnStatusCard-DohHcM9p.js",
+      "_ReturnStatusCard-CGZF_10T.js",
       "_OrderDetails-VXh7u0DP.js",
       "_AccountLayout-C1boTaS1.js"
     ]
   },
   "src/components/AdminAbout.jsx": {
-    "file": "assets/AdminAbout-Cks1_Pz0.js",
+    "file": "assets/AdminAbout-D--ajlPm.js",
     "name": "AdminAbout",
     "src": "src/components/AdminAbout.jsx",
     "isDynamicEntry": true,
@@ -190,7 +190,7 @@
     ]
   },
   "src/components/AdminCare.jsx": {
-    "file": "assets/AdminCare-C9D8Di0S.js",
+    "file": "assets/AdminCare-CNKKElvf.js",
     "name": "AdminCare",
     "src": "src/components/AdminCare.jsx",
     "isDynamicEntry": true,
@@ -201,7 +201,7 @@
       "_SupportOrderContext-BIchD_ev.js",
       "_Icon-QcDBXQVF.js",
       "_CancellationRefundCard-CvE_2IAw.js",
-      "_ReturnStatusCard-DohHcM9p.js",
+      "_ReturnStatusCard-CGZF_10T.js",
       "src/components/AdminWorkspace.jsx",
       "src/main.jsx"
     ]
@@ -229,7 +229,7 @@
     ]
   },
   "src/components/AdminEvents.jsx": {
-    "file": "assets/AdminEvents-T2g9uUGq.js",
+    "file": "assets/AdminEvents-DJKRckiW.js",
     "name": "AdminEvents",
     "src": "src/components/AdminEvents.jsx",
     "isDynamicEntry": true,
@@ -241,7 +241,7 @@
     ]
   },
   "src/components/AdminMerchandising.jsx": {
-    "file": "assets/AdminMerchandising-BS44ZYwm.js",
+    "file": "assets/AdminMerchandising-UL8fIswM.js",
     "name": "AdminMerchandising",
     "src": "src/components/AdminMerchandising.jsx",
     "isDynamicEntry": true,
@@ -257,7 +257,7 @@
     ]
   },
   "src/components/AdminOperations.jsx": {
-    "file": "assets/AdminOperations-yLqwUxPz.js",
+    "file": "assets/AdminOperations-DkmoYx1B.js",
     "name": "AdminOperations",
     "src": "src/components/AdminOperations.jsx",
     "isDynamicEntry": true,
@@ -284,7 +284,7 @@
     ]
   },
   "src/components/AdminWorkspace.jsx": {
-    "file": "assets/AdminWorkspace-N9gdaref.js",
+    "file": "assets/AdminWorkspace-CAllE3AR.js",
     "name": "AdminWorkspace",
     "src": "src/components/AdminWorkspace.jsx",
     "isDynamicEntry": true,
@@ -319,7 +319,7 @@
     ]
   },
   "src/components/BulkListingView.jsx": {
-    "file": "assets/BulkListingView-vgOJhTRs.js",
+    "file": "assets/BulkListingView-BLIsx6gc.js",
     "name": "BulkListingView",
     "src": "src/components/BulkListingView.jsx",
     "isDynamicEntry": true,
@@ -330,7 +330,7 @@
     ]
   },
   "src/components/CartPage.jsx": {
-    "file": "assets/CartPage-C2_2jaj2.js",
+    "file": "assets/CartPage-B_TMQZko.js",
     "name": "CartPage",
     "src": "src/components/CartPage.jsx",
     "isDynamicEntry": true,
@@ -361,7 +361,7 @@
     ]
   },
   "src/components/CompletedOrders.jsx": {
-    "file": "assets/CompletedOrders-Cr5lu5wM.js",
+    "file": "assets/CompletedOrders-Bf-KJlHa.js",
     "name": "CompletedOrders",
     "src": "src/components/CompletedOrders.jsx",
     "isDynamicEntry": true,
@@ -408,7 +408,7 @@
     ]
   },
   "src/components/ProductDetailPage.jsx": {
-    "file": "assets/ProductDetailPage-DyrQjz8y.js",
+    "file": "assets/ProductDetailPage-DY3c4Bsb.js",
     "name": "ProductDetailPage",
     "src": "src/components/ProductDetailPage.jsx",
     "isDynamicEntry": true,
@@ -436,7 +436,7 @@
     ]
   },
   "src/components/QuickView.jsx": {
-    "file": "assets/QuickView-DaumzRC0.js",
+    "file": "assets/QuickView-BWrMjj3l.js",
     "name": "QuickView",
     "src": "src/components/QuickView.jsx",
     "isDynamicEntry": true,
@@ -484,7 +484,7 @@
     ]
   },
   "src/main.jsx": {
-    "file": "assets/main-D_58tkvp.js",
+    "file": "assets/main-BZm8rCWG.js",
     "name": "main",
     "src": "src/main.jsx",
     "isDynamicEntry": true,
@@ -514,19 +514,19 @@
     ]
   },
   "glamia-product-styles.css": {
-    "file": "assets/product-styles-9c00e219.css",
+    "file": "assets/product-styles-c61b9e3c.css",
     "src": "glamia-product-styles.css"
   },
   "glamia-catalogue-styles.css": {
-    "file": "assets/catalogue-styles-b2717141.css",
+    "file": "assets/catalogue-styles-d6900c6e.css",
     "src": "glamia-catalogue-styles.css"
   },
   "glamia-cart-styles.css": {
-    "file": "assets/cart-styles-b55c466a.css",
+    "file": "assets/cart-styles-19902ab8.css",
     "src": "glamia-cart-styles.css"
   },
   "glamia-homepage-styles.css": {
-    "file": "assets/homepage-styles-b2717141.css",
+    "file": "assets/homepage-styles-d6900c6e.css",
     "src": "glamia-homepage-styles.css"
   }
 }

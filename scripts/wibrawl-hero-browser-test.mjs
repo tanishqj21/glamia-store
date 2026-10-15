@@ -1,6 +1,7 @@
 import { chromium } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import assert from 'node:assert/strict';
+import { readAboutPage } from '../src/about.js';
 import { mkdirSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { localDatabase, workerFunctions } from './lib/worker-fixture.mjs';
@@ -33,6 +34,7 @@ try {
     else if(path==='/api/products')data={products:products.filter(p=>url.searchParams.get('scope')==='admin'||[url.searchParams.has('wibrawl-preview')?'wibrawl':'glamia','both'].includes(p.storefront_visibility)),pagination:{has_more:false,total:3}};
     else if(path==='/api/categories')data={categories:['Tees'],subcategories:[]};
     else if(path==='/api/storefront-settings')data={announcement:{visible:false},trust_strip:{visible:false},seo:{},customer_experience:{}};
+    else if(path==='/api/about')data=await readAboutPage(env);
     else if(path==='/api/loyalty')data={balance:0};
     else if(path==='/api/admin/cinematic-reel')data={cinematic_reel:{visible:false,product_ids:[]}};
     else if(path.startsWith('/api/saved-items'))data={cart:[],wishlist:[],saved_for_later:[]};
@@ -190,9 +192,9 @@ try {
     }
   }
   await page.goto(base+'/about?wibrawl-preview=1');
-  await page.getByRole('heading',{name:'YOUR VIBE. YOUR IDENTITY.'}).waitFor();
+  await page.getByRole('heading',{name:(await readAboutPage(env)).headline,exact:true}).waitFor();
   assert.equal(await page.locator('.wibrawl-culture-strip').count(),0);
-  assert.doesNotMatch(await page.locator('.wibrawl-about').innerText(),/gaming|anime|sports|movies|music|memes/i);
+  assert.equal(await page.locator('.about-story .about-moment').count(),(await readAboutPage(env)).timeline.length);
   assert.deepEqual(errors,[]);
   console.log('Hero Studio storefront switching, product filtering, create/edit, live display, CTA, mobile themes and carousel accessibility passed.');
 } finally {await browser.close();db.close();}

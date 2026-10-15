@@ -153,11 +153,6 @@
 .wibrawl-shell .footer-socials-copy>span { color:var(--ink); }
 .wibrawl-footer-origin { display:block; margin-top:28px; color:var(--muted); font-size:12px; }
 .wibrawl-footer-origin a { text-underline-offset:4px; }
-.wibrawl-about { padding-block:80px; }
-.wibrawl-about h1 { font-size:clamp(46px,7vw,90px); letter-spacing:-.06em; line-height:1; margin:0 0 34px; }
-.wibrawl-about h1 span { color:var(--accent-text); }
-.wibrawl-about>p:not(.wibrawl-kicker) { max-width:570px; color:var(--muted); font-size:18px; line-height:1.6; margin-bottom:24px; }
-.wibrawl-about-origin { margin-top:40px; font-size:14px !important; }
 .wibrawl-admin-visibility { display:flex; flex-direction:column; gap:8px; margin-block:18px; max-width:540px; }
 .wibrawl-admin-visibility select { min-height:44px; }
 .wibrawl-admin-preview { --bg:#101413; --surface:#191e1b; --surface-strong:#252e27; --ink:#f1f4eb; --muted:#abb6aa; --line:#39473b; --accent:#c3f35e; --accent-text:#c3f35e; background:var(--bg); color:var(--ink); font-family:Jost,sans-serif; border:1px solid var(--line); border-radius:4px; overflow:hidden; }

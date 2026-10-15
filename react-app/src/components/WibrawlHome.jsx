@@ -89,7 +89,3 @@ export function WibrawlHome({ theme, slides = [], ready = true, onNavigate, chil
     </section>
   </div>;
 }
-
-export function WibrawlAbout({ onNavigate }) {
-  return <main className="page-main wibrawl-about"><p className="wibrawl-kicker">Meet Wibrawl</p><h1>YOUR VIBE.<br /><span>YOUR IDENTITY.</span></h1><p>Wibrawl is a space for self-expression through everyday graphic tees. Bold ideas, easy fits, and a little more you.</p><p>Your style doesn't need a label. Dress for your mood, switch things up, and wear what feels like you.</p><Link className="wibrawl-primary-action" href="/just-arrived" onNavigate={onNavigate}>Explore the tees</Link><p className="wibrawl-about-origin">A brand from <a href="https://glamiastore.com">Glamia</a>.</p></main>;
-}
