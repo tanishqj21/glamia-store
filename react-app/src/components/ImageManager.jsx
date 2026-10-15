@@ -105,7 +105,7 @@ export function ImageManager({
           </div>
           <div className="image-manager-card-copy">
             <strong>{index === 0 ? "First image" : index === images.length - 1 ? "Last image" : `Image ${index + 1}`}</strong>
-            <span>{item.key ? "Saved to R2" : "External image URL"}</span>
+            <span>{item.key ? "Uploaded image" : "Linked image"}</span>
           </div>
           <div className="image-manager-actions">
             <button type="button" onClick={() => move(index, 0)} disabled={index === 0}>First</button>
@@ -117,6 +117,6 @@ export function ImageManager({
       })}
       {!images.length && <div className="image-manager-empty">Your image previews will appear here.</div>}
     </div>
-    <p className="form-hint image-manager-footer">The thumbnail is selected separately from the first and last image. Unused uploaded R2 files are cleaned up automatically after the weekly maintenance scan.</p>
+    <p className="form-hint image-manager-footer">The thumbnail is selected separately from the first and last image.</p>
   </fieldset>;
 }

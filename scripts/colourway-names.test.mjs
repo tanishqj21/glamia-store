@@ -39,6 +39,7 @@ test('admin optimistic updates exclude names from fields copied to siblings', ()
   const source = readFileSync('react-app/src/components/AdminWorkspace.jsx', 'utf8');
   const fields = JSON.parse('[' + source.match(/const SHARED_PRODUCT_FIELDS = \[([^]*?)\];/)[1] + ']');
   assert.ok(!fields.includes('name'));
+  assert.ok(!fields.includes('video_url'));
   assert.ok(fields.includes('price'));
-  assert.match(source, /Product name, colour, sizes, stock, and images stay specific/);
+  assert.match(source, /Product name, colour, sizes, stock, images, and video stay specific/);
 });

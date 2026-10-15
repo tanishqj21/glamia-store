@@ -189,3 +189,6 @@
 .admin-react-page .schedule-datetime-field { display:grid; gap:7px; min-width:0; }
 .admin-react-page .schedule-datetime-label { color:var(--muted); font-size:12px; font-weight:600; }
 .admin-react-page .schedule-datetime-field > input { font-size:12px; min-width:0; padding-inline:8px; }
+
+.product-video-field video { display: block; width: min(100%, 560px); max-height: 420px; margin: 12px 0; background: #0d120b; border-radius: 8px; }
+.product-video-field .image-manager-toolbar { flex-wrap: wrap; }

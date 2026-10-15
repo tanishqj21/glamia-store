@@ -3,6 +3,7 @@ import { canManageEmployee, publicProductView, readBoundedBody, validSessionClai
 import { merchantAdmin, processMerchantSync, scheduleMerchantSync } from "./google-merchant.js";
 import { creditAuthority, creditWallet, creditAdminData, grantStoreCredits, saveCreditSettings, decideCreditRefund, ensureReferralCode, claimSignupReferral, validateReferral, qualifyCreditReferral } from "./store-credits.js";
 import { billFontBytes, billLogoBytes, canReadOrderBill, createOrderBillPdf } from "./order-bills.js";
+import { storeProductVideo, validateProductVideo, serveProductVideo } from './product-video.js';
 import { readAboutPage, saveAboutPage } from "./about.js";
 import { applyGatewayState } from "./payment-state.js";
 import { claimPaymentCreation } from "./payment-creation.js";
@@ -100,7 +101,7 @@ const ADMIN_NOTIFICATION_PERMISSIONS = Object.freeze({
 });
 const R2_CLEANUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const R2_CLEANUP_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
-const R2_CLEANUP_PREFIXES = ["products/", "reviews/"];
+const R2_CLEANUP_PREFIXES = ["products/", "product-videos/", "reviews/"];
 const CANONICAL_ORIGIN = "https://glamiastore.com";
 const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com", WIBRAWL_HOSTNAME]);
 const storefrontForRequest = storefrontForUrl;
@@ -140,6 +141,7 @@ const RATE_LIMITS = new Map([
   ["/api/notifications/read", 60],
   ["/api/push-tokens", 30],
   ["/api/uploads/image", 30],
+  ["/api/uploads/video", 10],
   ["/api/support/tickets", 30],
   ["/api/cart-events", 120],
   ["/api/wishlist-events", 120]
@@ -1719,6 +1721,16 @@ async function routeApi(request, env, url, ctx) {
     return createProduct(request, env, user, ctx);
   }
 
+  if (request.method === "POST" && path === "/api/uploads/video") {
+    requireUser(user);
+    const quotaRequired = !adminEmails(env, request).includes(String(user.email).toLowerCase());
+    return json(await storeProductVideo(request, env, user, {
+      ownerKey: await hashIdentifier(user.email),
+      reserve: bytes => quotaRequired ? reserveUploadQuota(env, user.email, bytes) : Promise.resolve(),
+      release: bytes => quotaRequired ? releaseUploadQuota(env, user.email, bytes) : Promise.resolve()
+    }));
+  }
+
   if (request.method === "POST" && path === "/api/uploads/image") {
     requireUser(user);
     return uploadImage(request, env, user);
@@ -1883,6 +1895,9 @@ async function routeApi(request, env, url, ctx) {
     return trackWishlistEvent(request, env, user);
   }
 
+  if (["GET", "HEAD"].includes(request.method) && path.startsWith("/api/assets/product-videos/")) {
+    return serveProductVideo(request, env, path.slice("/api/assets/".length));
+  }
   if (["GET", "HEAD"].includes(request.method) && path.startsWith("/api/assets/")) {
     return serveR2Asset(env, path.replace("/api/assets/", ""), request.method === "HEAD");
   }
@@ -4688,12 +4703,12 @@ function productInsertStatement(env, entry) {
       thumbnail_images_json, thumbnail_keys_json, thumbnail_source_url, material, description, specifications, what_in_box, variants_json, variant_group,
       subcategory, size_chart_url, cost_price, reorder_point, preorder_enabled, preorder_release_at,
       preorder_limit, preorder_sold, hsn_sac_code, hsn_sac_type, gst_rate, gst_tax_inclusive, returnable,
-      storefront_visibility
+      storefront_visibility, video_url
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `).bind(
     entry.id,
@@ -4739,13 +4754,15 @@ function productInsertStatement(env, entry) {
     entry.gstRate ?? null,
     entry.gstTaxInclusive ?? 1,
     entry.returnable ?? 1,
-    entry.storefrontVisibility || "glamia"
+    entry.storefrontVisibility || "glamia",
+    entry.videoUrl || ""
   );
 }
 
 async function createProduct(request, env, user, ctx) {
   const product = await readJson(request);
   validateProduct(product);
+  const videoUrl = await validateProductVideo(product.video_url, env, user);
   const storefrontVisibility = String(product.storefront_visibility || "glamia");
   if (!["glamia", "wibrawl", "both"].includes(storefrontVisibility)) return json({ error: "Choose Glamia, Wibrawl, or both storefronts" }, 400);
   if (!(await categoryExists(env, product.category))) {
@@ -4797,6 +4814,7 @@ async function createProduct(request, env, user, ctx) {
     sizes: product.sizes,
     images,
     imageKeys,
+    videoUrl,
     thumbnailSourceUrl,
     thumbnailImages: thumbnailImages.length ? thumbnailImages : [images[0]],
     thumbnailKeys: thumbnailKeys.length ? thumbnailKeys : [imageKeys[0] || ""].filter(Boolean),
@@ -4897,6 +4915,9 @@ async function updateProduct(request, env, id, adminUser = null, ctx) {
   if (!current) return json({ error: "Product not found" }, 404);
 
   let next = { ...current };
+  if (body.video_url !== undefined && body.video_url !== (current.video_url || "")) {
+    next.video_url = await validateProductVideo(body.video_url, env, adminUser);
+  }
   let removedKeys = [];
   let removedSizeChartKeys = [];
   let sizePlan = null;
@@ -5101,7 +5122,7 @@ async function updateProduct(request, env, id, adminUser = null, ctx) {
       variants_json = ?, status = ?, featured = ?, deal_ends_at = ?,
       deal_starts_at = ?, deal_price = ?, size_chart_url = ?, subcategory = ?, cost_price = ?, reorder_point = ?,
       preorder_enabled = ?, preorder_release_at = ?, preorder_limit = ?, hsn_sac_code = ?, hsn_sac_type = ?,
-      gst_rate = ?, gst_tax_inclusive = ?, storefront_visibility = ?, updated_at = CURRENT_TIMESTAMP
+      gst_rate = ?, gst_tax_inclusive = ?, storefront_visibility = ?, video_url = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
     next.name, next.category, next.brand, next.price, next.mrp, next.stock, next.color, next.color_hex ?? "", next.returnable ?? 1, next.material,
@@ -5110,7 +5131,7 @@ async function updateProduct(request, env, id, adminUser = null, ctx) {
     next.variants_json, next.status, next.featured, next.deal_ends_at ?? null,
     next.deal_starts_at ?? null, next.deal_price ?? null, next.size_chart_url ?? null, next.subcategory ?? "", next.cost_price ?? 0,
     next.reorder_point ?? 15, next.preorder_enabled ? 1 : 0, next.preorder_release_at ?? null, next.preorder_limit ?? null,
-    next.hsn_sac_code ?? "", next.hsn_sac_type ?? "HSN", next.gst_rate ?? null, next.gst_tax_inclusive ? 1 : 0, next.storefront_visibility || "glamia", id
+    next.hsn_sac_code ?? "", next.hsn_sac_type ?? "HSN", next.gst_rate ?? null, next.gst_tax_inclusive ? 1 : 0, next.storefront_visibility || "glamia", next.video_url || "", id
   );
   const updateStatements = sizePlan ? [...sizePlan.statements] : [];
   if (current.variant_group && body.status !== undefined) {
@@ -7233,7 +7254,7 @@ async function createEmployeeProduct(request, env, employee, ctx) {
 function allowedEmployeeProductFields(employee) {
   const allowed = new Set();
   if (employeeHasPermission(employee, "products")) {
-    ["status", "featured", "preorder_enabled", "preorder_release_at", "preorder_limit", "name", "category", "brand", "price", "mrp", "color", "color_hex", "returnable", "material", "sizes", "description", "specifications", "what_in_box", "images", "thumbnail_urls", "thumbnail_keys", "thumbnail_source_url", "subcategory", "size_chart_url", "cost_price"].forEach((key) => allowed.add(key));
+    ["video_url", "status", "featured", "preorder_enabled", "preorder_release_at", "preorder_limit", "name", "category", "brand", "price", "mrp", "color", "color_hex", "returnable", "material", "sizes", "description", "specifications", "what_in_box", "images", "thumbnail_urls", "thumbnail_keys", "thumbnail_source_url", "subcategory", "size_chart_url", "cost_price"].forEach((key) => allowed.add(key));
   }
   if (employeeHasPermission(employee, "inventory")) ["stock", "size_stock", "reorder_point", "variants"].forEach((key) => allowed.add(key));
   if (employeeHasPermission(employee, "deals")) ["deal_starts_at", "deal_ends_at", "deal_price"].forEach((key) => allowed.add(key));
@@ -11250,6 +11271,7 @@ function formatProduct(row) {
     specifications: row.specifications || "",
     what_in_box: row.what_in_box || "",
     sizes: jsonArray(row.sizes_json),
+    video_url: row.video_url || "",
     image: row.image_url,
     image_url: row.image_url,
     image_key: row.image_key,
@@ -11366,7 +11388,8 @@ async function authorizeEmployeeWebsiteRequest(request, url, actor) {
   if (/^\/api\/support\/tickets\/[^/]+\/messages$/.test(path)) required(["support"]);
   if (path === "/api/products" && !read) required(["add_product", "bulk_listing"]);
   if (/^\/api\/products\/[^/]+$/.test(path) && !read) required(["products"]);
-  if (path.startsWith("/api/uploads/") && !read) required(["products", "add_product", "hero", "storefront"]);
+  if (path === "/api/uploads/video" && !read) required(["products", "add_product"]);
+  else if (path.startsWith("/api/uploads/") && !read) required(["products", "add_product", "hero", "storefront"]);
 }
 
 function mobileBearerToken(request) {
