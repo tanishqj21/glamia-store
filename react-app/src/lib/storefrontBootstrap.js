@@ -8,17 +8,17 @@ export function restoreFirstScreenMedia(data, rootDocument) {
     return candidate && candidate.length <= 65600 ? candidate : null;
   };
   if (data.hero?.first_image_from_dom) {
-    const image = readImage('#root .cinematic-home .cinematic-frame img, #root .wibrawl-hero-frames img');
+    const image = readImage('#root .cinematic-home .cinematic-frame img, #root .wibrawl-hero-frames img, #root .wb-hero-media > a > img');
     const frame = data.hero.slides?.[0]?.frames?.[0];
     if (image && frame) frame.image = image;
   }
   if (data.hero?.campaign_image_from_dom) {
-    const image = readImage('#root .wibrawl-campaign-figure source');
+    const image = readImage('#root .wibrawl-campaign-figure source, #root .wb-hero-media > picture > source');
     const slide = data.hero.slides?.[0];
     if (image && slide) slide.campaign_image = image;
   }
   if (data.product?.first_image_inline?.from_dom) {
-    const image = readImage('#root .detail-gallery > img');
+    const image = readImage('#root .detail-gallery > img, #root .wb-product-main-image > img');
     if (image) data.product.first_image_inline = { source: data.product.first_image_inline.source, data: image };
     else data.product.first_image_inline = null;
   }

@@ -12,6 +12,7 @@ import { ProductGuarantees } from "./ProductGuarantees";
 import { ProductReviews } from "./Reviews";
 import { productMedia, productMediaSrcSet, recoverProductMedia } from '../lib/productMedia';
 import { readProductBootstrap } from '../lib/productBootstrap';
+import { WibrawlProductDetail } from './WibrawlProductDetail';
 
 function setMetaDescription(text) {
   const meta = document.querySelector('meta[name="description"]');
@@ -100,6 +101,7 @@ jsonLdScript.textContent = JSON.stringify(jsonLd); } }).catch(() => active && se
   const productCategory = String(product.category || productPathContext?.category || "").trim();
   const productSubcategoryValue = productSubcategory(product) || String(productPathContext?.subcategory || "").trim();
   const productSubSubcategoryValue = productSubSubcategory(product);
+  if (wibrawlMode) return <WibrawlProductDetail key={product.id} product={product} products={products} colourways={colourways} size={size} setSize={setSize} images={images} onNavigate={onNavigate} addToCart={addToCart} wishlist={wishlist} toggleWishlist={toggleWishlist} delivery={<DeliveryEstimate />} reviews={<ProductReviews product={product} user={user} onNavigate={onNavigate} onReviewsUpdated={next => setProduct(current => current ? { ...current, reviews: next.reviews || [], rating: next.count ? next.average : 0, review_average: next.average, review_count: next.count, my_review: next.my_review || null } : current)} />} questions={<ProductQuestions productId={product.id} user={user} onNavigate={onNavigate} />} />;
   function moveZoom(event) {
     if (showVideo || !currentImage) return;
     const bounds = event.currentTarget.getBoundingClientRect();

@@ -16,9 +16,9 @@ export function criticalStorefrontCss(css, additionalClass = () => false, { stor
       const positiveSelector = selector.replace(/:not\([^)]*\)/g, '');
       const classes = [...positiveSelector.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map(match => match[1]);
       if (classes.some(name => /^(?:admin-|wibrawl-admin-|wibrawl-preview-)/.test(name))) return false;
-      if (storefront === 'glamia' && (/data-brand=["']?wibrawl/.test(selector) || classes.some(name => /^wibrawl-/.test(name) && !['wibrawl-store-link', 'wibrawl-store-pill'].includes(name)))) return false;
+      if (storefront === 'glamia' && (/data-brand=["']?wibrawl/.test(selector) || classes.some(name => /^wb-/.test(name) || /^wibrawl-/.test(name) && !['wibrawl-store-link', 'wibrawl-store-pill'].includes(name)))) return false;
       if (storefront === 'wibrawl' && classes.some(name => /^(?:cinematic-(?:home|copy|words|stage|frame|arrow|prev|next|progress)|homepage-editorial|campaign-feature)/.test(name))) return false;
-      return classes.every(name => shellClass.test(name) || additionalClass(name) || /^(?:site-footer|footer(?:-.+)?|wibrawl(?:-.+)?)$/.test(name) || ['ui-icon', 'theme-toggle', 'cart-link', 'cart-count', 'glamia-logo'].includes(name));
+      return classes.every(name => shellClass.test(name) || additionalClass(name) || /^(?:site-footer|footer(?:-.+)?|wibrawl(?:-.+)?|wb-.+)$/.test(name) || ['ui-icon', 'theme-toggle', 'cart-link', 'cart-count', 'glamia-logo'].includes(name));
     });
     if (selectors.length) rule.selector = selectors.join(',');
     else rule.remove();

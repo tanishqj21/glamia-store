@@ -1,10 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { collectionNames, WIBRAWL_HERO_LAYOUTS } from '../../../src/storefront-identity.js';
+import { WIBRAWL_HERO_LAYOUTS } from '../../../src/storefront-identity.js';
 import { Link } from './Header';
 import { Icon } from './Icon';
+import { WibrawlHero } from './WibrawlHero';
+import { WIBRAWL_COLLECTIONS } from '../lib/wibrawlStorefront';
 import { WIBRAWL_CAMPAIGN_IMAGE, WIBRAWL_CAMPAIGN_SRCSET, WIBRAWL_CAMPAIGN_SIZES, WIBRAWL_CAMPAIGN_AVIF_SRCSET, wibrawlProductLinkImage } from '../../../src/wibrawl-media';
 
 export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
+  return preview ? <WibrawlPreviewCarousel slides={slides} onNavigate={onNavigate} preview /> : <WibrawlHero slides={slides} onNavigate={onNavigate} />;
+}
+
+function WibrawlPreviewCarousel({ slides, onNavigate, preview }) {
   const [index, setIndex] = useState(0);
   const swipe = useRef(null);
   const suppressClickUntil = useRef(0);
@@ -73,14 +79,10 @@ export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
 }
 
 export function WibrawlHome({ theme, slides = [], ready = true, onNavigate, children }) {
-  const names = collectionNames(theme);
-  const gaming = theme === 'gaming';
   return <div className={`wibrawl-home wibrawl-home-${theme}`}>
     {!ready ? <div className="wibrawl-hero-loading" role="status" aria-label="Loading featured edit" /> : slides.length > 0 && <WibrawlCarousel slides={slides} onNavigate={onNavigate} />}
     <nav className="wibrawl-collection-nav" aria-label="Discover collections">
-      <Link href="/just-arrived" onNavigate={onNavigate}><span className="wibrawl-collection-symbol" aria-hidden="true">+</span><div><h2>{names.arrived}</h2><p>{gaming ? 'Fresh out of the lobby.' : 'Fresh additions to your line-up.'}</p></div></Link>
-      <Link href="/best-sellers" onNavigate={onNavigate}><span className="wibrawl-collection-symbol" aria-hidden="true">*</span><div><h2>{names.best}</h2><p>The crowd favourites.</p></div></Link>
-      <Link href="/offers" onNavigate={onNavigate}><span className="wibrawl-collection-symbol wibrawl-percent" aria-hidden="true">%</span><div><h2>{names.offers}</h2><p>More tee. Less spend.</p></div></Link>
+      {WIBRAWL_COLLECTIONS.map(([href, title, subtitle], i) => <Link key={href} href={href} onNavigate={onNavigate}><span className="wibrawl-collection-symbol" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span><div><h2>{title}</h2><p>// {subtitle}</p></div></Link>)}
     </nav>
     {children}
     <section className="wibrawl-manifesto" aria-labelledby="wibrawl-manifesto-title">

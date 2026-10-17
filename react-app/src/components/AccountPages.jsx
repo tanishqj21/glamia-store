@@ -1,3 +1,5 @@
+import { useWibrawlCommerce } from '../lib/wibrawlStorefront';
+import { WibrawlProductCard } from './WibrawlProductCard';
 import { istDayKey } from '../../../src/time-zone.js';
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
@@ -381,11 +383,12 @@ function OrdersPanel({ initialOrders, products, onNavigate }) {
 }
 
 function WishlistPanel({ products, wishlist, toggleWishlist, onNavigate }) {
+  const wibrawl = useWibrawlCommerce();
   const saved = useMemo(() => products.filter((product) => wishlist.has(product.id)), [products, wishlist]);
   return (
     <section className="account-panel" aria-labelledby="wishlist-title">
       <div className="account-panel-heading"><div><p className="eyebrow">Saved edits</p><h2 id="wishlist-title">Your wishlist</h2></div><span className="account-badge">{saved.length} saved</span></div>
-      {saved.length ? <div className="product-grid account-product-grid">{saved.map((product) => <article className="product-card" key={product.id}><button className="product-image" type="button" onClick={() => onNavigate(productUrl(product))}>{product.image_url && <img src={product.image_url} alt={product.name} loading="lazy" />}<span className="quick-view">View item </span></button><button className="wishlist-button is-saved" type="button" onClick={() => toggleWishlist(product.id)} aria-label={`Remove ${product.name} from wishlist`}>♥</button><div className="product-info"><p>{product.brand || product.category}</p><h3>{product.name}</h3><strong>{money(product.price)}</strong></div></article>)}</div> : <div className="empty-state">Nothing saved yet. Tap the heart on an item to keep it here.</div>}
+      {saved.length ? <div className="product-grid account-product-grid">{saved.map((product) => wibrawl ? <WibrawlProductCard key={product.id} product={product} wishlist={wishlist} toggleWishlist={toggleWishlist} onNavigate={onNavigate} /> : <article className="product-card" key={product.id}><button className="product-image" type="button" onClick={() => onNavigate(productUrl(product))}>{product.image_url && <img src={product.image_url} alt={product.name} loading="lazy" />}<span className="quick-view">View item </span></button><button className="wishlist-button is-saved" type="button" onClick={() => toggleWishlist(product.id)} aria-label={`Remove ${product.name} from wishlist`}>♥</button><div className="product-info"><p>{product.brand || product.category}</p><h3>{product.name}</h3><strong>{money(product.price)}</strong></div></article>)}</div> : <div className="empty-state">Nothing saved yet. Tap the heart on an item to keep it here.</div>}
     </section>
   );
 }

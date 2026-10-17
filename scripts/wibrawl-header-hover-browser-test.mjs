@@ -77,7 +77,7 @@ try {
     await link.focus();
     await page.waitForTimeout(250);
     assert.equal(await link.evaluate(node => node.matches(':focus-visible')), true);
-    assert.equal(await link.evaluate(node => getComputedStyle(node).outlineColor), 'rgb(195, 243, 94)');
+    assert.equal(await link.evaluate(node => getComputedStyle(node).outlineColor), 'rgb(0, 200, 255)');
     await page.emulateMedia({ reducedMotion: 'reduce' });
     assert.ok(await link.evaluate(node => getComputedStyle(node).transitionDuration.split(',').every(value => parseFloat(value) <= .001)));
     await page.setViewportSize({ width: 390, height: 844 });

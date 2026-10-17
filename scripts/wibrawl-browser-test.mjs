@@ -52,11 +52,11 @@ try {
     await page.emulateMedia({colorScheme:'dark'});
     await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
     assert.equal(await page.evaluate(()=>localStorage.getItem('wibrawl-theme')),null);
-    await page.getByRole('button',{name:'Sports',exact:true}).click();
+    await page.getByRole('button',{name:'Switch to Stadium Light',exact:true}).click();
     await page.emulateMedia({colorScheme:'light'});
-    for(const theme of ['Sports','Gaming']){
-      await page.getByRole('button',{name:theme,exact:true}).click();
-      const expected=theme==='Gaming'?'dark':'light';
+    for(const theme of ['Stadium Light','Tunnel Dark']){
+      const expected=theme==='Tunnel Dark'?'dark':'light';
+      if(await page.evaluate(()=>document.documentElement.dataset.theme)!==expected)await page.getByRole('button',{name:`Switch to ${theme}`,exact:true}).click();
       await page.waitForFunction(value=>document.documentElement.dataset.theme===value,expected);
       const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2);
       const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();
@@ -77,25 +77,25 @@ try {
     await drawer.waitFor();
     await drawer.getByText('Admin Custom Tees',{exact:true}).waitFor();
     await page.keyboard.press('Shift+Tab');
-    assert.equal(await page.evaluate(()=>document.getElementById('shop-menu').contains(document.activeElement)),true);
+    assert.equal(await page.evaluate(()=>document.querySelector('.wb-menu-dialog').contains(document.activeElement)),true);
     await page.keyboard.press('Escape');
     assert.equal(await drawer.count(),0);
     assert.equal(await page.getByRole('button',{name:'Open menu',exact:true}).evaluate(e=>e===document.activeElement),true);
-    await page.locator('.account-menu > summary').click();
+    await page.locator('.wb-account-trigger').click();
     await page.getByRole('link',{name:'Log in / Sign up',exact:true}).waitFor();
-    await page.locator('.account-menu > summary').click();
-    await page.locator('.product-image').first().click();
+    await page.keyboard.press('Escape');
+    await page.locator('.wb-card-preview').first().click();
     await page.getByRole('dialog').waitFor();
     await page.keyboard.press('Escape');
-    await page.locator('.wibrawl-navigation').getByRole('link',{name:'Current Meta'}).click();
-    await page.getByRole('heading',{name:'Current Meta',exact:true}).waitFor();
-    assert.equal(await page.title(),'Current Meta | Wibrawl');
+    await page.locator('.wibrawl-navigation').getByRole('link',{name:'League Leaders'}).click();
+    await page.getByRole('heading',{name:'League Leaders',exact:true}).waitFor();
+    assert.equal(await page.title(),'League Leaders | Wibrawl');
     await ready(page,'/product/tee-0');
     await page.getByRole('heading',{name:'Lobby Tee',exact:true}).waitFor();
     assert.equal(await page.locator('.gallery-control svg').count(),0,'No gallery arrows in Wibrawl');
     await page.getByRole('button',{name:'M',exact:true}).click();
-    await page.getByRole('button',{name:'Add to bag',exact:true}).click();
-    await page.getByText('Added to your cart.',{exact:true}).waitFor();
+    await page.locator('.wb-main-add').click();
+    await page.locator('.wb-pdp-message').getByText('Added to your cart.',{exact:true}).waitFor();
     await ready(page,'/cart');
     await page.getByRole('heading',{name:'Shopping bag',exact:true}).waitFor();
     await page.getByRole('button',{name:/Increase quantity/}).click();
@@ -111,8 +111,8 @@ try {
   await ready(page);
   await page.getByRole('button',{name:/Store credits, ₹1,234/}).waitFor();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2),false);
-  await page.locator('.account-menu > summary').click();
-  await page.getByRole('menuitem',{name:'Profile',exact:true}).waitFor();
+  await page.locator('.wb-account-trigger').click();
+  await page.getByRole('link',{name:'Profile',exact:true}).waitFor();
   await page.screenshot({path:fileURLToPath(new URL('mobile-profile.png',output)),fullPage:true});
   await small.close();
   for(const state of ['empty','failure']){

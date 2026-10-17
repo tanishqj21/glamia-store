@@ -8,7 +8,7 @@ import { StorefrontFooter } from '../react-app/src/components/StorefrontFooter';
 export function renderProductShell(product, settings, pathContext = null, storefront = 'glamia') {
   const noop = () => {};
   const wibrawlMode = storefront === 'wibrawl';
-  return pendingShoppingControls(renderToString(<div className={`app-shell${wibrawlMode ? ' wibrawl-shell' : ''}`}>
+  return pendingShoppingControls(renderToString(<div className={`app-shell${wibrawlMode ? ' wibrawl-shell wb-storefront' : ''}`} data-wibrawl-theme={wibrawlMode ? 'light' : undefined}>
     <a className="skip-link" href="#main-content">Skip to content</a>
     <Header onNavigate={noop} query="" setQuery={noop} dark={false} setDark={noop}
       menuOpen={false} setMenuOpen={noop} categories={['All']} products={[]}

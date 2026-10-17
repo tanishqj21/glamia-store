@@ -1,6 +1,7 @@
 import './styles.css';
 import './fonts.css';
 import './wibrawl.css';
+import './wibrawl-overhaul.css';
 
 function loadStorefrontStyles() {
   return Promise.all([...document.querySelectorAll('link[data-glamia-storefront-css]')].map(preload => new Promise((resolve, reject) => {

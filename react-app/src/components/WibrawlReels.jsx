@@ -1,6 +1,9 @@
-import React, { useId, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { Link } from './Header';
 import { productUrl } from '../lib/commerce';
+import { WibrawlShoppableReel } from './WibrawlShoppableReels';
+import { apiFetch } from '../lib/api';
+import { normalizeProduct } from '../lib/productPresentation';
 
 export function reelProducts(products, settings) {
   const eligible = products.filter(product => ['wibrawl', 'both'].includes(product.storefront_visibility || 'glamia') && (!product.status || product.status === 'live') && (product.image_url || product.thumbnail_url));
@@ -25,6 +28,7 @@ function Reel({ settings, products, onNavigate, preview, onEditField }) {
   const [index, setIndex] = useState(0);
   const pieces = reelProducts(products, settings);
   if ((!preview && !settings.visible) || !pieces.length) return null;
+  if (!preview) return <WibrawlShoppableReel settings={settings} pieces={pieces} onNavigate={onNavigate} />;
   const current = index % pieces.length;
   const active = pieces[current];
   return <section className={`wb-reel wb-reel-${settings.layout}`} data-reel={settings.id} aria-labelledby={headingId}>
@@ -36,5 +40,19 @@ function Reel({ settings, products, onNavigate, preview, onEditField }) {
 }
 
 export function WibrawlReels({ reels = [], products = [], onNavigate = href => window.location.assign(href), preview = false, onEditField }) {
+  if (!preview) return <LiveReels reels={reels} products={products} onNavigate={onNavigate} />;
   return <>{reels.map(settings => <Reel key={settings.id} settings={settings} products={products} onNavigate={onNavigate} preview={preview} onEditField={preview ? onEditField : undefined} />)}</>;
+}
+
+function LiveReels({ reels, products, onNavigate }) {
+  const [extra, setExtra] = useState([]);
+  const missing = [...new Set(reels.filter(reel => reel.visible).flatMap(reel => reel.product_ids || []))].filter(id => !products.some(product => product.id === id)).sort().join(',');
+  useEffect(() => {
+    if (!missing) return;
+    let active = true;
+    apiFetch(`/api/products?view=cards&include_stock=1&ids=${missing.split(',').map(encodeURIComponent).join(',')}`, { cacheTtl: 30000 }).then(response => response.ok ? response.json() : null).then(data => { if (active) setExtra((data?.products || []).map(normalizeProduct)); }).catch(() => {});
+    return () => { active = false; };
+  }, [missing]);
+  const all = [...new Map([...products, ...extra].map(product => [product.id, product])).values()];
+  return <>{reels.filter(settings => settings.visible).map(settings => { const pieces = reelProducts(all, settings); return pieces.length ? <WibrawlShoppableReel key={settings.id} settings={settings} pieces={pieces} onNavigate={onNavigate} /> : null; })}</>;
 }

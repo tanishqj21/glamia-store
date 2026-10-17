@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { preferredWibrawlTheme } from '../../../src/storefront-identity.js';
 
 function savedTheme() {
-  try { return localStorage.getItem('wibrawl-theme'); } catch { return null; }
+  try { const value = localStorage.getItem('wibrawl-theme'); return value === 'dark' ? 'gaming' : value === 'light' ? 'sports' : value; } catch { return null; }
 }
 
 export function useWibrawlTheme(hydrating = false) {
@@ -22,7 +22,7 @@ export function useWibrawlTheme(hydrating = false) {
     if (value !== 'gaming' && value !== 'sports') return;
     explicitChoice.current = value;
     // Only an explicit choice is persisted. Until then, follow the device theme.
-    try { localStorage.setItem('wibrawl-theme', value); } catch { /* The choice still works for this visit. */ }
+    try { localStorage.setItem('wibrawl-theme', value === 'gaming' ? 'dark' : 'light'); } catch { /* The choice still works for this visit. */ }
     setTheme(value);
   }
   return [theme, chooseTheme];

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
+import { WibrawlTimeline } from './WibrawlTimeline';
 
 export function AboutTimeline({ page, preview = false }) {
   return <div className={`about-story${preview ? " is-preview" : ""}`}>
@@ -29,5 +30,5 @@ export default function AboutPage({ brandName = "Glamia" }) {
   }, [attempt, brandName]);
   if (error) return <main className="about-story-state"><p>{error}</p><button type="button" onClick={() => { setError(""); setAttempt(value => value + 1); }}>Try again</button></main>;
   if (!page) return <main className="about-story-state" role="status">Loading our story…</main>;
-  return <main><AboutTimeline page={page} /></main>;
+  return <main>{brandName === 'Wibrawl' ? <WibrawlTimeline page={page} /> : <AboutTimeline page={page} />}</main>;
 }

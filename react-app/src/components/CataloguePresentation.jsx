@@ -6,6 +6,8 @@ import { RecentlyViewed } from './RecentlyViewed';
 import { Icon } from './Icon';
 import { SpecialPrice } from './SpecialPrice';
 import { catalogueMedia, recoverCatalogueMedia } from '../lib/catalogueMedia';
+import { useWibrawlCommerce } from '../lib/wibrawlStorefront';
+import { WibrawlProductCard } from './WibrawlProductCard';
 
 export function selectNewInProducts(products = [], limit = 8) {
   const candidates = (Array.isArray(products) ? products : [])
@@ -60,6 +62,8 @@ function colorMatches(product, family) {
 
 
 export function ProductCard({ product, onNavigate, wishlist, toggleWishlist, onQuickView, eventLive = false, index = 0, headingLevel = 3, aboveFold = false }) {
+  const wibrawl = useWibrawlCommerce();
+  if (wibrawl) return <WibrawlProductCard product={product} onNavigate={onNavigate} wishlist={wishlist} toggleWishlist={toggleWishlist} onQuickView={onQuickView} index={index} headingLevel={headingLevel} aboveFold={aboveFold} />;
   const Heading = headingLevel === 2 ? "h2" : "h3";
   const id = product.id || product.slug;
   const delayClass = `product-card-delay-${Math.min(Math.max(Number(index) || 0, 0), 11)}`;
@@ -72,7 +76,7 @@ export function CatalogPage({ title, products, loading, error, categories, store
   const [sort,setSort]=useState(pathname==="/just-arrived"?"newest":"featured");
   const catalogue=useCatalogue({enabled:!homepageNewIn,category:activeCategory,subcategory:activeSubcategory,subsubcategory:activeSubSubcategory,query:pathname==="/search"?(new URLSearchParams(typeof window === "undefined" ? "" : window.location.search).get("q")||query):query,color,size,minPrice,maxPrice,sort,mode:pathname,initial:initialCatalogue});
   if(!homepageNewIn){products=catalogue.products;loading=catalogue.loading;error=catalogue.error;hasMoreProducts=catalogue.pagination?.has_more;loadingMoreProducts=catalogue.loading;productTotal=catalogue.pagination?.total||0;onLoadMore=catalogue.loadMore;}
-  const scoped = products.filter((product) => (!activeCategory || activeCategory === "All" || product.category === activeCategory) && (!activeSubcategory || product.subcategory === activeSubcategory) && (!activeSubSubcategory || productSubSubcategory(product) === activeSubSubcategory) && searchMatches(product, query));
+  const scoped = products.filter((product) => (!activeCategory || activeCategory === "All" || product.category === activeCategory) && (!activeSubcategory || product.subcategory === activeSubcategory) && (!activeSubSubcategory || productSubSubcategory(product) === activeSubSubcategory) && (storefrontName === "Wibrawl" ? `${product.name || ""} ${product.category || ""} ${product.subcategory || ""} ${product.color || ""} ${(product.tags || []).toString()}`.toLowerCase().includes(query.trim().toLowerCase()) : searchMatches(product, query)));
   const colorOptions = [...new Set((homepageNewIn?scoped.map(product=>product.color):catalogue.facets.colors).map(colorFamily).filter(Boolean))].sort();
   const sizeOptions = [...new Set((homepageNewIn?scoped.flatMap(product=>product.sizes||[]):catalogue.facets.sizes))].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
   const priceBounds = scoped.reduce((range, product) => ({ min: Math.min(range.min, Number(product.price || 0)), max: Math.max(range.max, Number(product.price || 0)) }), { min: Infinity, max: 0 });

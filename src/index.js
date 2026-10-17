@@ -271,7 +271,7 @@ export default {
         : await renderPublicPage(request, env, ctx);
       if (page) return withSecurityHeaders(page);
       const assetResponse = await env.ASSETS.fetch(request);
-      if (isAdminPagePath(url.pathname) || ["/cart", "/checkout", "/profile", "/address", "/orders", "/wishlist", "/reviews", "/credits", "/login", "/notifications", "/saved-for-later"].includes(url.pathname)) {
+      if (isAdminPagePath(url.pathname) || (url.pathname === "/returns" && storefrontForRequest(url) === "wibrawl") || ["/cart", "/checkout", "/profile", "/address", "/orders", "/wishlist", "/reviews", "/credits", "/login", "/notifications", "/saved-for-later"].includes(url.pathname)) {
         const headers = new Headers(assetResponse.headers);
         headers.set("Cache-Control", "no-store");
         headers.set("X-Robots-Tag", "noindex, nofollow");
