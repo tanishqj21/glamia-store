@@ -41,15 +41,17 @@
     "postcss": "8.5.28",
     "sharp": "0.35.5",
     "vite": "^8.2.2",
-    "wrangler": "4.147.0"
+    "wrangler": "4.151.1"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
     "@phosphor-icons/react": "^2.1.10",
+    "@react-three/fiber": "^9.8.2",
     "mediabunny": "1.61.4",
     "pdf-lib": "^1.17.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "three": "^0.186.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }
