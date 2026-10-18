@@ -37,12 +37,12 @@ function SupportConversation({ ticket, messages, user, onReply, onEscalate, repl
   return <section className="customer-support-conversation"><div className="customer-support-conversation-head"><div><p className="eyebrow">{ticket.ticket_number}</p><h2>{ticket.subject}</h2><span>{ticket.status.replace(/_/g, " ")} · {ticket.priority} priority</span></div><span className="support-status-dot" /></div><p className="inline-note">{waiting ? `Reply target: ${replyHours} hours from your latest message (a target, not a guaranteed response time).` : 'The care team has replied. You can continue below.'}</p>{overdue && <button type="button" className="secondary-action" onClick={()=>onEscalate(ticket.id)} disabled={ticket.priority==='urgent'}>{ticket.priority==='urgent'?'Priority review requested':'Request priority review'}</button>}<div className="customer-support-messages" role="log" aria-live="polite">{messages.map((item) => <article className={`customer-support-message ${item.sender_role === "customer" ? "from-customer" : "from-admin"}`} key={item.id}><div><strong>{item.sender_role === "admin" ? "Glamia care" : "You"}</strong><small>{item.created_at ? refundDate(item.created_at) : ""}</small></div><p>{item.message}</p></article>)}</div>{user ? <form className="customer-support-reply" onSubmit={submit}><label>Reply<textarea value={message} onChange={(event) => setMessage(event.target.value)} rows="3" maxLength="2000" required placeholder="Add more context or reply to the care team…" /></label>{error && <p className="inline-error" role="alert">{error}</p>}<button className="primary-action" disabled={busy}>{busy ? "Sending…" : "Send reply"} </button></form> : <p className="inline-note">Sign in to continue this conversation.</p>}</section>;
 }
 
-export function CustomerSupportPage({ user, onNavigate, storefront }) {
+export function CustomerSupportPage({ user, onNavigate, storefront, render }) {
   // Switching accounts or signing out clears private orders and conversations.
-  return <CustomerSupportContent key={user?.email || "guest"} user={user} onNavigate={onNavigate} storefront={storefront} />;
+  return <CustomerSupportContent key={user?.email || "guest"} user={user} onNavigate={onNavigate} storefront={storefront} render={render} />;
 }
 
-function CustomerSupportContent({ user, onNavigate, storefront }) {
+function CustomerSupportContent({ user, onNavigate, storefront, render }) {
   const [tickets, setTickets] = useState([]);
   const [selectedId, setSelectedId] = useState("");
   const [messages, setMessages] = useState([]);
@@ -102,6 +102,7 @@ function CustomerSupportContent({ user, onNavigate, storefront }) {
   }
   async function reply(ticketId, message) { const { response, data } = await readJson(await apiFetch(`/api/support/tickets/${encodeURIComponent(ticketId)}/messages`, { method: "POST", body: JSON.stringify({ message }) })); if (!response.ok) throw new Error(data.error || "Reply could not be sent"); setMessages((current) => [...current, data.message]); setTickets((current) => current.map((ticket) => ticket.id === ticketId ? { ...ticket, ...data.ticket } : ticket)); }
 
+  if (render) return render({ user, onNavigate, storefront, tickets, selectedId, setSelectedId, messages, setMessages, form, setForm, status, error, busy, replyHours, afterSales, setAfterSales, supportLines, setSupportLines, accountOrder, selectSupportOrder, refreshTickets, refreshMessages, escalate, change, chooseSubject, createTicket, reply });
   return <main className="page-main"><section className="customer-support-page">
     <div className="customer-support-hero"><div><p className="eyebrow">Glamia care</p><h1 className="page-title">How can we help?</h1><p className="muted">Share a question, order concern, or sizing issue. Your request stays connected to the conversation.</p></div><div className="support-response-card"><span className="support-status-dot" /><strong>Care team</strong><small>We’ll keep your order details in context.</small></div></div>
     <div className="refund-actions"><button type="button" className="secondary-action" onClick={()=>{chooseSubject("I need help with a return or exchange");setRequesting(true);}}>Start a return or exchange</button><button type="button" className="secondary-action" onClick={()=>{chooseSubject("I need help with a return or exchange");setRequesting(false);}}>Help with an existing request</button></div><div className="customer-support-layout">
@@ -123,11 +124,11 @@ function CustomerSupportContent({ user, onNavigate, storefront }) {
   {requesting==='open'&&accountOrder&&<AfterSalesDialog order={accountOrder} onClose={()=>setRequesting(false)} onComplete={()=>{setRequesting(false);setStatus('Request submitted. Track your return and replacement in Your orders.');onNavigate('/orders');}}/>}</section></main>;
 }
 
-export function AfterSalesDialog({ order, onClose, onComplete }) {
-  return <AfterSalesContent key={order.id} order={order} onClose={onClose} onComplete={onComplete} />;
+export function AfterSalesDialog({ order, onClose, onComplete, render }) {
+  return <AfterSalesContent key={order.id} order={order} onClose={onClose} onComplete={onComplete} render={render} />;
 }
 
-function AfterSalesContent({ order, onClose, onComplete }) {
+function AfterSalesContent({ order, onClose, onComplete, render }) {
   const dialogRef = useRef(null);
   const initialized = useRef(false);
   const previousPolicies = useRef({});
@@ -185,6 +186,7 @@ function AfterSalesContent({ order, onClose, onComplete }) {
     try { const { response, data } = await readJson(await apiFetch(`/api/orders/${encodeURIComponent(order.id)}/returns`, { method: "POST", body: JSON.stringify({ type: type === "refund" ? "return_refund" : type, reason, refund_destination: destination,items:selected.map(item=>({line_id:item.line_id,quantity:quantities[item.line_id]})),exchange_line_id:lineId, exchange_product_id: productId, exchange_from_size: fromSize, exchange_to_size: toSize }) })); if (!response.ok) throw new Error(data.error || "Request could not be submitted"); onComplete(data); } catch (requestError) { setStatus(requestError.message); } finally { setBusy(false); }
   }
 
+  if (render) return render({ order, onClose, onComplete, type, setType, options, lineId, setLineId, quantities, setQuantities, toSize, setToSize, destination, setDestination, demoPayment, reason, setReason, status, busy, chosenItem, fromSize, availableSizes, selected, estimate, refreshOptions, blockedReason, careLink, submit });
   return <div className="modal-backdrop" role="presentation"><section ref={dialogRef} onKeyDown={dialogKeys} className="after-sales-dialog" role="dialog" aria-modal="true" aria-labelledby="after-sales-title">
     <div className="customer-support-form-head"><div><p className="eyebrow">After-sales care</p><h2 id="after-sales-title">{type === "exchange" ? "Exchange this item" : "Return / Refund"}</h2></div><button type="button" className="modal-close" onClick={onClose} disabled={busy} aria-label="Close">×</button></div>
     <p className="muted">Order {order.order_number} · Delivered orders can be requested within the return window.</p>

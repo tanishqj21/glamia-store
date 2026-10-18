@@ -99,7 +99,7 @@ try {
     await ready(page,'/cart');
     await page.getByRole('heading',{name:'Shopping bag',exact:true}).waitFor();
     await page.getByRole('button',{name:/Increase quantity/}).click();
-    await page.getByText('Quantity 2',{exact:false}).waitFor();
+    await page.locator('.wb-quantity output').filter({hasText:'2'}).waitFor();
     await ready(page,'/login');
     await page.getByRole('heading',{name:'YOUR PEOPLE. YOUR WORLD.'}).waitFor();
     await page.getByRole('button',{name:'Continue browsing as a guest',exact:true}).click();

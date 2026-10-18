@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 import { formatIST, money } from "../lib/commerce";
 
-export function CouponBox({ items, appliedCoupon, onCouponApplied, onCouponRemoved, compact = false }) {
+export function CouponBox({ items, appliedCoupon, onCouponApplied, onCouponRemoved, compact = false, idPrefix }) {
+  const headingId = idPrefix ? `${idPrefix}-coupon-heading` : compact ? "checkout-coupon-heading" : "cart-coupon-heading";
+  const inputId = idPrefix ? `${idPrefix}-coupon-code` : compact ? "checkout-coupon-code" : "cart-coupon-code";
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -68,13 +70,13 @@ export function CouponBox({ items, appliedCoupon, onCouponApplied, onCouponRemov
     setMessage("");
   }
 
-  return <section className={`coupon-box ${compact ? "coupon-box--compact" : ""}`} aria-labelledby={compact ? "checkout-coupon-heading" : "cart-coupon-heading"}>
+  return <section className={`coupon-box ${compact ? "coupon-box--compact" : ""}`} aria-labelledby={headingId}>
     <div className="coupon-box-heading">
-      <div><p className="eyebrow">Save on your order</p><h2 id={compact ? "checkout-coupon-heading" : "cart-coupon-heading"}>Have a coupon?</h2></div>
+      <div><p className="eyebrow">Save on your order</p><h2 id={headingId}>Have a coupon?</h2></div>
       <span aria-hidden="true">%</span>
     </div>
     {appliedCoupon ? <div className="coupon-applied"><div><strong>{appliedCoupon.code}</strong><span>You save {money(appliedCoupon.discount)}</span></div><button type="button" onClick={remove}>Remove</button></div> : <>
-      <form className="coupon-form" onSubmit={apply}><label htmlFor={compact ? "checkout-coupon-code" : "cart-coupon-code"}>Coupon code<input id={compact ? "checkout-coupon-code" : "cart-coupon-code"} value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="Enter code" autoComplete="off" maxLength="40" /></label><button type="submit" className="secondary-action" disabled={busy || !code.trim()}>{busy ? "Checking…" : "Apply"}</button></form>
+      <form className="coupon-form" onSubmit={apply}><label htmlFor={inputId}>Coupon code<input id={inputId} value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="Enter code" autoComplete="off" maxLength="40" /></label><button type="submit" className="secondary-action" disabled={busy || !code.trim()}>{busy ? "Checking…" : "Apply"}</button></form>
       {suggestionsBusy && <p className="coupon-suggestions-loading">Looking for available coupons…</p>}
       {!suggestionsBusy && suggestions.length > 0 && <div className="coupon-suggestions" aria-label="Available coupons">
         <div className="coupon-suggestions-heading"><strong>Available for you</strong><span>Tap to apply</span></div>

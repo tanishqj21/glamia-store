@@ -120,7 +120,7 @@ try {
   }
   const account = await context({ width:390,height:844 }, { signedIn:true });
   await account.goto('/credits'); await account.page.getByText('TEST123', { exact:true }).waitFor(); await audit(account.page, 'credits-mobile');
-  await account.goto('/orders'); await account.page.getByRole('heading', { name:'Your orders',exact:true }).waitFor(); await audit(account.page,'orders-mobile');
+  await account.goto('/orders'); await account.page.getByRole('heading', { name:'Your drops.',exact:true }).waitFor(); await audit(account.page,'orders-mobile');
   await account.goto('/support'); await account.page.getByRole('heading').first().waitFor(); await audit(account.page,'support-mobile'); await account.ctx.close();
   const returns = await context({width:390,height:844},{signedIn:true}); await returns.goto('/returns'); await returns.page.getByRole('heading',{name:'Returns & exchanges',exact:true}).waitFor(); await audit(returns.page,'returns-mobile'); await returns.ctx.close();
   for (const width of [390,1440]) {

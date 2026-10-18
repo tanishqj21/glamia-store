@@ -323,7 +323,7 @@ function AddressPanel({ initialAddresses }) {
   );
 }
 
-function OrdersPanel({ initialOrders, products, onNavigate }) {
+export function OrdersPanel({ initialOrders, products, onNavigate, render }) {
   const [orders, setOrders] = useState(initialOrders || []);
   const cancellations=useCancellationRefunds(orders,setOrders);
   const updates = useCustomerReturns();
@@ -354,6 +354,7 @@ function OrdersPanel({ initialOrders, products, onNavigate }) {
   }
 
   if (updates.expired) return <section className="account-panel"><p className="inline-error" role="alert">{updates.error}</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Sign in again</button></section>;
+  if (render) return render({ orders, setOrders, returns, updates, cancellations, status, setStatus, cancel, onNavigate, afterSalesOrder, setAfterSalesOrder, cancellationWindowOpen });
 
   return (
     <section className="account-panel" aria-labelledby="orders-title">

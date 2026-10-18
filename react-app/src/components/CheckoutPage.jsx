@@ -94,7 +94,7 @@ function PaymentMethodLogo({ id }) {
   return null;
 }
 
-export function CheckoutPage({ cart, products, user, addresses, appliedCoupon, onCouponApplied, onCouponRemoved, onNavigate, onOrderPlaced,storefront }) {
+export function CheckoutPage({ cart, products, user, addresses, appliedCoupon, onCouponApplied, onCouponRemoved, onNavigate, onOrderPlaced,storefront, render, initialUseCredits = false }) {
   const savedAddresses = addresses || NO_ADDRESSES;
   const defaultAddress = savedAddresses.find((address) => address.isDefault) || savedAddresses[0];
   const [selectedAddressId, setSelectedAddressId] = useState(defaultAddress?.id || "new");
@@ -163,7 +163,7 @@ export function CheckoutPage({ cart, products, user, addresses, appliedCoupon, o
   useEffect(() => {
     let active = true;
     setCreditBalance(0);
-    setUseCredits(false);
+    setUseCredits(Boolean(initialUseCredits));
     if (!user?.email) return () => { active = false; };
     const load = () => apiFetch("/api/loyalty?summary=1", { cache: "no-store" }).then(async response => {
       if (response.ok && active) setCreditBalance(Math.max(0, Number((await response.json()).balance || 0)));
@@ -351,6 +351,7 @@ export function CheckoutPage({ cart, products, user, addresses, appliedCoupon, o
     }
   }
 
+  if (render) return render({ cart, user, storefront, savedAddresses, selectedAddressId, selectAddress, draft, setDraft, email, setEmail, busy, message, checking, checkError, paymentMethods, paymentMethod, setPaymentMethod, creditBalance, useCredits, setUseCredits, confirmation, pendingPayment, checkPayment, lines, unavailableLines, preorderLines, preorderReleaseDates, total, discount, creditsAllowed, creditsUsed, payableTotal, usingSavedAddress, changeField, placeOrder, appliedCoupon, onCouponApplied, onCouponRemoved, onNavigate });
   if (confirmation) return <main className="page-main"><section className="account-page order-confirmation" aria-labelledby="order-confirmed-title"><p className="eyebrow">Thank you</p><h1 id="order-confirmed-title" className="page-title">Order placed</h1><p>Order {confirmation.order_number || confirmation.id || "confirmed"}</p><p role="status">Your payment was received and your order is now confirmed. Keep your order number for support.</p><p className="muted">{confirmation.delivery_estimate||deliveryPromise(confirmation.shipping?.state,storefront?.customer_experience)}</p><div className="order-confirmation-actions">{confirmation.bill_available && confirmation.id ? <a className="primary-action" download href={`/api/orders/${encodeURIComponent(confirmation.id)}/bill?token=${encodeURIComponent(confirmation.tracking_token || "")}`}>Download bill</a> : <p className="muted">Your bill is being prepared. It will be available in your orders and confirmation email.</p>}<button type="button" className="secondary-action" onClick={() => onNavigate(user ? "/orders" : "/best-sellers")}>{user ? "View your orders" : "Continue shopping"}</button></div></section></main>;
 
   return (

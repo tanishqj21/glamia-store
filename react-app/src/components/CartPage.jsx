@@ -50,7 +50,7 @@ function RemovalDialog({ item, product, onClose, onRemove, onSave, canSave, erro
   </dialog>;
 }
 
-function CartContent({ cart, products, setCart, onNavigate, appliedCoupon, onCouponApplied, onCouponRemoved, user, sessionReady, loading, saved, syncError }) {
+function CartContent({ cart, products, setCart, onNavigate, appliedCoupon, onCouponApplied, onCouponRemoved, user, sessionReady, loading, saved, syncError, render }) {
   const [removing, setRemoving] = useState(null);
   const [notice, setNotice] = useState("");
   const [extraProducts, setExtraProducts] = useState([]);
@@ -124,6 +124,8 @@ function CartContent({ cart, products, setCart, onNavigate, appliedCoupon, onCou
   }
 
   if (loading && cart.length) return <CartLoadingContent />;
+  if (render) return render({ cart, products, setCart, onNavigate, appliedCoupon, onCouponApplied, onCouponRemoved, user, sessionReady, saved, syncError, lines, total, discount, notice, setNotice, changeQuantity, setRemoving, saveForLater, moveToBag, byId, checkingSaved, missingIds, lookup, setRetry,
+    removalDialog: removing && <RemovalDialog item={removing} product={byId.get(removing.id)} onClose={() => setRemoving(null)} onRemove={() => removeFromBag(removing)} onSave={() => saveForLater(removing)} canSave={saved.ready} error={saved.error} /> });
   return <>
     <p className="cart-notice" role="status" aria-live="polite">{notice}</p>
     {saved.error && !removing && <p className="inline-error" role="alert">{saved.error}</p>}
@@ -166,5 +168,6 @@ function CartContent({ cart, products, setCart, onNavigate, appliedCoupon, onCou
 
 // Changing accounts resets the local list and any open removal dialog immediately.
 export function CartPage(props) {
+  if (props.compactFrame) return <div>{props.bootPending ? <CartLoadingContent /> : <CartContent key={props.sessionReady ? props.user?.email || "guest" : "pending"} {...props} />}</div>;
   return <CartFrame>{props.bootPending ? <CartLoadingContent /> : <CartContent key={props.sessionReady ? props.user?.email || "guest" : "pending"} {...props} />}</CartFrame>;
 }

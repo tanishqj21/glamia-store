@@ -8,7 +8,7 @@ export const refreshCredits = () => window.dispatchEvent(new Event("glamia-credi
 
 export { CreditsBalance } from "./CreditsBalance";
 
-export function StoreCreditsPage({ user, onNavigate }) {
+export function StoreCreditsPage({ user, onNavigate, render }) {
   const [wallet, setWallet] = useState(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -25,6 +25,7 @@ export function StoreCreditsPage({ user, onNavigate }) {
   }, [user]);
   useEffect(() => { load(); }, [load]);
   async function copy() { try { await navigator.clipboard.writeText(wallet.referral_code); setCopied(true); } catch { setError("Copy is unavailable. Select the referral code to copy it."); } }
+  if (render) return render({ wallet, error, copied, copy, load, user, onNavigate });
   return <AccountLayout route="/credits" onNavigate={onNavigate} title="Store credits" className="credits-page credits-wallet">
     {!user ? <section className="account-panel"><p>Sign in to view your balance, rewards, and referral code.</p><button className="primary-action" type="button" onClick={() => onNavigate("/login")}>Sign in</button></section> : <>
       {error && <p className="inline-error" role="alert">{error}</p>}
