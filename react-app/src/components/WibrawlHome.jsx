@@ -3,7 +3,13 @@ import { WIBRAWL_HERO_LAYOUTS } from '../../../src/storefront-identity.js';
 import { Link } from './Header';
 import { Icon } from './Icon';
 import { WibrawlHero } from './WibrawlHero';
-import { WIBRAWL_COLLECTIONS } from '../lib/wibrawlStorefront';
+import { useWibrawlPersona } from '../lib/wibrawlPersona';
+import { WibrawlHint } from './WibrawlHint';
+import { WibrawlCollectionSection } from './WibrawlCollectionSection';
+import { WibrawlReels } from './WibrawlReels';
+import { WibrawlCampaign } from './WibrawlCampaign';
+import { useCatalogue } from '../lib/useCatalogue';
+import { StorePromises } from './HomepagePresentation';
 import { WIBRAWL_CAMPAIGN_IMAGE, WIBRAWL_CAMPAIGN_SRCSET, WIBRAWL_CAMPAIGN_SIZES, WIBRAWL_CAMPAIGN_AVIF_SRCSET, wibrawlProductLinkImage } from '../../../src/wibrawl-media';
 
 export function WibrawlCarousel({ slides, onNavigate, preview = false }) {
@@ -78,16 +84,17 @@ function WibrawlPreviewCarousel({ slides, onNavigate, preview }) {
   </section>;
 }
 
-export function WibrawlHome({ theme, slides = [], ready = true, onNavigate, children }) {
-  return <div className={`wibrawl-home wibrawl-home-${theme}`}>
-    {!ready ? <div className="wibrawl-hero-loading" role="status" aria-label="Loading featured edit" /> : slides.length > 0 && <WibrawlCarousel slides={slides} onNavigate={onNavigate} />}
-    <nav className="wibrawl-collection-nav" aria-label="Discover collections">
-      {WIBRAWL_COLLECTIONS.map(([href, title, subtitle], i) => <Link key={href} href={href} onNavigate={onNavigate}><span className="wibrawl-collection-symbol" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span><div><h2>{title}</h2><p>// {subtitle}</p></div></Link>)}
-    </nav>
-    {children}
-    <section className="wibrawl-manifesto" aria-labelledby="wibrawl-manifesto-title">
-      <p>Whatever you're into,<br />you're in.</p>
-      <div><h2 id="wibrawl-manifesto-title">YOUR VIBE.<br />NO FILTER.</h2><p>Graphic tees for showing up as yourself. Mix it up, make it yours, and find your people along the way.</p><Link className="wibrawl-secondary-action" href="/about" onNavigate={onNavigate}>Meet Wibrawl</Link></div>
-    </section>
+export function WibrawlHome({ theme = 'gaming', slides = [], ready = true, onNavigate, products = [], wishlist, toggleWishlist, onQuickView, storefront, catalogReady = false }) {
+  const persona = useWibrawlPersona(theme);
+  const best = useCatalogue({enabled:catalogReady,category:'All',query:'',sort:'featured',mode:'/best-sellers'});
+  const offers = useCatalogue({enabled:catalogReady,category:'All',query:'',sort:'featured',mode:'/offers'});
+  const cardProps = {onNavigate,wishlist,toggleWishlist,onQuickView};
+  return <div className="wb-arena-home">
+    {!ready ? <div className="wb-arena-loading" role="status" aria-label="Loading featured edit"/> : <WibrawlHero slides={slides} onNavigate={onNavigate} mode={theme}/>}
+    <div className="wb-home-telemetry"><p className="wb-tech">W. / INDEPENDENT EXPRESSION</p><span className="wb-tech">YOUR EVERYDAY. REMIXED.</span><span className="wb-tech">{persona.name.toUpperCase()}</span></div>
+    <StorePromises settings={storefront?.trust_strip} />
+    <nav className="wb-home-hubs" aria-label="Discover collections">{persona.collections.map((hub,i)=><WibrawlHint key={hub.href} label={hub.tooltip}><Link href={hub.href} onNavigate={onNavigate}><span className="wb-tech">0{i+1} / {hub.detail}</span><h2>{hub.title}</h2><span className="wb-home-hub-sign" aria-hidden="true">{i===0?'+':i===1?'#':'%'}</span></Link></WibrawlHint>)}</nav>
+    {catalogReady&&<div className="wb-home-editorial"><WibrawlCampaign campaign={storefront?.active_event || storefront?.sales_campaign} onNavigate={onNavigate}/><WibrawlCollectionSection kind="arrived" products={[...products].sort((a,b)=>(Date.parse(b.created_at)||0)-(Date.parse(a.created_at)||0)).slice(0,8)} {...cardProps}/><div className="wb-home-interlock"><div className="wb-home-manifesto"><p className="wb-tech">NO FILTER / ALL YOU</p><h2>GOOD TEES.<br/>BETTER COMPANY.</h2><p>For the last-minute plans. The extra-time wins. The days you show up as yourself.</p><Link href="/about" className="secondary-action" onNavigate={onNavigate}>Our story</Link></div><WibrawlCollectionSection kind="best" products={best.products.slice(0,4)} loading={best.loading} error={best.error} onRetry={best.retry} {...cardProps}/></div><WibrawlReels reels={storefront?.cinematic_reels} products={products} onNavigate={onNavigate}/><WibrawlCollectionSection kind="offers" products={offers.products.slice(0,6)} loading={offers.loading} error={offers.error} onRetry={offers.retry} {...cardProps}/></div>}
+    <section className="wb-home-signoff"><span className="wb-tech">FIND YOUR PEOPLE. WEAR YOUR PERSONALITY.</span><p>Different worlds.<br/><em>Same energy.</em></p><Link href="/just-arrived" onNavigate={onNavigate} className="primary-action">Find your next fit</Link></section>
   </div>;
 }

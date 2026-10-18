@@ -1,10 +1,19 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
-<title id="title">Wibrawl WB</title>
-<rect width="256" height="256" rx="32" fill="#101413"/>
-<g transform="translate(27 70) scale(1.1) skewX(-10)">
-<g transform="translate(0 7)"><path fill="#FF3096" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/><path transform="translate(124 0)" fill="#FF3096" fill-rule="evenodd" d="M0 0H62L80 18V38L68 50L80 62V82L62 100H0ZM22 19V42H53L59 36V25L53 19ZM22 59V81H54L60 75V65L54 59Z"/></g>
-<path fill="#00C8FF" d="M0 0H22L35 69L49 15H66L80 69L92 0H114L92 100H71L58 51L45 100H23Z"/><path transform="translate(124 0)" fill="#00C8FF" fill-rule="evenodd" d="M0 0H62L80 18V38L68 50L80 62V82L62 100H0ZM22 19V42H53L59 36V25L53 19ZM22 59V81H54L60 75V65L54 59Z"/>
-<path fill="#C3F35E" d="M92 0H114L110.48 16H89.22Z"/>
-</g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-labelledby="title">
+<title id="title">Wibrawl WB</title><defs>
+    <linearGradient id="electricBlue" x1="0" y1="0" x2="0" y2="1" objectBoundingBox="true">
+      <stop offset="0" stop-color="#12C5F6"/>
+      <stop offset="1" stop-color="#00B6F4"/>
+    </linearGradient>
+    <linearGradient id="hotPink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FE2BA0"/>
+      <stop offset="1" stop-color="#F41F99"/>
+    </linearGradient>
+    <linearGradient id="voltYellow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E4FF00"/>
+      <stop offset="1" stop-color="#D6F700"/>
+    </linearGradient>
+  </defs>
+<rect width="1000" height="1000" rx="150" fill="#09090b"/>
+<defs><clipPath id="symbol"><rect x="175" y="175" width="910" height="680"/></clipPath></defs>
+<g transform="translate(-130 -30)" clip-path="url(#symbol)"><path id="blue-W" fill="url(#electricBlue)" fill-rule="evenodd" d="M217,322 L322,504 L320,505 L284,469 L430,764 L505,631 L563,755 L673,544 L741,423 L794,335 L629,447 L575,570 L521,493 L466,595 L455,611 L386,412 Z M407,422 L449,498 L469,552 L490,469 Z"/><path id="pink-B" fill="url(#hotPink)" fill-rule="evenodd" d="M966,383 L838,383 L796,434 L729,523 L642,651 L798,531 L842,461 L948,462 L778,581 L771,595 L909,595 L932,625 L868,689 L735,689 L629,798 L670,771 L889,771 L1041,648 L955,555 L1042,461 Z"/><path id="volt-strike" fill="url(#voltYellow)" fill-rule="evenodd" d="M766,575 L665,654 L545,853 L698,694 Z M950,206 L820,317 L687,551 L867,309 Z M409,863 L377,871 L370,907 L403,896 Z"/></g>
 </svg>

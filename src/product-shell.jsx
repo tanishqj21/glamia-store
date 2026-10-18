@@ -3,16 +3,17 @@ import { renderToString } from 'react-dom/server.edge';
 import { Header } from '../react-app/src/components/Header';
 import ProductDetailPage from '../react-app/src/components/ProductDetailPage';
 import { pendingShoppingControls } from './storefront-shell-controls';
+import { WibrawlFooter } from '../react-app/src/components/WibrawlFooter';
 import { StorefrontFooter } from '../react-app/src/components/StorefrontFooter';
 
 export function renderProductShell(product, settings, pathContext = null, storefront = 'glamia') {
   const noop = () => {};
   const wibrawlMode = storefront === 'wibrawl';
-  return pendingShoppingControls(renderToString(<div className={`app-shell${wibrawlMode ? ' wibrawl-shell wb-storefront' : ''}`} data-wibrawl-theme={wibrawlMode ? 'light' : undefined}>
+  return pendingShoppingControls(renderToString(<div className={`app-shell${wibrawlMode ? ' wibrawl-shell wb-storefront' : ''}`} data-wibrawl-mode={wibrawlMode ? 'gaming' : undefined} data-wibrawl-theme={wibrawlMode ? 'dark' : undefined}>
     <a className="skip-link" href="#main-content">Skip to content</a>
     <Header onNavigate={noop} query="" setQuery={noop} dark={false} setDark={noop}
       menuOpen={false} setMenuOpen={noop} categories={['All']} products={[]}
-      wishlistCount={0} cartCount={0} user={null} storefront={settings} wibrawlMode={wibrawlMode} themeMode="sports" setThemeMode={noop} />
+      wishlistCount={0} cartCount={0} user={null} storefront={settings} wibrawlMode={wibrawlMode} themeMode={wibrawlMode ? "gaming" : "sports"} setThemeMode={noop} />
     <div id="main-content" tabIndex={-1}>
       <Suspense>
         <ProductDetailPage productRef={product.id} productPathContext={pathContext} initialProduct={product} products={[]} wibrawlMode={wibrawlMode}
@@ -20,6 +21,6 @@ export function renderProductShell(product, settings, pathContext = null, storef
           eventLive={Boolean(settings?.active_event?.active && (!settings.active_event.ends_at || Date.parse(settings.active_event.ends_at) > Date.now()))} />
       </Suspense>
     </div>
-    <StorefrontFooter storefront={settings} onNavigate={noop} wibrawlMode={wibrawlMode} />
+    {wibrawlMode ? <WibrawlFooter storefront={settings} onNavigate={noop} mode="gaming" /> : <StorefrontFooter storefront={settings} onNavigate={noop} />}
   </div>));
 }

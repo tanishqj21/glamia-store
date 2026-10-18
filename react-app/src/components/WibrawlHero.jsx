@@ -1,39 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from './Header';
+import { useWibrawlPersona } from '../lib/wibrawlPersona';
 import { WIBRAWL_CAMPAIGN_IMAGE, WIBRAWL_CAMPAIGN_SRCSET, WIBRAWL_CAMPAIGN_AVIF_SRCSET } from '../../../src/wibrawl-media';
 
-export function WibrawlHero({ slides = [], onNavigate }) {
-  const [index, setIndex] = useState(0), [piece, setPiece] = useState(0), [paused, setPaused] = useState(false);
-  const touch = useRef(null), suppress = useRef(false);
-  const selected = index % Math.max(1, slides.length), slide = slides[selected];
-  const select = next => { setIndex((next + slides.length) % slides.length); setPiece(0); };
-  useEffect(() => {
-    if (slides.length < 2 || paused) return;
-    let timer;
-    const media = matchMedia('(prefers-reduced-motion: reduce)');
-    const schedule = () => { clearTimeout(timer); if (!document.hidden && !media.matches) timer = setTimeout(() => { setIndex(current => (current + 1) % slides.length); setPiece(0); }, 6500); };
-    schedule(); document.addEventListener('visibilitychange', schedule); media.addEventListener('change', schedule);
-    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', schedule); media.removeEventListener('change', schedule); };
-  }, [slides, selected, paused]);
-  if (!slide) return null;
-  const frames = slide.frames || [], active = frames[piece % Math.max(1, frames.length)];
-  const layout = ['poster', 'collage', 'split'].includes(slide.layout) ? slide.layout : 'poster';
-  const campaign = slide.imagery === 'campaign';
-  const campaignPicture = <picture><source type="image/avif" srcSet={slide.campaign_image || WIBRAWL_CAMPAIGN_AVIF_SRCSET} sizes="(max-width: 767px) 100vw, 75vw" /><img src={WIBRAWL_CAMPAIGN_IMAGE} srcSet={WIBRAWL_CAMPAIGN_SRCSET} sizes="(max-width: 767px) 100vw, 75vw" width="1440" height="960" alt="Wibrawl oversized graphic tee campaign" fetchPriority="high" /></picture>;
-  return <section className={`wb-hero wb-hero--${layout}`} aria-label="Wibrawl featured collections" aria-roledescription="carousel" onPointerEnter={event => { if (event.pointerType === 'mouse') setPaused(true); }} onPointerLeave={() => setPaused(false)} onFocusCapture={() => setPaused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false); }} onTouchStart={event => { suppress.current = false; touch.current = { x: event.touches[0].clientX, y: event.touches[0].clientY }; }} onTouchEnd={event => {
-    if (!touch.current || slides.length < 2) return;
-    const x = event.changedTouches[0].clientX - touch.current.x, y = event.changedTouches[0].clientY - touch.current.y;
-    if (Math.abs(x) > 55 && Math.abs(x) > Math.abs(y) * 1.3) { select(selected + (x < 0 ? 1 : -1)); suppress.current = true; }
-    touch.current = null;
-  }} onClickCapture={event => { if (suppress.current) { event.preventDefault(); event.stopPropagation(); suppress.current = false; } }}>
-    <div className="wb-hero-body" key={slide.id} role="group" aria-roledescription="slide" aria-label={`${selected + 1} of ${slides.length}`}>
-      <div className="wb-hero-media">
-        {campaign ? campaignPicture : active ? <Link href={`/product/${encodeURIComponent(active.id)}`} onNavigate={onNavigate}><img src={active.image} alt={active.name} width="960" height="1200" fetchPriority="high" /></Link> : <span className="wb-hero-empty">WIBRAWL / THE EDIT</span>}
-        {layout === 'collage' && frames.length > 1 && <div className="wb-hero-collage-pieces">{frames.slice(0, 3).map((frame, i) => <Link key={frame.id} data-active={piece === i ? "true" : undefined} href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate}><img src={frame.image} alt={frame.name} width="240" height="300" /><span>{String(i + 1).padStart(2, '0')} / {frame.name}</span></Link>)}</div>}
-        {['poster', 'split'].includes(layout) && active && <Link href={`/product/${encodeURIComponent(active.id)}`} onNavigate={onNavigate} className="wb-hero-spec"><small>In this edit / {String(piece + 1).padStart(2, '0')}</small><strong>{active.name}</strong>{active.color && <span>{active.color}</span>}</Link>}
-      </div>
-      <div className="wb-hero-copy"><p className="wibrawl-kicker">{slide.eyebrow}</p><h1>{slide.title}</h1><p className="wb-hero-description">{slide.tagline}</p>{slide.words?.length > 0 && <div className="wb-hero-tags">{slide.words.map(word => <span key={word}>{word}</span>)}</div>}<Link className="wibrawl-primary-action" href={slide.cta_category ? `/category/${encodeURIComponent(slide.cta_category)}` : '/just-arrived'} onNavigate={onNavigate}>{slide.cta_label || 'Shop the edit'}</Link></div>
-    </div>
-    <div className="wb-hero-rail"><div className="wb-piece-selectors" role="group" aria-label="Choose a piece">{frames.map((frame, i) => <button key={frame.id} type="button" aria-pressed={piece === i} onClick={() => setPiece(i)} aria-label={`Preview ${frame.name}`}><img src={frame.image} alt="" width="32" height="40" /><span>{String(i + 1).padStart(2, '0')}<small>{frame.name}</small></span></button>)}</div><div className="wb-slide-controls"><button type="button" onClick={() => select(selected - 1)} disabled={slides.length < 2} aria-label="Previous hero slide">Previous</button><span className="wb-slide-index" aria-live="polite">{String(selected + 1).padStart(2, '0')} / {String(slides.length).padStart(2, '0')}</span><button type="button" onClick={() => select(selected + 1)} disabled={slides.length < 2} aria-label="Next hero slide">Next</button></div></div>
+function HeroVisual({ slide, frame, selectedPiece = false, className = '' }) {
+  return <figure className={`wb-arena-visual ${className}`}>{slide.imagery === 'campaign' && !selectedPiece ? <picture><source type="image/avif" srcSet={slide.campaign_image || WIBRAWL_CAMPAIGN_AVIF_SRCSET} sizes="100vw"/><img src={WIBRAWL_CAMPAIGN_IMAGE} srcSet={WIBRAWL_CAMPAIGN_SRCSET} sizes="100vw" alt="Wibrawl graphic tee campaign" width="1440" height="960" fetchPriority="high" /></picture> : frame ? <img src={frame.image} alt={frame.name} width="960" height="1200" fetchPriority="high" /> : <div className="wb-arena-placeholder"><span>W.</span><p>THE NEXT EDIT STARTS WITH YOU.</p></div>}</figure>;
+}
+function HeroCopy({ slide, onNavigate, deck }) {return <div className="wb-arena-copy"><span className="wb-tech">{slide.eyebrow || 'THE FIRST EDIT'} / {deck}</span><h1>{slide.title}</h1><p>{slide.tagline}</p>{!!slide.words?.length && <div className="wb-arena-tags">{slide.words.map(word => <span key={word}>{word}</span>)}</div>}<Link className="primary-action" href={slide.cta_category ? `/category/${encodeURIComponent(slide.cta_category)}` : '/just-arrived'} onNavigate={onNavigate}>{slide.cta_label || 'Shop the edit'}</Link></div>;}
+function HeroPieces({ frames, onNavigate, select, active }) {return <div className="wb-arena-pieces">{frames.slice(0,3).map((frame,i) => <article key={frame.id}><button type="button" aria-pressed={active === i} aria-label={`Preview ${frame.name}`} onClick={() => select(i)}><img src={frame.image} alt="" width="80" height="100"/><span className="wb-tech">0{i+1}</span></button><Link href={`/product/${encodeURIComponent(frame.id)}`} onNavigate={onNavigate}><strong>{frame.name}</strong><small>{frame.color || 'IN THIS EDIT'}</small></Link></article>)}</div>;}
+export function WibrawlHero({ slides = [], onNavigate, mode }) {
+  const [index,setIndex] = useState(0),[piece,setPiece] = useState(0),[pieceChosen,setPieceChosen] = useState(false),[paused,setPaused] = useState(false), touch = useRef(null), suppress = useRef(false);
+  const persona = useWibrawlPersona(mode), selected = index % Math.max(1,slides.length), slide = slides[selected];
+  const change = next => {setIndex((next+slides.length)%slides.length);setPiece(0);setPieceChosen(false);};
+  useEffect(()=>{if(slides.length<2||paused)return;let timer;const media=matchMedia('(prefers-reduced-motion: reduce)');const schedule=()=>{clearTimeout(timer);if(!document.hidden&&!media.matches)timer=setTimeout(()=>{setIndex(i=>(i+1)%slides.length);setPiece(0);setPieceChosen(false);},6500);};schedule();document.addEventListener('visibilitychange',schedule);media.addEventListener('change',schedule);return()=>{clearTimeout(timer);document.removeEventListener('visibilitychange',schedule);media.removeEventListener('change',schedule);};},[slides,selected,paused]);
+  if(!slide)return null;
+  const layout=['poster','collage','split'].includes(slide.layout)?slide.layout:'poster',frames=slide.frames||[],active=frames[piece%Math.max(1,frames.length)];
+  const copy=<HeroCopy slide={slide} deck={persona.deck.toUpperCase()} onNavigate={onNavigate}/>, visual=<HeroVisual slide={slide} frame={active} selectedPiece={pieceChosen}/>;
+  return <section className={`wb-arena-hero wb-hero--${layout} ${paused?'is-paused':''}`} aria-label="Wibrawl featured collections" aria-roledescription="carousel" onPointerEnter={e=>{if(e.pointerType==='mouse')setPaused(true);}} onPointerLeave={()=>setPaused(false)} onFocusCapture={()=>setPaused(true)} onBlurCapture={e=>{if(!e.currentTarget.contains(e.relatedTarget))setPaused(false);}} onTouchStart={e=>{suppress.current=false;touch.current={x:e.touches[0].clientX,y:e.touches[0].clientY};}} onTouchEnd={e=>{if(!touch.current)return;const x=e.changedTouches[0].clientX-touch.current.x,y=e.changedTouches[0].clientY-touch.current.y;if(slides.length>1&&Math.abs(x)>55&&Math.abs(x)>Math.abs(y)*1.3){change(selected+(x<0?1:-1));suppress.current=true;}touch.current=null;}} onClickCapture={e=>{if(suppress.current){e.preventDefault();e.stopPropagation();suppress.current=false;}}}>
+    <div className="wb-arena-slide" role="group" aria-roledescription="slide" aria-label={`${selected+1} of ${slides.length}`} key={slide.id}>
+      {layout==='poster'&&<div className="wb-arena-poster">{visual}<div className="wb-poster-hud">{copy}</div><HeroPieces frames={frames} active={piece} select={next=>{setPiece(next);setPieceChosen(true);}} onNavigate={onNavigate}/></div>}
+      {layout==='collage'&&<div className="wb-arena-collage"><div className="wb-collage-lead">{visual}{copy}</div><aside className="wb-collage-side"><p className="wb-tech">LIVE PIECE SELECTOR / THE EDIT</p><HeroPieces frames={frames} active={piece} select={next=>{setPiece(next);setPieceChosen(true);}} onNavigate={onNavigate}/><div className="wb-collage-stamp" aria-hidden="true">NO<br/>FILTER.</div></aside></div>}
+      {layout==='split'&&<div className="wb-arena-split"><div className="wb-split-media">{visual}{active&&<Link href={`/product/${encodeURIComponent(active.id)}`} onNavigate={onNavigate} className="wb-split-label">{active.name}</Link>}</div><div className="wb-split-spine" aria-hidden="true"><span className="wb-spine-loop">{[0,1].map(copy=><span key={copy}>YOUR VIBE / YOUR RULES / YOUR VIBE / YOUR RULES / YOUR VIBE / YOUR RULES /</span>)}</span></div><div className="wb-split-deck">{copy}<HeroPieces frames={frames} active={piece} select={next=>{setPiece(next);setPieceChosen(true);}} onNavigate={onNavigate}/></div></div>}
+    </div><footer className="wb-arena-controls"><div className="wb-arena-progress" role="progressbar" aria-label="Featured edit position" aria-valuemin={1} aria-valuemax={slides.length} aria-valuenow={selected+1}>{slides.map((s,i)=><span key={s.id} className={i===selected?'is-current':''}/>)}</div><div><button type="button" onClick={()=>change(selected-1)} disabled={slides.length<2} aria-label="Previous hero slide">Previous</button><span className="wb-tech">THE FIRST EDIT</span><button type="button" onClick={()=>change(selected+1)} disabled={slides.length<2} aria-label="Next hero slide">Next</button></div></footer>
   </section>;
 }

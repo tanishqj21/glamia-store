@@ -650,9 +650,9 @@ async function renderPublicPage(request, env, ctx) {
   if (storefront === 'wibrawl') {
     html = html
       .replace('<html lang="en">', '<html lang="en" data-brand="wibrawl" data-theme="light">')
-      .replace('<link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg?v=glamia-vector" />', '<link rel="icon" type="image/svg+xml" sizes="any" href="/wibrawl/favicon.svg?v=afterimage" />')
+      .replace('<link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg?v=glamia-vector" />', '<link rel="icon" type="image/svg+xml" sizes="any" href="/wibrawl/favicon.svg?v=master-a" />')
       .replace('<link rel="apple-touch-icon" href="/glamia-g-favicon.png" />', '')
-      .replace('<div class="initial-loader-brand" role="img" aria-label="Glamia"><img class="glamia-loader-logo" src="/glamia/logo-light.svg" alt="" width="257" height="50" /></div>', '<div class="initial-loader-brand" role="img" aria-label="Wibrawl"><img class="wibrawl-logo" src="/wibrawl/logo.svg" alt="" width="280" height="59" /></div>');
+      .replace('<div class="initial-loader-brand" role="img" aria-label="Glamia"><img class="glamia-loader-logo" src="/glamia/logo-light.svg" alt="" width="257" height="50" /></div>', '<div class="initial-loader-brand" role="img" aria-label="Wibrawl"><img class="wibrawl-logo" src="/wibrawl/logo.svg?v=master-a" alt="" width="1025" height="815" /></div>');
   }
   const origin = canonicalOriginForRequest(url);
   const isBot = CRAWLER_UA.test(request.headers.get("User-Agent") || "");

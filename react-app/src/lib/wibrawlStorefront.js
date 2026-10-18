@@ -2,11 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 
 export const WibrawlCommerce = createContext(null);
 export const useWibrawlCommerce = () => useContext(WibrawlCommerce);
-export const WIBRAWL_COLLECTIONS = [
-  ['/just-arrived', 'New Signings', 'Fresh Drops'],
-  ['/best-sellers', 'League Leaders', 'Best Sellers'],
-  ['/offers', 'Matchday Deals', 'Timed Offers'],
-];
+
 
 // One clock per mounted storefront; cards do not each create a second timer.
 export function useWibrawlClock(enabled = true) {
