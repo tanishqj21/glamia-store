@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { useState } from 'react';
 import { AccountLayout } from './AccountLayout';
 import { Link } from './Header';

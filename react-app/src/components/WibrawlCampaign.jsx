@@ -1,9 +1,10 @@
+/** @jsxRuntime automatic */
 import { Link } from './Header';
-import { useWibrawlCommerce, wibrawlCountdown } from '../lib/wibrawlStorefront';
+import { useWibrawlClock, wibrawlCountdown } from '../lib/wibrawlStorefront';
 import { formatIST } from '../lib/commerce';
 
 export function WibrawlCampaign({ campaign, onNavigate }) {
-  const commerce = useWibrawlCommerce(), now = commerce?.now;
+  const now = useWibrawlClock(Boolean(campaign?.active && campaign.show_on_home !== false));
   if (!campaign || campaign.show_on_home === false || now == null) return null;
   const starts = Date.parse(campaign.starts_at || ''), ends = Date.parse(campaign.ends_at || '');
   if (!campaign.active || (Number.isFinite(starts) && starts > now) || (Number.isFinite(ends) && ends <= now)) return null;

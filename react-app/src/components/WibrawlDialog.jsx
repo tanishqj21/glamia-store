@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { useEffect, useId, useRef } from 'react';
 
 // Native dialogs supply focus containment, inert background and Escape handling.

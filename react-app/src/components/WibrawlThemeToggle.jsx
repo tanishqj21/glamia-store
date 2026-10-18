@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { GameController } from '@phosphor-icons/react/dist/csr/GameController';
 import { SoccerBall } from '@phosphor-icons/react/dist/csr/SoccerBall';
 

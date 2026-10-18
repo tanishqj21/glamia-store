@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { useState } from 'react';
 import { OrdersPanel } from './AccountPages';
 import { AccountLayout } from './AccountLayout';

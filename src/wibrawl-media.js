@@ -6,9 +6,17 @@ export const WIBRAWL_CAMPAIGN_SIZES = '(max-width: 700px) 100vw, (max-width: 160
 export const WIBRAWL_CAMPAIGN_AVIF = '/wibrawl/streetwear-campaign-1440.avif';
 export const WIBRAWL_CAMPAIGN_AVIF_SRCSET = '/wibrawl/streetwear-campaign-480.avif 480w, /wibrawl/streetwear-campaign-720.avif 720w, /wibrawl/streetwear-campaign-960.avif 960w, /wibrawl/streetwear-campaign-1440.avif 1440w';
 
+// Reuse the document's small image without replacing larger responsive sources.
+// Server and hydrated markup then select the same resource on every device.
+export function wibrawlCampaignSources(inline) {
+  return /^data:image\/avif;base64,[A-Za-z0-9+/=]+$/.test(inline || '') && inline.length <= 65600
+    ? WIBRAWL_CAMPAIGN_AVIF_SRCSET.replace('/wibrawl/streetwear-campaign-480.avif', inline)
+    : inline || WIBRAWL_CAMPAIGN_AVIF_SRCSET;
+}
+
 // Only the bundled concept images have these small variants. Uploaded product
 // images keep their existing source; full hero frames keep their original size.
 export function wibrawlProductLinkImage(source) {
-  return /^\/wibrawl\/(gaming|sports)-campaign-(?:640|960)\.webp$/.test(source)
+  return /^(?:https:\/\/(?:wibrawl\.)?glamiastore\.com)?\/wibrawl\/(gaming|sports)-campaign-(?:640|960)\.webp$/.test(source)
     ? source.replace(/-(?:640|960)\.webp$/, '-96.webp') : source;
 }

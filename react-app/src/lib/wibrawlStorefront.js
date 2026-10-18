@@ -1,20 +1,42 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useSyncExternalStore } from 'react';
 
 export const WibrawlCommerce = createContext(null);
 export const useWibrawlCommerce = () => useContext(WibrawlCommerce);
 
 
-// One clock per mounted storefront; cards do not each create a second timer.
+// Only time-dependent leaves subscribe. The storefront/cart/auth tree never
+// renders on a one-second tick. All leaves share one visibility-aware timer.
+const clockListeners = new Set();
+let clockNow = null, clockTimer;
+const noSubscription = () => () => {};
+const serverClock = () => null;
+function tickClock() {
+  clearTimeout(clockTimer);
+  clockNow = Date.now();
+  clockListeners.forEach(listener => listener());
+  if (clockListeners.size && !document.hidden) clockTimer = setTimeout(tickClock, 1000 - Date.now() % 1000);
+}
+function subscribeClock(listener) {
+  clockListeners.add(listener);
+  if (clockListeners.size === 1) { document.addEventListener('visibilitychange', tickClock); tickClock(); }
+  return () => {
+    clockListeners.delete(listener);
+    if (!clockListeners.size) { clearTimeout(clockTimer); clockNow = null; document.removeEventListener('visibilitychange', tickClock); }
+  };
+}
 export function useWibrawlClock(enabled = true) {
-  const [now, setNow] = useState(null);
-  useEffect(() => {
-    if (!enabled) return;
-    let timer;
-    const tick = () => { clearTimeout(timer); setNow(Date.now()); if (!document.hidden) timer = setTimeout(tick, 1000 - Date.now() % 1000); };
-    tick(); document.addEventListener('visibilitychange', tick);
-    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', tick); };
-  }, [enabled]);
-  return now;
+  return useSyncExternalStore(enabled ? subscribeClock : noSubscription, enabled ? () => clockNow : serverClock, serverClock);
+}
+function scheduledDeal(product) {
+  return product?.deal_price != null && Date.parse(product.deal_ends_at || '') > Date.now();
+}
+export function useWibrawlDealActive(product) {
+  // A boolean snapshot changes only at a deal boundary, not every second.
+  return useSyncExternalStore(scheduledDeal(product) ? subscribeClock : noSubscription, () => wibrawlDeal(product, clockNow), () => false);
+}
+export function useWibrawlLiveDealIds(products, enabled) {
+  return useSyncExternalStore(enabled && products.some(scheduledDeal) ? subscribeClock : noSubscription,
+    () => products.filter(product => wibrawlDeal(product, clockNow)).map(product => product.id).join(','), () => '');
 }
 
 export function orderedWibrawlImages(product) {

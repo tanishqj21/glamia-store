@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { useState } from 'react';
 import { money } from '../lib/commerce';
 import { wibrawlTaxEstimate } from '../lib/wibrawlCommerceUI';

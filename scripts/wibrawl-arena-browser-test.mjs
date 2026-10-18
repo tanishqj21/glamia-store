@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 const base = process.env.WIBRAWL_TEST_URL || 'http://127.0.0.1:5174';
 assert.ok(['localhost', '127.0.0.1'].includes(new URL(base).hostname));
 const output = 'tmp/wibrawl-arena-review'; mkdirSync(output, { recursive: true });
-await build({ entryPoints: ['src/homepage-shell.jsx','src/product-shell.jsx','src/cart-shell.jsx'], bundle: true, platform: 'node', format: 'esm', packages: 'external', outdir: 'tmp/wibrawl-ssr', jsx: 'automatic', logLevel: 'silent' });
+await build({ entryPoints: ['src/homepage-shell.jsx','src/product-shell.jsx','src/cart-shell.jsx'], bundle: true, platform: 'node', format: 'esm', packages: 'external', outdir: 'tmp/wibrawl-ssr', jsx: 'transform', logLevel: 'silent' });
 const end = new Date(Date.now() + 3600000).toISOString();
 const products = ['Courtside Tee', 'Midnight Tee', 'The Away Kit', 'First Team Tee'].map((name, i) => ({
   id: `tee-${i}`, name, category: 'Graphic Tees', subcategory: 'Original Prints', brand: 'Wibrawl',

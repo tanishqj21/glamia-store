@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { useState } from 'react';
 
 export function WibrawlTimeline({ page }) {

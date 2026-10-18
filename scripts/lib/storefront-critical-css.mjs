@@ -3,6 +3,10 @@ import postcss from 'postcss';
 // Only the server-rendered header, hero, promises, event and editorial need
 // inline CSS. The unmodified full stylesheet still loads before React mounts.
 const shellClass = /^(?:app-shell|skip-link|sr-only|announce(?:-.+)?|site-header|menu-button|tool-button|quick-links|wordmark|header-tools|header-credits|search-box|search-suggest(?:-.+)?|login-link|account(?:-.+)?|heart-link|nav(?:-.+)?|menu(?:-.+)?|cinematic-(?:home(?:-.+)?|copy|words|stage|frame(?:-.+)?|arrow|prev|next|progress)|hero-gradient(?:-.+)?|primary-action|secondary-action|text-link|eyebrow|trust-(?:strip(?:-.+)?|promise)|campaign-feature(?:-.+)?|event-theme-.+|homepage-editorial(?:-.+)?|active|muted)$/;
+// Wibrawl's first document contains the command bar, hero, hubs and footer.
+// Catalogue/account/admin and retired-layout rules arrive in the deferred CSS.
+const wibrawlShellClass = /^(?:wibrawl-(?:shell|logo|primary-action|secondary-action)|wb-(?:storefront|tech|hint(?:-badge)?|header(?:-.+)?|command-.+|logo-badge|hub-bar|category-trigger|icon-action|search-trigger|mode-switch|credit-badge|count|dock-symbol|arena-.+|hero--.+|poster-hud|collage-.+|split-.+|spine-loop|home-(?:telemetry|hubs|hub-sign|signoff)|stadium-footer|footer-.+|catalog-deck|product-spec-page)|is-current|is-paused)$/;
+const wibrawlSharedClass = /^(?:app-shell|skip-link|sr-only|announce(?:-.+)?|primary-action|secondary-action|text-link|trust-(?:strip(?:-.+)?|promise)|ui-icon|cart-link|cart-count|glamia-logo|active|muted)$/;
 
 export function criticalStorefrontCss(css, additionalClass = () => false, { storefront = 'both' } = {}) {
   const root = postcss.parse(css);
@@ -15,6 +19,7 @@ export function criticalStorefrontCss(css, additionalClass = () => false, { stor
       // the negated private class is not a dependency of the visible shell.
       const positiveSelector = selector.replace(/:not\([^)]*\)/g, '');
       const classes = [...positiveSelector.matchAll(/\.([a-zA-Z_][\w-]*)/g)].map(match => match[1]);
+      if (storefront === 'wibrawl' && classes.some(name => !wibrawlShellClass.test(name) && !wibrawlSharedClass.test(name))) return false;
       if (classes.some(name => /^(?:admin-|wibrawl-admin-|wibrawl-preview-)/.test(name))) return false;
       if (storefront === 'glamia' && (/data-brand=["']?wibrawl/.test(selector) || classes.some(name => /^wb-/.test(name) || /^wibrawl-/.test(name) && !['wibrawl-store-link', 'wibrawl-store-pill'].includes(name)))) return false;
       if (storefront === 'wibrawl' && classes.some(name => /^(?:cinematic-(?:home|copy|words|stage|frame|arrow|prev|next|progress)|homepage-editorial|campaign-feature)/.test(name))) return false;

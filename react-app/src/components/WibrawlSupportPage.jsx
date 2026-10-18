@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { useEffect, useState } from 'react';
 import { CustomerSupportPage } from './CustomerCare';
 import { AccountLayout } from './AccountLayout';

@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from 'react';
 import { GameController } from '@phosphor-icons/react/dist/csr/GameController';
 import { SoccerBall } from '@phosphor-icons/react/dist/csr/SoccerBall';

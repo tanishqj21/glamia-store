@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { Link } from './Header';
 import { Icon } from './Icon';
 import { useWibrawlPersona } from '../lib/wibrawlPersona';

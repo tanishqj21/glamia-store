@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { cloneElement, useId } from 'react';
 
 export function WibrawlHint({ label, children, id: stableId }) {

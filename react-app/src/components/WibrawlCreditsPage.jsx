@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { useState } from 'react';
 import { StoreCreditsPage } from './StoreCredits';
 import { AccountLayout } from './AccountLayout';

@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 export function WibrawlReturnLifecycle({ request }) {
   let logistics={};try {logistics=JSON.parse(request.logistics_json || '{}') || {};}catch { /* Older requests may lack saved logistics. */ }
   const stopped=['rejected','cancelled'].includes(request.status);

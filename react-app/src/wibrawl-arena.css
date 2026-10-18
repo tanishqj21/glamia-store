@@ -154,7 +154,7 @@
 .wb-storefront .wb-spec-colours{position:absolute;bottom:70px;left:12px;display:flex;gap:6px;z-index:1}
 .wb-storefront .wb-spec-colours button{background:var(--wb-bg-surface);border:1px solid var(--wb-border);border-radius:20px;padding:5px;min-width:30px;min-height:25px;display:grid;place-items:center}
 .wb-storefront .wb-spec-colours button[aria-pressed=true]{outline:1px solid var(--wb-text-primary);outline-offset:2px}
-.wb-storefront .wb-spec-colours button>span{display:block;width:18px;height:12px;border-radius:12px;border:1px solid #8886}
+.wb-storefront .wb-spec-colours button>.wb-colour-swatch{display:block;width:18px;height:12px;border-radius:12px;border:1px solid #8886}
 .wb-storefront .wb-spec-quickadd{position:absolute;bottom:0;left:0;right:0;padding:10px;background:var(--wb-bg-glass);backdrop-filter:blur(16px);border-top:1px solid var(--wb-border);transform:translateY(calc(100% - 32px));transition:transform .25s}
 .wb-storefront .wb-spec-card:is(:hover,:focus-within) .wb-spec-quickadd{transform:translateY(0)}
 .wb-storefront .wb-spec-quickadd>div:first-child{display:flex;justify-content:space-between;gap:8px;align-items:center}
@@ -234,7 +234,7 @@
 .wb-storefront .wb-loadout-colours>div{display:flex;flex-wrap:wrap;gap:8px;margin-block:14px 24px}
 .wb-storefront .wb-loadout-colours button{display:flex;align-items:center;gap:10px;padding:10px 12px;font-size:11px;background:transparent;color:var(--wb-text-primary);border:1px solid var(--wb-border)}
 .wb-storefront .wb-loadout-colours button[aria-pressed=true]{border-color:var(--wb-text-primary)}
-.wb-storefront .wb-loadout-colours button>span{width:16px;height:16px;border-radius:50%;border:1px solid #8886}
+.wb-storefront .wb-loadout-colours button>.wb-colour-swatch{width:16px;height:16px;border-radius:50%;border:1px solid #8886}
 .wb-storefront .wb-loadout-size-head{display:flex;justify-content:space-between;gap:16px;font-size:11px;align-items:center;margin-bottom:14px}
 .wb-storefront .wb-loadout-matrix{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:12px}
 .wb-storefront .wb-loadout-matrix button{display:grid;gap:6px;justify-items:center;padding:14px 6px;background:var(--wb-bg-surface);color:var(--wb-text-primary);border:1px solid var(--wb-border)}
@@ -300,3 +300,11 @@
 .wb-cart-flight-piece img{display:block;width:100%;height:100%;pointer-events:none}
 .wb-storefront .wb-command-bar .wb-cart-confirmed{outline:2px solid var(--wb-accent);outline-offset:3px}
 @media(prefers-reduced-motion:reduce){.wb-cart-flight{display:none}}
+
+/* Scrolling does not need a separate backdrop raster for each product tile. */
+.wb-storefront .wb-spec-quickadd{backdrop-filter:none;background:var(--wb-bg-surface)}
+.wb-storefront .wb-arena-pieces article,.wb-storefront .wb-split-label{backdrop-filter:none}
+.wb-storefront .wb-command-bar{backdrop-filter:blur(8px)}
+@media(max-width:767px){.wb-storefront .wb-command-bar,.wb-storefront .wb-mobile-loadout{backdrop-filter:none;background:var(--wb-bg-primary)}.wb-storefront .wb-command-dock{backdrop-filter:blur(8px)}}
+
+.wb-storefront .wb-colour-swatch{display:block;flex-shrink:0;overflow:hidden}

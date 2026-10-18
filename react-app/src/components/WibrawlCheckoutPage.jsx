@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { CheckoutPage } from './CheckoutPage';
 import { PhoneField, composePhone, splitPhone } from './PhoneField';
 import { CouponBox } from './CouponBox';

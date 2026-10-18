@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { useState } from 'react';
 import { AfterSalesDialog } from './CustomerCare';
 import { WibrawlDialog } from './WibrawlDialog';

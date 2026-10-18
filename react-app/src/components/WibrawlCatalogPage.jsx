@@ -1,3 +1,4 @@
+/** @jsxRuntime automatic */
 import { useState } from 'react';
 import { useCatalogue } from '../lib/useCatalogue';
 import { useWibrawlPersona } from '../lib/wibrawlPersona';
