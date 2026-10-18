@@ -17,7 +17,7 @@ function colourwaySwatchClass(value) {
   return "colourway-swatch-accent";
 }
 
-export function QuickView({ product, onClose, onNavigate, addToCart, eventLive = false }) {
+export function QuickView({ product, onClose, onNavigate, addToCart, eventLive = false, wibrawlMode = false }) {
   const dialog = useRef(null);
   const [size, setSize] = useState("");
   const [message, setMessage] = useState("");
@@ -49,8 +49,8 @@ export function QuickView({ product, onClose, onNavigate, addToCart, eventLive =
     <div className="modal-copy"><p className="eyebrow">{displayProduct.brand || displayProduct.category}</p><h2 id="modal-title">{displayProduct.name}</h2><SpecialPrice product={displayProduct} eventLive={eventLive} className="modal-price" /><ProductGuarantees compact returnable={displayProduct.returnable} />{preorder && <p className="preorder-detail-note"><strong>Pre-order available</strong>{preorderRelease && <span>Expected release: {preorderRelease}</span>}{preorderCapacity !== null && <span>{preorderCapacity > 0 ? `${preorderCapacity} reservation${preorderCapacity === 1 ? "" : "s"} remaining` : "Pre-order limit reached"}</span>}</p>}
       {!!displayProduct.sizes?.length && <div className="size-list"><strong>Select size</strong><div>{displayProduct.sizes.map((value) => <button type="button" key={value} disabled={!availableQuantity(displayProduct, value)} aria-pressed={size === value} className={size === value ? "selected" : ""} onClick={() => { setSize(value); setMessage(""); }}>{value}</button>)}</div></div>}
       {colourways.length > 1 && <div className="colourway-picker quick-view-colourways"><strong>Colour</strong><div>{colourways.map((colourway) => <button type="button" className={colourway.id === displayProduct.id ? "selected" : ""} key={colourway.id} onClick={() => { onClose(); onNavigate(productUrl(colourway)); }}><span className={`colourway-swatch ${colourwaySwatchClass(colourway.color)}`} style={colourSwatchStyle(colourway.color, colourway.color_hex)} aria-label={colourway.color || "Colourway"} role="img" />{colourway.color || "Colourway"}</button>)}</div></div>}
-      <button className="primary-action" onClick={() => { if (displayProduct.sizes?.length && !size) return setMessage("Choose a size first."); if (!availableQuantity(displayProduct, size)) return setMessage(preorder ? "The pre-order limit has been reached." : "This selection is out of stock."); addToCart(displayProduct, size); onClose(); onNavigate("/cart"); }}>{preorder ? "Pre-order now" : "Add to bag"} <Icon name="bag" size={18} /></button>
-      {message && <p role="alert">{message}</p>}
+      <button className="primary-action" onClick={(event) => { if (displayProduct.sizes?.length && !size) return setMessage("Choose a size first."); if (!availableQuantity(displayProduct, size)) return setMessage(preorder ? "The pre-order limit has been reached." : "This selection is out of stock."); addToCart(displayProduct, size, { source: dialog.current?.querySelector(".modal-image"), trigger: event.currentTarget }); if (wibrawlMode) setMessage("Added to your cart."); else { onClose(); onNavigate("/cart"); } }}>{preorder ? "Pre-order now" : "Add to bag"} <Icon name="bag" size={18} /></button>
+      {message && <p role={wibrawlMode ? "status" : "alert"}>{message}</p>}{wibrawlMode && message === "Added to your cart." && <button type="button" className="secondary-action" onClick={() => { onClose(); onNavigate("/cart"); }}>View bag</button>}
       <a href={productUrl(displayProduct)} onClick={(event) => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); onClose(); onNavigate(event.currentTarget.getAttribute("href")); }}>View full details</a>
     </div>
   </dialog>;
