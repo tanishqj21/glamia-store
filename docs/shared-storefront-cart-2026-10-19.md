@@ -41,3 +41,11 @@ Tests: `scripts/shared-storefront-cart.test.mjs` (experimental VM modules),
 `scripts/shared-storefront-cart-browser-test.mjs` (build first into
 `tmp/shared-cart-app-dist`), and existing Wibrawl / saved-item regressions.
 Reports: `tmp/shared-cart-review/`, `tmp/shared-cart-*.log`.
+
+Production release: implementation commit 5fec83c, Cloudflare version
+`c0ee752c-e31a-456c-9059-5312d1030c70`. Read-only live verification passed on
+both domains: reviewed HTML/build and timeline assets, shared explicit cart
+lookups, scoped browsing catalogues, cross-domain product redirects with size,
+and public product detail lookup for cross-store checkout. No live order, cart,
+inventory, credit or payment mutations were performed during verification.
+Run `node scripts/shared-storefront-cart-live-check.mjs` for the public checks.
