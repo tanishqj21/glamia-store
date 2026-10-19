@@ -1,6 +1,7 @@
 // One source of truth for the storefront's public hostname and collection names.
 export const WIBRAWL_HOSTNAME = 'wibrawl.glamiastore.com';
 export const WIBRAWL_ORIGIN = `https://${WIBRAWL_HOSTNAME}`;
+export const GLAMIA_ORIGIN = 'https://glamiastore.com';
 export const STOREFRONT_ORIGINS = Object.freeze([
   'https://glamiastore.com', 'https://www.glamiastore.com', WIBRAWL_ORIGIN
 ]);
@@ -16,6 +17,16 @@ export function isWibrawlUrl(input) {
 
 export function storefrontForUrl(input) {
   return isWibrawlUrl(input) ? 'wibrawl' : 'glamia';
+}
+
+// Shared products stay on the current store; exclusive products open on their owner.
+export function productStorefront(product, current = 'glamia') {
+  const visibility = product?.storefront_visibility || 'glamia';
+  return visibility === 'both' ? current : visibility === 'wibrawl' ? 'wibrawl' : 'glamia';
+}
+
+export function storefrontOrigin(storefront) {
+  return storefront === 'wibrawl' ? WIBRAWL_ORIGIN : GLAMIA_ORIGIN;
 }
 
 export function collectionNames(theme) {

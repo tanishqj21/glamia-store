@@ -74,9 +74,6 @@
 .wb-storefront .wb-ledger article>div{display:grid;gap:8px}
 .wb-storefront .wb-ledger b{font:700 1.2rem var(--wb-mono);white-space:nowrap}
 .wb-storefront .wb-credit-positive{color:var(--wb-accent-text)}
-.wb-storefront .wb-fulfilment{list-style:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:0;margin:24px 0;gap:6px}
-.wb-storefront .wb-fulfilment li{display:grid;gap:8px;border-top:3px solid var(--wb-border);padding-top:12px;font-size:11px;color:var(--wb-text-muted)}
-.wb-storefront .wb-fulfilment li.is-done{border-color:var(--wb-accent);color:var(--wb-text-primary)}
 .wb-storefront .wb-tracking{border:1px solid var(--wb-border);padding:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .wb-storefront .wb-tracking>span:first-child{width:100%}
 .wb-storefront .wb-tracking code{overflow-wrap:anywhere}

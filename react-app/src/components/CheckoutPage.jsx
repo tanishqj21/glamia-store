@@ -137,7 +137,7 @@ export function CheckoutPage({ cart, products, user, addresses, appliedCoupon, o
       try {
         const [catalog, settings] = await Promise.all([
           Promise.all(JSON.parse(cartIds).map(async (id) => {
-            const response = await apiFetch(`/api/products/${encodeURIComponent(id)}`, { cache: "no-store" });
+            const response = await apiFetch(`/api/products/${encodeURIComponent(id)}?scope=cart`, { cache: "no-store" });
             if (response.status === 404) return null;
             if (!response.ok) throw new Error("Could not verify your bag. Refresh this page to retry.");
             return (await response.json()).product;

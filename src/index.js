@@ -18,7 +18,7 @@ import { storefrontCss, wibrawlStorefrontCss, wibrawlStorefrontStyleHash, storef
 import { inlineProductImage } from './product-image-bootstrap.js';
 import { normalizeWibrawlReels } from './wibrawl-reels.js';
 import { wibrawlFirstScreenImage } from './wibrawl-first-screen-image.js';
-import { WIBRAWL_HOSTNAME, WIBRAWL_ORIGIN, STOREFRONT_ORIGINS, WIBRAWL_HERO_LAYOUTS, storefrontForUrl } from './storefront-identity.js';
+import { WIBRAWL_HOSTNAME, WIBRAWL_ORIGIN, STOREFRONT_ORIGINS, WIBRAWL_HERO_LAYOUTS, storefrontForUrl, productStorefront, storefrontOrigin } from './storefront-identity.js';
 
 const SESSION_COOKIE = "mm_session";
 const HOST_SESSION_COOKIE = "__Host-mm_session";
@@ -105,7 +105,7 @@ const R2_CLEANUP_PREFIXES = ["products/", "product-videos/", "reviews/"];
 const CANONICAL_ORIGIN = "https://glamiastore.com";
 const PRODUCTION_HOSTNAMES = new Set(["glamiastore.com", "www.glamiastore.com", WIBRAWL_HOSTNAME]);
 const storefrontForRequest = storefrontForUrl;
-const PUBLIC_CACHE_VERSION = `2026-10-15-ist-seconds-v53-${storefrontStyleHash.slice(0, 12)}-${wibrawlStorefrontStyleHash.slice(0, 12)}`;
+const PUBLIC_CACHE_VERSION = `2026-10-19-shared-bag-v54-${storefrontStyleHash.slice(0, 12)}-${wibrawlStorefrontStyleHash.slice(0, 12)}`;
 const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
 const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 const PHONEPE_SANDBOX_BASE = "https://api-preprod.phonepe.com/apis/pg-sandbox";
@@ -688,9 +688,15 @@ async function renderPublicPage(request, env, ctx) {
     const resolvedId = canonicalId?.toLowerCase() || await resolveProductReference(env, productReference, pathContext);
     const visibility = storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
     const row = resolvedId ? await env.DB.prepare(`${PRODUCT_SELECT}
-      WHERE p.id = ? AND p.status = 'live' AND COALESCE(p.storefront_visibility, 'glamia') IN ${visibility}
+      WHERE p.id = ? AND p.status = 'live'
       GROUP BY p.id`).bind(resolvedId).first() : null;
     if (!row) return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+    const owner = productStorefront(row, storefront);
+    if (owner !== storefront) {
+      const destination = new URL(canonicalProductPath(row), storefrontOrigin(owner));
+      if (url.searchParams.has('size')) destination.searchParams.set('size', url.searchParams.get('size'));
+      return Response.redirect(destination.href, 302);
+    }
     const [[stockProduct], siblingColours] = await Promise.all([
       withSizeStock(env, [row]),
       row.color_group_id ? env.DB.prepare(`SELECT color FROM products WHERE color_group_id=? AND status='live' AND COALESCE(storefront_visibility, 'glamia') IN ${visibility}`).bind(row.color_group_id).all() : Promise.resolve({ results: [] })
@@ -1907,7 +1913,7 @@ async function routeApi(request, env, url, ctx) {
     const context = url.searchParams.has("category") || url.searchParams.has("subcategory")
       ? { category: url.searchParams.get("category") || "", subcategory: url.searchParams.get("subcategory") || "" }
       : null;
-    return getProduct(env, user, decodeURIComponent(productResource[1]), context, storefrontForRequest(url));
+    return getProduct(env, url.searchParams.get('scope') === 'cart' ? null : user, decodeURIComponent(productResource[1]), context, url.searchParams.get('scope') === 'cart' ? 'all' : storefrontForRequest(url));
   }
   if (productResource && request.method === "DELETE") {
     requireUser(user);
@@ -2789,7 +2795,7 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
     return json({ products: await withSizeStock(env, results) });
   }
 
-  const visibility = storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
+  const visibility = scope === "cart" ? "('glamia', 'wibrawl', 'both')" : storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
   const where = ["p.status = 'live'", `COALESCE(p.storefront_visibility, 'glamia') IN ${visibility}`];
   const activePrice="CASE WHEN p.deal_price IS NOT NULL AND (p.deal_starts_at IS NULL OR julianday(p.deal_starts_at)<=julianday('now')) AND julianday(p.deal_ends_at)>julianday('now') THEN p.deal_price ELSE p.price END";
   const bindings = [];
@@ -2797,6 +2803,7 @@ async function listProducts(env, user, scope, searchParams = new URLSearchParams
     .split(",")
     .map((id) => id.trim())
     .filter(Boolean))].slice(0, 100);
+  if (scope === "cart" && !requestedIds.length) throw httpError("Provide product IDs for your bag", 400);
   const category = String(searchParams.get("category") || "").trim();
   const subcategory = String(searchParams.get("subcategory") || "").trim();
   const color = String(searchParams.get("color") || "").trim();
@@ -3145,7 +3152,7 @@ async function resolveProductReference(env, reference, context = null) {
 async function getProduct(env, user, reference, context = null, storefront = "glamia") {
   const canManage = user?.role === "admin";
   const sellerEmail = String(user?.email || "").toLowerCase();
-  const visibility = storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
+  const visibility = storefront === "all" ? "('glamia', 'wibrawl', 'both')" : storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
   const resolvedId = await resolveProductReference(env, reference, context);
   if (!resolvedId) return json({ error: "Product not found" }, 404);
   const row = await env.DB.prepare(`${PRODUCT_SELECT}
@@ -3153,7 +3160,11 @@ async function getProduct(env, user, reference, context = null, storefront = "gl
     GROUP BY p.id`)
     .bind(resolvedId, canManage ? 1 : 0, sellerEmail)
     .first();
-  if (!row) return json({ error: "Product not found" }, 404);
+  if (!row) {
+    const exclusive = await env.DB.prepare("SELECT * FROM products WHERE id = ? AND status = 'live'").bind(resolvedId).first();
+    if (exclusive && productStorefront(exclusive, storefront) !== storefront) return json({ error: "This product belongs to the other store", redirect_url: storefrontOrigin(productStorefront(exclusive, storefront)) + canonicalProductPath(exclusive) }, 409);
+    return json({ error: "Product not found" }, 404);
+  }
   let colourwayRows = [];
   if (row.variant_group) {
     const { results } = await env.DB.prepare(`${PRODUCT_SELECT}
@@ -7566,11 +7577,11 @@ function normalizeOrderItems(rawItems) {
   return [...merged.values()];
 }
 
-async function loadLiveProductsById(env, requested, storefront = "glamia") {
+async function loadLiveProductsById(env, requested) {
   const ids = [...new Set(requested.map(item => String(item.id || "").trim()).filter(Boolean))];
   if (!ids.length) return new Map();
   const placeholders = ids.map(() => "?").join(",");
-  const visibility = storefront === "wibrawl" ? "('wibrawl', 'both')" : "('glamia', 'both')";
+  const visibility = "('glamia', 'wibrawl', 'both')";
   const { results } = await env.DB.prepare(`SELECT * FROM products WHERE status = 'live' AND COALESCE(storefront_visibility, 'glamia') IN ${visibility} AND id IN (${placeholders})`)
     .bind(...ids).all();
   return new Map(results.map(row => [row.id, row]));
@@ -8266,7 +8277,7 @@ async function createOrder(request, env, user, { allowGateway = false, body: pro
   const trackingToken = crypto.randomUUID().replace(/-/g, "");
 
   const [catalog, sizeRowsByProduct] = await Promise.all([
-    loadLiveProductsById(env, requested, requestStorefront),
+    loadLiveProductsById(env, requested),
     loadSizeRowsByProduct(env, requested)
   ]);
 
@@ -10762,7 +10773,7 @@ async function validateCoupon(request, env, user) {
   const coupon = couponForCustomer(storedCoupon, env, user);
   const availabilityError = await couponAvailability(coupon, env, user);
   if (availabilityError) return json({ error: availabilityError }, 400);
-  const catalog = await loadLiveProductsById(env, requested, storefrontForRequest(new URL(request.url)));
+  const catalog = await loadLiveProductsById(env, requested);
   const cartSubtotal = requested.reduce((sum, entry) => {
     const row = catalog.get(entry.id);
     return sum + (row ? effectivePrice(row) * Math.max(1, Math.floor(Number(entry.quantity) || 1)) : 0);
@@ -10803,7 +10814,7 @@ async function listAvailableCoupons(request, env, user) {
   const { results } = await env.DB.prepare(
     "SELECT * FROM coupons WHERE active = 1 OR ? = 1 ORDER BY created_at DESC LIMIT 25"
   ).bind(isWhitelistedCouponAdmin(env,user) ? 1 : 0).all();
-  const catalog = await loadLiveProductsById(env, requested, storefrontForRequest(new URL(request.url)));
+  const catalog = await loadLiveProductsById(env, requested);
   const cartSubtotal = requested.reduce((sum, entry) => {
     const row = catalog.get(entry.id);
     return sum + (row ? effectivePrice(row) * Math.max(1, Math.floor(Number(entry.quantity) || 1)) : 0);

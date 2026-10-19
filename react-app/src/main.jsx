@@ -10,7 +10,7 @@ import { wibrawlPersona } from './lib/wibrawlPersona';
 
 import { useWibrawlTheme } from './lib/useWibrawlTheme';
 import { useWibrawlCartMotion } from './lib/useWibrawlCartMotion';
-import { isWibrawlUrl } from '../../src/storefront-identity.js';
+import { isWibrawlUrl, STOREFRONT_ORIGINS } from '../../src/storefront-identity.js';
 import { StorePromises, CampaignFeature, CinematicHero, HomepageEditorial } from './components/HomepagePresentation';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
@@ -27,7 +27,7 @@ import { Icon } from "./components/Icon";
 
 import { CinematicReel } from "./components/CinematicReel";
 import { MobileAppDownload } from "./components/MobileAppDownload";
-import { cleanSavedCart, cleanSavedWishlist, savedItemChanges, savedItemSnapshot, hasSavedItemChanges } from "./lib/savedItems";
+import { savedItemChanges, savedItemSnapshot, hasSavedItemChanges } from "./lib/savedItems";
 import { useSavedForLater } from "./lib/useSavedForLater";
 import { readSavedForLater, savedForLaterKey } from "./lib/savedForLater";
 
@@ -136,6 +136,7 @@ function useRoute() {
   }, []);
   return [route, (next) => {
     const target = new URL(next, window.location.origin);
+    if (target.origin !== window.location.origin) { window.location.assign(target.href); return; }
     window.history.pushState({}, "", `${target.pathname}${target.search}${target.hash}`);
     setRoute(currentPath());
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -291,6 +292,8 @@ function App() {
   const savedForLater = useSavedForLater(user?.email, sessionReady);
   const { items: laterItems, ready: laterReady, replaceItems: replaceLaterItems, getBaseline: getLaterBaseline } = savedForLater;
   const [savedSyncError, setSavedSyncError] = useState("");
+  const [crossStoreError, setCrossStoreError] = useState("");
+  const crossStoreNavigation = useRef(false);
   const [savedConnectTick, setSavedConnectTick] = useState(0);
   const savedCurrentRef = useRef({ cart: [], wishlist: [] });
   const savedServerRef = useRef({ cart: [], wishlist: [] });
@@ -400,7 +403,7 @@ function App() {
       if (savedSyncEmailRef.current !== String(user.email).toLowerCase()) { setSavedConnectTick(value => value + 1); return; }
       const pending = savedItemChanges(savedServerRef.current, savedCurrentRef.current);
       if (hasSavedItemChanges(pending)) { setSavedSyncTick(value => value + 1); return; }
-      if (Date.now() - savedLastReadRef.current < 60000) return;
+      if (Date.now() - savedLastReadRef.current < 250) return;
       savedLastReadRef.current = Date.now();
       apiFetch("/api/saved-items").then(response => response.ok ? response.json() : null).then(data => {
         if (!data || savedSyncEmailRef.current !== String(user.email).toLowerCase() || hasSavedItemChanges(savedItemChanges(savedServerRef.current, savedCurrentRef.current))) return;
@@ -419,7 +422,7 @@ function App() {
     window.addEventListener("glamia-refresh-saved-items", refreshSaved);
     return () => { document.removeEventListener("visibilitychange", refreshSaved); window.removeEventListener("online", refreshSaved); window.removeEventListener("focus", refreshSaved); window.removeEventListener("glamia-refresh-saved-items", refreshSaved); };
   }, [user?.email, replaceLaterItems]);
-  useEffect(() => { if (route === "/cart") window.dispatchEvent(new Event("glamia-refresh-saved-items")); }, [route]);
+  useEffect(() => { if (route === "/cart" || route === "/checkout") window.dispatchEvent(new Event("glamia-refresh-saved-items")); }, [route]);
   const accountCollectionsLoaded = useRef({ addresses: false, orders: false });
   async function loadAccountCollections({ addresses: loadAddresses = false, orders: loadOrders = false } = {}) {
     if (!user || (!loadAddresses && !loadOrders)) return;
@@ -563,13 +566,44 @@ function App() {
       return;
     }
     const delta = savedItemChanges(savedServerRef.current, savedCurrentRef.current);
-    if (!delta.cart.length && !delta.wishlist.length) return;
+    if (!hasSavedItemChanges(delta)) return;
     const response = await apiFetch("/api/saved-items", { method: "PATCH", body: JSON.stringify(delta) });
     if (!response.ok) throw new Error("Saved items could not be synced. Please try again.");
     const data = await response.json();
-    savedServerRef.current = { cart: cleanSavedCart(data.cart), wishlist: cleanSavedWishlist(data.wishlist) };
+    savedServerRef.current = savedItemSnapshot(data);
     writeStorage("glamia-saved-baseline", JSON.stringify(savedServerRef.current));
   }
+  // Finish account writes before a normal cross-store link unloads this origin.
+  useEffect(() => {
+    if (!user?.email) return undefined;
+    const email = String(user.email).toLowerCase();
+    const saveOnExit = () => {
+      if (savedSyncEmailRef.current !== email) return;
+      const delta = savedItemChanges(savedServerRef.current, savedCurrentRef.current);
+      if (hasSavedItemChanges(delta)) apiFetch('/api/saved-items', { method: 'PATCH', keepalive: true, body: JSON.stringify(delta) }).catch(() => {});
+    };
+    const followStoreLink = async event => {
+      const anchor = event.target.closest?.('a[href]');
+      if (event.defaultPrevented || event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !anchor || anchor.target || anchor.hasAttribute('download')) return;
+      const destination = new URL(anchor.href, window.location.origin);
+      if (destination.origin === window.location.origin || !STOREFRONT_ORIGINS.includes(destination.origin)) return;
+      event.preventDefault();
+      if (crossStoreNavigation.current) return;
+      crossStoreNavigation.current = true;
+      setCrossStoreError('');
+      try {
+        for (let attempt = 0; savedSyncEmailRef.current !== email && attempt < 50; attempt += 1) await new Promise(resolve => setTimeout(resolve, 100));
+        if (savedSyncEmailRef.current !== email) throw new Error('Your account bag is still syncing. Reconnect and select the store link again.');
+        await flushSavedBeforeLogout();
+        window.location.assign(destination.href);
+      } catch (cause) {
+        setCrossStoreError(cause.message || 'Your bag could not be synced. Please try the store link again.');
+      } finally { crossStoreNavigation.current = false; }
+    };
+    document.addEventListener('click', followStoreLink);
+    window.addEventListener('pagehide', saveOnExit);
+    return () => { document.removeEventListener('click', followStoreLink); window.removeEventListener('pagehide', saveOnExit); };
+  }, [user?.email]);
   function clearAccount() { accountCollectionsLoaded.current = { addresses: false, orders: false }; savedSyncEmailRef.current = ""; writeStorage("glamia-saved-sync-user", ""); writeStorage("glamia-saved-baseline", ""); setCart([]); setWishlist(new Set()); setUser(null); setNeedsProfileCompletion(false); setAddresses([]); setOrders([]); setSessionReady(true); }
   useEffect(() => {
     function handleAdminAuthFailure() {
@@ -645,7 +679,7 @@ let content = adminAccessLoading ? <main className="page-main"><div className="l
   if (salePopup && !isAdminRoute) content = <>{content}<SaleCampaignPopup campaign={salePopup} onClose={() => setSalePopup(null)} onNavigate={onNavigate} /></>;
   if (!usesReactRoute) return content;
   content = <Suspense fallback={<main className="page-main"><div className="loading-card" role="status" aria-live="polite">Preparing your edit…</div></main>}>{profileGate || (!(productRouteRef && document.getElementById('glamia-product-bootstrap')) && route !== "/" && !["/offers", "/just-arrived", "/best-sellers", "/search", "/cart"].includes(route) && !route.startsWith("/category/") && !categoryRoute) ? <RouteStyles>{content}</RouteStyles> : content}</Suspense>;
-  return <WibrawlCommerce.Provider value={isWibrawlStorefront && !isAdminRoute ? { products, addToCart, onProductLoaded: mergeLoadedProduct, onQuickView: setSelected, mode: wibrawlTheme, cartProps: { bootPending: !browserPreferencesReady, saved: savedForLater, syncError: savedSyncError, user, sessionReady, loading, cart, products, setCart, appliedCoupon, onCouponApplied: setAppliedCoupon, onCouponRemoved: () => setAppliedCoupon(null) } } : null}><div className={`app-shell ${isWibrawlStorefront ? `wibrawl-shell${!isAdminRoute ? " wb-storefront" : ""}` : ""}`} data-wibrawl-mode={isWibrawlStorefront && !isAdminRoute ? wibrawlTheme : undefined} data-wibrawl-theme={isWibrawlStorefront && !isAdminRoute ? (themeIsDark ? "dark" : "light") : undefined}><a className="skip-link" href="#main-content">Skip to content</a><Header onNavigate={onNavigate} query={query} setQuery={setQuery} dark={themeIsDark} setDark={setDark} wibrawlMode={isWibrawlStorefront} themeMode={wibrawlTheme} setThemeMode={setWibrawlTheme} menuOpen={menuOpen} setMenuOpen={setMenuOpen} categories={categories} categoryData={categoryData} products={products} wishlistCount={wishlist.size} cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)} user={user} storefront={storefront} onBeforeLogout={flushSavedBeforeLogout} onLogout={clearAccount} adminMode={isAdminRoute} /><div id="main-content" tabIndex={-1}>{content}</div>{selected && <Suspense fallback={<p className="inline-note" role="status">Loading product preview…</p>}><QuickView key={selected.id} wibrawlMode={isWibrawlStorefront && !isAdminRoute} product={selected} onClose={() => setSelected(null)} onNavigate={onNavigate} addToCart={addToCart} eventLive={eventLive} /></Suspense>}{isAdminRoute && adminToast && <div className="admin-save-toast" role="status" aria-live="polite"><Icon name="check" size={18} /><span>{adminToast.message}</span><button type="button" aria-label="Dismiss saved message" onClick={() => setAdminToast(null)}>×</button></div>}{isWibrawlStorefront && !isAdminRoute ? <WibrawlFooter storefront={storefront} onNavigate={onNavigate} mode={wibrawlTheme} /> : <StorefrontFooter storefront={storefront} onNavigate={onNavigate} wibrawlMode={isWibrawlStorefront} />}</div></WibrawlCommerce.Provider>;
+  return <WibrawlCommerce.Provider value={isWibrawlStorefront && !isAdminRoute ? { products, addToCart, onProductLoaded: mergeLoadedProduct, onQuickView: setSelected, mode: wibrawlTheme, cartProps: { bootPending: !browserPreferencesReady, saved: savedForLater, syncError: savedSyncError, user, sessionReady, loading, cart, products, setCart, appliedCoupon, onCouponApplied: setAppliedCoupon, onCouponRemoved: () => setAppliedCoupon(null) } } : null}><div className={`app-shell ${isWibrawlStorefront ? `wibrawl-shell${!isAdminRoute ? " wb-storefront" : ""}` : ""}`} data-wibrawl-mode={isWibrawlStorefront && !isAdminRoute ? wibrawlTheme : undefined} data-wibrawl-theme={isWibrawlStorefront && !isAdminRoute ? (themeIsDark ? "dark" : "light") : undefined}><a className="skip-link" href="#main-content">Skip to content</a><Header onNavigate={onNavigate} query={query} setQuery={setQuery} dark={themeIsDark} setDark={setDark} wibrawlMode={isWibrawlStorefront} themeMode={wibrawlTheme} setThemeMode={setWibrawlTheme} menuOpen={menuOpen} setMenuOpen={setMenuOpen} categories={categories} categoryData={categoryData} products={products} wishlistCount={wishlist.size} cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)} user={user} storefront={storefront} onBeforeLogout={flushSavedBeforeLogout} onLogout={clearAccount} adminMode={isAdminRoute} /><div id="main-content" tabIndex={-1}>{crossStoreError && <p className="inline-error" role="alert">{crossStoreError}</p>}{content}</div>{selected && <Suspense fallback={<p className="inline-note" role="status">Loading product preview…</p>}><QuickView key={selected.id} wibrawlMode={isWibrawlStorefront && !isAdminRoute} product={selected} onClose={() => setSelected(null)} onNavigate={onNavigate} addToCart={addToCart} eventLive={eventLive} /></Suspense>}{isAdminRoute && adminToast && <div className="admin-save-toast" role="status" aria-live="polite"><Icon name="check" size={18} /><span>{adminToast.message}</span><button type="button" aria-label="Dismiss saved message" onClick={() => setAdminToast(null)}>×</button></div>}{isWibrawlStorefront && !isAdminRoute ? <WibrawlFooter storefront={storefront} onNavigate={onNavigate} mode={wibrawlTheme} /> : <StorefrontFooter storefront={storefront} onNavigate={onNavigate} wibrawlMode={isWibrawlStorefront} />}</div></WibrawlCommerce.Provider>;
 }
 
 export async function mountApplication() {

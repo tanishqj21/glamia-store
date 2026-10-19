@@ -43,7 +43,8 @@ test('catalog and colourways obey admin storefront visibility', async t => {
   assert.deepEqual(gm.products.map(p => p.id).sort(), ['gm', 'shared']);
   const product = await (await worker.getProduct(env, null, 'wb', null, 'wibrawl')).json();
   assert.deepEqual(product.colourways.map(p => p.id).sort(), ['shared', 'wb']);
-  assert.equal((await worker.getProduct(env, null, 'gm', null, 'wibrawl')).status, 404);
+  const redirected = await worker.getProduct(env, null, 'gm', null, 'wibrawl');
+  assert.equal(redirected.status, 409); assert.ok((await redirected.json()).redirect_url.startsWith('https://glamiastore.com/'));
 });
 
 test('coupons validate and list against Wibrawl inventory', async t => {
@@ -54,10 +55,10 @@ test('coupons validate and list against Wibrawl inventory', async t => {
   assert.equal(response.status, 200); assert.equal((await response.json()).discount, 10);
   const offers = await (await worker.listAvailableCoupons(req(WIBRAWL_ORIGIN, body),env,buyer)).json();
   assert.ok(offers.coupons.some(coupon => coupon.code === 'TEST'));
-  assert.equal((await worker.validateCoupon(req('https://glamiastore.com',body),env,buyer)).status,400);
+  assert.equal((await worker.validateCoupon(req('https://glamiastore.com',body),env,buyer)).status,200);
 });
 
-test('real credit checkout creates WB orders and keeps GM orders separate', async t => {
+test('credit checkout uses the checkout store prefix, including cross-store products', async t => {
   const {db,env} = fixture(t);
   const purchase = (origin,id,token) => worker.createOrder(req(origin, {
     items:[{id,quantity:1}], payment_method:'store_credit',credits_used:100,
@@ -70,10 +71,10 @@ test('real credit checkout creates WB orders and keeps GM orders separate', asyn
   const gmResponse = await purchase('https://glamiastore.com','gm','gm');
   assert.equal(gmResponse.status,201);
   assert.match((await gmResponse.json()).order.order_number,/^GM-/);
-  await assert.rejects(purchase(WIBRAWL_ORIGIN,'gm','wrong-store'),/no longer available/);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM orders').get().n,2);
+  const cross = await purchase(WIBRAWL_ORIGIN,'gm','cross-store'); assert.equal(cross.status,201); assert.match((await cross.json()).order.order_number,/^WB-/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM orders').get().n,3);
   assert.equal(db.prepare("SELECT stock FROM products WHERE id='wb'").get().stock,49);
-  assert.equal(db.prepare('SELECT balance FROM store_credit_accounts WHERE user_email=?').get(buyer.email).balance,800);
+  assert.equal(db.prepare('SELECT balance FROM store_credit_accounts WHERE user_email=?').get(buyer.email).balance,700);
 });
 
 test('public sharing metadata identifies Wibrawl while About content is shared', async t => {
@@ -162,7 +163,7 @@ test('direct product links render the Wibrawl header and footer before JavaScrip
   assert.ok(!html.includes('id="initial-loader"'));
   assert.match(html,/\/wibrawl\/favicon.svg/);
   assert.match(html,/\/wibrawl\/logo.svg/);
-  assert.match(html,/<link rel="icon" type="image\/svg\+xml" sizes="any" href="\/wibrawl\/favicon.svg\?v=afterimage"/);
+  assert.match(html,/<link rel="icon" type="image\/svg\+xml" sizes="any" href="\/wibrawl\/favicon.svg\?v=master-a"/);
   assert.doesNotMatch(html,/<link[^>]+href="\/wibrawl\/(?:favicon|icon-192)\.png"/);
 });
 
@@ -171,9 +172,9 @@ test('Wibrawl homepage sends its active hero and scoped public settings before J
   db.prepare(`INSERT INTO hero_slides(id,eyebrow,title,tagline,cta_label,product_ids_json,storefront,imagery,active,position)
     VALUES('first-screen','The Wibrawl edit','YOUR VIBE. YOUR RULES.','Wear it your way.','Shop the edit','["wb"]','wibrawl','campaign',1,0)`).run();
   const html = await (await worker.renderPublicPage(new Request(WIBRAWL_ORIGIN),env)).text();
-  assert.match(html, /id="wibrawl-title"/);
+  assert.match(html, /class="wb-arena-hero/);
   assert.match(html, /YOUR VIBE\. YOUR RULES\./);
-  assert.match(html, /class="wibrawl-campaign-figure"/);
+  assert.match(html, /class="wb-arena-visual/);
   assert.match(html, /<source[^>]+srcSet="data:image\/avif;base64,/);
   assert.equal((html.match(/data:image\/avif;base64,/g) || []).length, 1, 'Campaign bytes must appear once, without a duplicate in bootstrap JSON');
   assert.ok(!/<link[^>]+as="image"[^>]+streetwear-campaign/.test(html));
@@ -185,7 +186,7 @@ test('Wibrawl homepage sends its active hero and scoped public settings before J
   assert.equal(bootstrap.hero.slides[0].frames[0].id,'wb');
   assert.ok(!Object.hasOwn(bootstrap,'user') && !Object.hasOwn(bootstrap.settings,'fulfillment'));
   const css = html.match(/id="glamia-storefront-styles">([^]*?)<\/style>/)[1];
-  assert.ok(css.includes('.wibrawl-hero') && !css.includes('.cinematic-copy'));
+  assert.ok(css.includes('.wb-arena-hero') && !css.includes('.cinematic-copy'));
   assert.ok(!css.includes('font-family:"Cormorant Garamond";font-style:normal;font-weight:400 600;font-display:swap;src:url(data:'));
   assert.ok(worker.withSecurityHeaders(new Response(html)).headers.get('Content-Security-Policy').includes(`'sha256-${createHash('sha256').update(css).digest('base64')}'`));
 });

@@ -1,4 +1,5 @@
 import { APP_TIME_ZONE, parseStoredTimestamp } from '../../../src/time-zone.js';
+import { productStorefront, storefrontOrigin, storefrontForUrl } from '../../../src/storefront-identity.js';
 
 export function sellingPrice(product, now = Date.now()) {
   const starts = product?.deal_starts_at ? Date.parse(product.deal_starts_at) : 0;
@@ -74,6 +75,13 @@ export function productUrl(product) {
     ? `${publicCode}-${internalId}`
     : stableId;
   return `/${category}/${subcategory}/${slug}-${suffix.toLowerCase()}`;
+}
+
+export function productStoreUrl(product, currentUrl = typeof window === 'undefined' ? null : window.location.href) {
+  const path = productUrl(product);
+  if (!currentUrl) return path;
+  const current = storefrontForUrl(currentUrl), owner = productStorefront(product, current);
+  return owner === current ? path : `${storefrontOrigin(owner)}${path}`;
 }
 
 export function refundDate(value) {

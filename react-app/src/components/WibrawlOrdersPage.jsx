@@ -11,12 +11,10 @@ import { CustomerRefundTracker } from './CustomerRefundTracker';
 import { CustomerExchangeTracker } from './CustomerReturnDetails';
 import { orderBucket, safeTrackingUrl } from '../lib/wibrawlCommerceUI';
 import { money, formatIST } from '../lib/commerce';
+import { WibrawlOrderTimeline } from './WibrawlOrderTimeline';
 
 export function WibrawlFulfilment({ order }) {
-  const delivered = order.status === 'delivered', shipped = delivered || ['shipped','in_transit','out_for_delivery'].includes(order.status);
-  const packed = shipped || order.packing_status === 'packed' || !!order.packed_at;
-  const confirmed = packed || ['confirmed','processing','packed'].includes(order.status) || order.payment_status === 'paid';
-  return <ol className="wb-fulfilment" aria-label="Fulfilment progress">{[['Confirmed',confirmed],['Packed',packed],['In transit',shipped],['Delivered',delivered]].map(([label,done],i) => <li className={done ? 'is-done' : ''} key={label}><span className="wb-tech">{String(i+1).padStart(2,'0')}</span><span>{label}</span></li>)}</ol>;
+  return <WibrawlOrderTimeline order={order} />;
 }
 function OrderBody({ order, m, detailed = false }) {
   const cases = m.returns.filter(r => r.order_id === order.id), active = cases.some(r => !['rejected','cancelled','refunded','completed'].includes(r.status));

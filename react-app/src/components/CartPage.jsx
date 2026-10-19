@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch } from "../lib/api";
-import { availableQuantity, isPreorder, money, sellingPrice } from "../lib/commerce";
+import { availableQuantity, isPreorder, money, sellingPrice, productStoreUrl } from "../lib/commerce";
+import { loadCartProducts } from '../lib/cartProducts';
+import { Link } from './Header';
 import { savedCartKey } from "../lib/savedItems";
 import { removeCartSelection, restoreCartSelection, savedSelectionAvailability } from "../lib/savedForLater";
 import { CouponBox } from "./CouponBox";
 import { CartFrame, CartLoadingContent } from './CartFrame';
 import '../cart-ui.css';
 
-function SelectionDetails({ item, product }) {
+function SelectionDetails({ item, product, onNavigate }) {
   return <>
-    <h2>{product?.name || "Unavailable item"}</h2>
+    <h2>{product ? <Link href={productStoreUrl(product)} onNavigate={onNavigate}>{product.name}</Link> : 'Unavailable item'}</h2>
     <p className="muted">{[item.size && `Size ${item.size}`, item.variant].filter(Boolean).join(" · ")}{isPreorder(product) && <span className="preorder-line-label"> Pre-order</span>}</p>
     <p>{product ? money(sellingPrice(product)) : "Currently unavailable"} · Quantity {item.quantity}</p>
   </>;
@@ -58,7 +59,7 @@ function CartContent({ cart, products, setCart, onNavigate, appliedCoupon, onCou
   const [retry, setRetry] = useState(0);
   const savedHeading = useRef(null);
   const byId = useMemo(() => new Map([...products, ...extraProducts].map(product => [product.id, product])), [products, extraProducts]);
-  const missingIds = [...new Set(saved.items.map(item => item.id).filter(id => {
+  const missingIds = [...new Set([...cart, ...saved.items].map(item => item.id).filter(id => {
     const product = byId.get(id);
     return !product || (product.sizes?.length && !isPreorder(product) && !Object.hasOwn(product, "size_stock"));
   }))].sort().join(",");
@@ -67,12 +68,10 @@ function CartContent({ cart, products, setCart, onNavigate, appliedCoupon, onCou
     if (!needsLookup || loading) return undefined;
     let active = true;
     // Batch only missing saved products or size-stock details omitted by catalogue cards.
-    apiFetch(`/api/products?view=cards&include_stock=1&ids=${missingIds.split(",").map(encodeURIComponent).join(",")}`, { cacheTtl: 30000 })
-      .then(async response => {
-        if (!response.ok) throw new Error("Saved items could not be checked. Please try again.");
-        const data = await response.json();
+    loadCartProducts(missingIds.split(','), { cacheTtl: 30000 })
+      .then(rows => {
         if (active) {
-          setExtraProducts(current => [...new Map([...current, ...(data.products || [])].map(product => [product.id, product])).values()]);
+          setExtraProducts(current => [...new Map([...current, ...rows].map(product => [product.id, product])).values()]);
           setLookup({ ids: missingIds, retry, error: "" });
         }
       }).catch(error => { if (active) setLookup({ ids: missingIds, retry, error: error.message || "Saved items could not be checked. Please try again." }); });
@@ -123,7 +122,7 @@ function CartContent({ cart, products, setCart, onNavigate, appliedCoupon, onCou
     }
   }
 
-  if (loading && cart.length) return <CartLoadingContent />;
+  if (cart.length && (loading || (needsLookup && cart.some(item => !byId.has(item.id))))) return <CartLoadingContent />;
   if (render) return render({ cart, products, setCart, onNavigate, appliedCoupon, onCouponApplied, onCouponRemoved, user, sessionReady, saved, syncError, lines, total, discount, notice, setNotice, changeQuantity, setRemoving, saveForLater, moveToBag, byId, checkingSaved, missingIds, lookup, setRetry,
     removalDialog: removing && <RemovalDialog item={removing} product={byId.get(removing.id)} onClose={() => setRemoving(null)} onRemove={() => removeFromBag(removing)} onSave={() => saveForLater(removing)} canSave={saved.ready} error={saved.error} /> });
   return <>
@@ -131,8 +130,8 @@ function CartContent({ cart, products, setCart, onNavigate, appliedCoupon, onCou
     {saved.error && !removing && <p className="inline-error" role="alert">{saved.error}</p>}
     {lines.length ? <>
       <div className="cart-list" aria-label="Items in your bag">{lines.map(item => <article className="cart-line" key={savedCartKey(item)}>
-        {item.product?.image_url ? <img src={item.product.image_url} alt="" loading="lazy" /> : <span aria-hidden="true">—</span>}
-        <div><SelectionDetails item={item} product={item.product} /></div>
+        {item.product?.image_url ? <Link href={productStoreUrl(item.product)} onNavigate={onNavigate} aria-label={`View ${item.product.name}`}><img src={item.product.image_url} alt="" loading="lazy" /></Link> : <span aria-hidden="true">—</span>}
+        <div><SelectionDetails item={item} product={item.product} onNavigate={onNavigate} /></div>
         <div className="cart-actions">
           <button type="button" aria-label={`Increase quantity of ${item.product?.name || "item"}`} disabled={item.quantity >= Math.min(10, availableQuantity(item.product, item.size))} onClick={() => changeQuantity(item, 1)}>+</button>
           <button type="button" aria-label={`Decrease quantity of ${item.product?.name || "item"}`} onClick={() => changeQuantity(item, -1)}>−</button>
@@ -144,7 +143,7 @@ function CartContent({ cart, products, setCart, onNavigate, appliedCoupon, onCou
       <div className="cart-total cart-subtotal"><span>Subtotal</span><strong>{money(total)}</strong></div>
       {discount > 0 && <div className="cart-total cart-discount"><span>Coupon discount <small>{appliedCoupon.code}</small></span><strong>−{money(discount)}</strong></div>}
       <div className="cart-total" role="status"><span>Total</span><strong>{money(Math.max(0, total - discount))}</strong></div>
-      <button type="button" className="primary-action" onClick={() => onNavigate("/checkout")}>Continue to checkout </button>
+      <button type="button" className="primary-action" disabled={lines.some(item => !item.product)} onClick={() => onNavigate("/checkout")}>Continue to checkout </button>
     </> : <div className="empty-state">Your bag is ready for something excellent.<br /><button type="button" className="primary-action" onClick={() => onNavigate("/best-sellers")}>Browse best sellers </button></div>}
     <section className="cart-saved-section" aria-labelledby="cart-saved-heading">
       <div className="cart-saved-heading"><div><p className="eyebrow">Another day, same favourites</p><h2 id="cart-saved-heading" ref={savedHeading} tabIndex={-1}>Saved for later <span className="cart-saved-count">{saved.items.length}</span></h2></div></div>
@@ -157,7 +156,7 @@ function CartContent({ cart, products, setCart, onNavigate, appliedCoupon, onCou
         const unavailable = needsStock && checkingSaved ? "Checking availability…" : needsStock && lookup?.error ? "Availability could not be checked" : savedSelectionAvailability(item, product, cart);
         return <article className="cart-line cart-saved-line" key={savedCartKey(item)}>
           {product?.image_url ? <img src={product.image_url} alt="" loading="lazy" /> : <span aria-hidden="true">—</span>}
-          <div><SelectionDetails item={item} product={product} />{unavailable && <p className="cart-saved-availability">{unavailable}</p>}</div>
+          <div><SelectionDetails item={item} product={product} onNavigate={onNavigate} />{unavailable && <p className="cart-saved-availability">{unavailable}</p>}</div>
           <div className="cart-actions"><button type="button" className="cart-move-back" disabled={!saved.ready || Boolean(unavailable)} onClick={() => moveToBag(item)}>Move to bag</button><button type="button" disabled={!saved.ready} onClick={() => { if (saved.removeItem(item)) { setNotice("Item removed from saved for later."); requestAnimationFrame(() => savedHeading.current?.focus()); } }}>Remove saved item</button></div>
         </article>;
       })}</div>}
