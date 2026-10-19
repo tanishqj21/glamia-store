@@ -13,7 +13,7 @@
 .wb-storefront .wb-commerce fieldset fieldset{border-block:1px solid var(--wb-border);padding:16px 0}
 .wb-storefront .wb-commerce label,.wb-storefront .wb-bag-ui label{display:grid;gap:8px;font-size:.85rem;font-weight:600;margin-block:12px}
 .wb-storefront .wb-commerce input:not([type=radio]):not([type=checkbox]),.wb-storefront .wb-commerce select,.wb-storefront .wb-commerce textarea,.wb-storefront .wb-bag-ui select{box-sizing:border-box;width:100%;min-height:46px;border:1px solid var(--wb-border);background:var(--wb-bg-primary);color:var(--wb-text-primary);padding:12px;border-radius:0;font:inherit}
-.wb-storefront .wb-commerce :is(input,textarea,select):focus-visible,.wb-storefront .wb-bag-ui select:focus-visible{outline:2px solid var(--wb-accent);outline-offset:3px}
+.wb-storefront .wb-commerce :is(input,textarea,select):focus-visible,.wb-storefront .wb-bag-ui select:focus-visible{outline:2px solid var(--wb-text-primary);outline-offset:3px}
 .wb-storefront .wb-commerce :is(input[type=radio],input[type=checkbox]),.wb-storefront .wb-bag-ui input[type=checkbox]{accent-color:var(--wb-accent);width:20px;height:20px;flex-shrink:0}
 .wb-storefront .wb-commerce :is(small,.form-hint),.wb-storefront .wb-bag-ui small{color:var(--wb-text-muted);line-height:1.6}
 .wb-storefront .wb-perks{border:1px solid var(--wb-border);padding:20px;margin-block:20px;background:var(--wb-bg-surface)}
@@ -35,7 +35,7 @@
 .wb-storefront .wb-quantity button{width:40px;height:42px;background:transparent;color:var(--wb-text-primary);border:0;font-size:20px;cursor:pointer}
 .wb-storefront .wb-quantity output{min-width:30px;text-align:center;font-family:var(--wb-mono)}
 .wb-storefront .wb-bag-line-controls label{min-width:110px;margin:0}
-.wb-storefront .wb-stock-note{color:var(--wb-accent);font:11px var(--wb-mono)}
+.wb-storefront .wb-stock-note{color:var(--wb-accent-text);font:11px var(--wb-mono)}
 .wb-storefront .wb-receipt{font:12px/1.7 var(--wb-mono);margin-block:24px;border-block:1px dashed var(--wb-border);padding:14px 0}
 .wb-storefront .wb-receipt>div{display:flex;justify-content:space-between;gap:16px;padding-block:7px}
 .wb-storefront .wb-receipt-total{border-top:1px solid var(--wb-border);margin-top:10px;font-size:1.2rem}
@@ -69,11 +69,11 @@
 .wb-storefront .wb-referral-code code{font-size:1.5rem;letter-spacing:.1em;margin-right:auto}
 .wb-storefront .wb-filter-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0}
 .wb-storefront .wb-filter-tabs button{border:1px solid var(--wb-border);padding:12px 16px;background:var(--wb-bg-surface);color:var(--wb-text-muted);font:11px var(--wb-mono);text-transform:uppercase;cursor:pointer;transition:color .15s,background .15s}
-.wb-storefront .wb-filter-tabs button[aria-pressed=true]{background:var(--wb-accent);color:var(--wb-bg-primary);border-color:var(--wb-accent)}
+.wb-storefront .wb-filter-tabs button[aria-pressed=true]{background:var(--wb-accent);color:var(--wb-accent-contrast);border-color:var(--wb-accent)}
 .wb-storefront .wb-ledger article{display:flex;justify-content:space-between;gap:20px;padding:22px 0;border-top:1px solid var(--wb-border)}
 .wb-storefront .wb-ledger article>div{display:grid;gap:8px}
 .wb-storefront .wb-ledger b{font:700 1.2rem var(--wb-mono);white-space:nowrap}
-.wb-storefront .wb-credit-positive{color:var(--wb-accent)}
+.wb-storefront .wb-credit-positive{color:var(--wb-accent-text)}
 .wb-storefront .wb-fulfilment{list-style:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:0;margin:24px 0;gap:6px}
 .wb-storefront .wb-fulfilment li{display:grid;gap:8px;border-top:3px solid var(--wb-border);padding-top:12px;font-size:11px;color:var(--wb-text-muted)}
 .wb-storefront .wb-fulfilment li.is-done{border-color:var(--wb-accent);color:var(--wb-text-primary)}

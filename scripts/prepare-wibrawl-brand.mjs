@@ -16,6 +16,12 @@ path('white-wordmark');
 const logo = master.replace('viewBox="0 0 1254 1254" width="1254" height="1254"', 'viewBox="115 190 1025 815" width="1025" height="815"')
   .replace('and white WiBrawl lettering on black.', 'and white WiBrawl lettering on a transparent background.');
 await writeFile(new URL('logo.svg', directory), logo);
+// The supplied mark has no background. Only adapt its white lettering for
+// light surfaces; keep the monogram, lightning and all path geometry intact.
+const lightLogo = logo.replace('id="white-wordmark" fill="#F7F7F7"', 'id="white-wordmark" fill="#121216"')
+  .replace('and white WiBrawl lettering', 'and charcoal WiBrawl lettering');
+if (lightLogo === logo) throw new Error('Missing white wordmark for light-surface adaptation');
+await writeFile(new URL('logo-light.svg', directory), lightLogo);
 // Reuse the exact WB paths, clipped above the small wordmark dot.
 const favicon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-labelledby="title">
 <title id="title">Wibrawl WB</title>${defs}

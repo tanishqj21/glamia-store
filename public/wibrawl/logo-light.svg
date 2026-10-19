@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="115 190 1025 815" width="1025" height="815" role="img" aria-labelledby="logoTitle logoDesc">
+  <title id="logoTitle">WiBrawl Master Logo A</title>
+  <desc id="logoDesc">Angular WB monogram with electric blue W, hot-pink B, volt-yellow lightning strike, and charcoal WiBrawl lettering on a transparent background.</desc>
+  <defs>
+    <linearGradient id="electricBlue" x1="0" y1="0" x2="0" y2="1" objectBoundingBox="true">
+      <stop offset="0" stop-color="#12C5F6"/>
+      <stop offset="1" stop-color="#00B6F4"/>
+    </linearGradient>
+    <linearGradient id="hotPink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FE2BA0"/>
+      <stop offset="1" stop-color="#F41F99"/>
+    </linearGradient>
+    <linearGradient id="voltYellow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E4FF00"/>
+      <stop offset="1" stop-color="#D6F700"/>
+    </linearGradient>
+  </defs>
+  <g id="WiBrawl-logo" shape-rendering="geometricPrecision">
+    <path id="blue-W" fill="url(#electricBlue)" fill-rule="evenodd" d="M217,322 L322,504 L320,505 L284,469 L430,764 L505,631 L563,755 L673,544 L741,423 L794,335 L629,447 L575,570 L521,493 L466,595 L455,611 L386,412 Z M407,422 L449,498 L469,552 L490,469 Z"/>
+    <path id="pink-B" fill="url(#hotPink)" fill-rule="evenodd" d="M966,383 L838,383 L796,434 L729,523 L642,651 L798,531 L842,461 L948,462 L778,581 L771,595 L909,595 L932,625 L868,689 L735,689 L629,798 L670,771 L889,771 L1041,648 L955,555 L1042,461 Z"/>
+    <path id="volt-strike" fill="url(#voltYellow)" fill-rule="evenodd" d="M766,575 L665,654 L545,853 L698,694 Z M950,206 L820,317 L687,551 L867,309 Z M409,863 L377,871 L370,907 L403,896 Z"/>
+    <path id="white-wordmark" fill="#121216" fill-rule="evenodd" d="M567,864 L567,895 L651,895 L655,898 L658,904 L656,912 L653,915 L647,917 L567,917 L567,987 L600,987 L601,986 L601,949 L602,948 L617,948 L650,987 L731,987 L776,923 L819,987 L863,987 L780,863 L773,863 L770,866 L751,896 L692,982 L690,982 L661,948 L662,946 L673,941 L681,933 L687,923 L689,916 L688,891 L681,878 L674,871 L660,864 L641,864 L640,863 L634,864 L585,864 L584,863 L570,863 L569,864 L568,863 Z M423,864 L423,987 L523,987 L537,982 L546,974 L551,966 L554,957 L553,937 L550,930 L544,923 L551,907 L551,893 L547,881 L539,871 L531,866 L520,863 L471,863 L470,864 L426,863 Z M131,863 L164,914 L214,987 L250,934 L253,936 L285,985 L287,986 L373,864 L369,863 L361,863 L360,864 L329,863 L323,870 L291,917 L287,921 L252,870 L250,863 L250,869 L214,921 L175,863 L168,864 L148,864 L147,863 L132,864 Z M821,864 L841,902 L841,904 L882,987 L886,986 L918,934 L929,950 L951,987 L953,987 L955,985 L957,979 L962,971 L963,967 L1014,865 L1011,863 L1005,864 L993,864 L992,863 L977,864 L976,863 L970,873 L953,911 L949,915 L918,867 L918,863 L918,868 L900,895 L889,914 L887,915 L885,913 L866,871 L861,863 L854,864 L822,863 Z M1018,864 L1018,987 L1105,987 L1125,951 L1052,951 L1051,950 L1051,863 Z M403,907 L395,909 L370,919 L370,985 L369,986 L370,987 L402,987 L403,986 Z M456,938 L457,937 L516,937 L522,942 L523,948 L521,952 L517,955 L457,955 L456,954 Z M456,895 L457,894 L515,894 L519,898 L520,903 L515,908 L457,908 L456,907 Z"/>
+  </g>
+</svg>

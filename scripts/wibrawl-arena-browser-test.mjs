@@ -75,15 +75,38 @@ try {
     await page.getByRole('button',{name:'Next hero slide',exact:true}).click();await page.locator('.wb-hero--collage').waitFor();await audit(page,width+'-gaming-collage');
     await page.getByRole('button',{name:'Preview Midnight Tee',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Preview Midnight Tee',exact:true}).getAttribute('aria-pressed'),'true');assert.equal(await page.locator('.wb-collage-lead .wb-arena-visual img').getAttribute('alt'),'Midnight Tee');
     await page.getByRole('button',{name:'Next hero slide',exact:true}).click();await page.locator('.wb-hero--split').waitFor();await audit(page,width+'-gaming-split');
-    const sports=page.getByRole('button',{name:'SPORTS MODE // Light Mode',exact:true});await sports.hover();await page.getByRole('tooltip',{name:'SPORTS MODE // Light Mode',exact:true}).waitFor();await sports.click();await expectMode('sports');assert.equal(await page.evaluate(()=>localStorage.getItem('wibrawl_mode')),'sports');await page.locator('.wb-home-hubs').getByRole('link',{name:/NEW SIGNING/}).waitFor();await audit(page,width+'-sports-home');
-    if(width<768){assert.equal(await page.locator('.wb-command-dock').isVisible(),true);await page.locator('.wb-command-dock').getByRole('link',{name:'Signing',exact:true}).waitFor();}
-    assert.equal(await page.locator('.wb-logo-badge img').first().getAttribute('src'),'/wibrawl/logo.svg?v=master-a');assert.equal(await page.locator('.wb-stadium-footer .sr-only').count(),0);
+    await page.locator('.wb-module-best .wb-spec-card').nth(3).waitFor();
+    await page.evaluate(() => document.fonts.ready);
+    const layoutGeometry = () => page.evaluate(() => {
+      const selectors=['.wb-command-bar','.wb-command-brand img','.wb-command-tools','.wb-arena-hero','.wb-home-hubs','.wb-module-arrived .wb-module-heading','.wb-ranked-bento','.wb-stadium-footer'];
+      return Object.fromEntries(selectors.map(selector=>{
+        const el=document.querySelector(selector),r=el.getBoundingClientRect(),css=getComputedStyle(el);
+        return [selector,{width:r.width,height:r.height,font:css.fontFamily,size:css.fontSize,gap:css.gap,padding:css.padding,borderRadius:css.borderRadius}];
+      }));
+    });
+    const darkGeometry=await layoutGeometry();
+    const sports=page.getByRole('button',{name:'SPORTS MODE // Light Mode',exact:true});await sports.hover();await page.getByRole('tooltip',{name:'SPORTS MODE // Light Mode',exact:true}).waitFor();await sports.click();await expectMode('sports');assert.equal(await page.evaluate(()=>localStorage.getItem('wibrawl_mode')),'sports');await page.locator('.wb-home-hubs').getByRole('link',{name:/JUST SPAWNED/}).waitFor();await audit(page,width+'-sports-home');
+    const lightGeometry=await layoutGeometry();
+    assert.deepEqual(lightGeometry,darkGeometry,width+'px: switching themes must not resize or restyle the UI');
+    assert.equal(await page.locator('.wb-command-brand .wb-logo-badge').evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)');
+    const tools=await page.locator('.wb-command-tools').evaluate(e=>[...e.children].map(child=>child.className));
+    assert.ok(tools.indexOf('wb-mode-switch')>tools.findIndex(c=>c.includes('wb-account-trigger')));
+    assert.ok(tools.indexOf('wb-mode-switch')<tools.findIndex(c=>c.includes('cart-link')));
+    const heading=page.locator('.wb-module-arrived .wb-module-heading');
+    const eyebrow=await heading.locator('.wb-tech').boundingBox(),title=await heading.getByRole('heading').boundingBox();
+    assert.ok(eyebrow.y+eyebrow.height<=title.y,width+'px: section eyebrow must sit above its title');
+    const cards=await page.locator('.wb-module-best .wb-ranked-bento>.wb-spec-card').evaluateAll(items=>items.slice(0,2).map(e=>e.getBoundingClientRect().y));
+    assert.ok(Math.abs(cards[0]-cards[1])<1,width+'px: product rows stay aligned');
+    console.log('Theme geometry, transparent branding and aligned headings passed at '+width+'px');
+
+    if(width<768){assert.equal(await page.locator('.wb-command-dock').isVisible(),true);await page.locator('.wb-command-dock').getByRole('link',{name:'Spawned',exact:true}).waitFor();}
+    assert.equal(await page.locator('.wb-logo-badge img').first().getAttribute('src'),'/wibrawl/logo-light.svg?v=master-a');assert.equal(await page.locator('.wb-stadium-footer .sr-only').count(),0);
     const card=page.locator('.wb-module-arrived .wb-spec-card').first();await card.scrollIntoViewIfNeeded();await card.hover();await card.getByRole('button',{name:'Add Courtside Tee, size M to bag',exact:true}).click();await card.getByText('M / Added to bag',{exact:true}).waitFor();assert.equal(await card.getByRole('button',{name:'Add Courtside Tee, size S to bag',exact:true}).isDisabled(),true);
     await page.getByRole('button',{name:/Open cart, 1 item/}).click();await page.getByRole('dialog',{name:'Your bag.'}).waitFor();await page.getByRole('dialog',{name:'Your bag.'}).getByRole('heading',{name:'Courtside Tee',exact:true}).waitFor();await page.keyboard.press('Escape');
     await page.getByRole('button',{name:'Open account menu',exact:true}).click();await page.getByRole('dialog',{name:'Your Wibrawl'}).waitFor();await page.getByRole('button',{name:'Browse categories',exact:true}).click();await page.getByRole('dialog',{name:'Find your lane.',exact:true}).waitFor();assert.equal(await page.locator('.wb-category-tree details').count(),0);await page.locator('.wb-category-tree').getByRole('link',{name:/Graphic Tees/}).first().waitFor();await page.keyboard.press('Escape');
     await page.getByRole('button',{name:'Find your next favourite',exact:true}).click();await page.getByRole('searchbox',{name:'Search the collection',exact:true}).fill('Midnight');await page.locator('.wb-command-results').getByRole('link',{name:/Midnight Tee/}).waitFor();await page.keyboard.press('Escape');
     await goto('/category/Graphic%20Tees?sub=Original%20Prints');await page.getByRole('heading',{name:'Graphic Tees',exact:true}).waitFor();await page.locator('.wb-spec-card').first().waitFor();
-    for(const [route,title,display] of [['/just-arrived','NEW SIGNING','.wb-lookbook-rail'],['/best-sellers','TABLE LEADERS','.wb-ranked-bento'],['/offers','LOCKER ROOM DEALS','.wb-drop-vault']]){await goto(route);await page.getByRole('heading',{name:title,exact:true}).waitFor();await page.locator(display+' .wb-spec-card').first().waitFor();await audit(page,width+'-sports-'+route.slice(1));}
+    for(const [route,title,display] of [['/just-arrived','JUST SPAWNED','.wb-lookbook-rail'],['/best-sellers','CURRENT META','.wb-ranked-bento'],['/offers','LOOT','.wb-drop-vault']]){await goto(route);await page.getByRole('heading',{name:title,exact:true}).waitFor();await page.locator(display+' .wb-spec-card').first().waitFor();await audit(page,width+'-sports-'+route.slice(1));}
     assert.equal(await page.locator('.wb-deal-timer').count()>0,true);
     await goto('/search?query=fit-check');await page.getByRole('link',{name:'View Midnight Tee',exact:true}).waitFor();await page.waitForFunction(()=>document.querySelectorAll('.wb-filtered-grid .wb-spec-card').length===1);
     await goto('/just-arrived');await page.getByRole('combobox',{name:'Colour',exact:true}).selectOption('White');await page.getByRole('link',{name:'View Midnight Tee',exact:true}).waitFor();await page.waitForFunction(()=>document.querySelectorAll('.wb-spec-card').length===1);
