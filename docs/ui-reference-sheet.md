@@ -21,6 +21,7 @@ Glamia and Wibrawl. Add future references here.
 
 | Added | Reference | Useful details | Status |
 | --- | --- | --- | --- |
+| 2026-10-20 | [Motion Primitives — full component catalog](https://motion-primitives.com/docs) | All 33 components indexed by the six published categories in the [catalog below](#motion-primitives-component-catalog), including the user-selected [Progressive Blur](https://motion-primitives.com/docs/progressive-blur). | Reference options; not installed or applied. |
 | 2026-10-20 | [Vengeance UI — full component catalog](https://www.vengenceui.com/components) | All 76 published components indexed in the [catalog below](#vengeance-ui-component-catalog), including the user-selected [Animated Number](https://www.vengenceui.com/components/animated-number). | Reference options; not installed or applied. |
 | 2026-10-20 | [Three.js](https://threejs.org/docs/) | Reuse for requested 3D scenes and product interactions. Load only where needed, pause rendering when idle or offscreen, and provide a lightweight fallback. | Installed locally: `three@0.186.1`; no new scene added by this entry. |
 | 2026-10-20 | [React Three Fiber](https://r3f.docs.pmnd.rs/) | Existing React integration option for Three.js features. Consider together with Three.js when the task calls for 3D, while keeping the normal storefront lightweight. | Installed locally: `@react-three/fiber@9.8.2`; no new scene added by this entry. |
@@ -434,3 +435,76 @@ applied by recording this catalog.
 - [Perspective Grid](https://www.vengenceui.com/components/perspective-grid)
 - [Light Lines](https://www.vengenceui.com/components/light-lines)
 - [Liquid Ocean](https://www.vengenceui.com/components/liquid-ocean)
+
+## Motion Primitives component catalog
+
+Source: [Motion Primitives documentation](https://motion-primitives.com/docs).
+Indexed on 2026-10-20: **33 components** across six categories, as listed in
+the documentation navigation. The original user-selected reference was
+[Progressive Blur](https://motion-primitives.com/docs/progressive-blur).
+
+These are optional references. Check the current component API, dependencies
+and license when implementing; adapt brand styling and preserve accessibility,
+reduced-motion behaviour and mobile performance. This directory snapshot does
+not represent a review of every implementation. No components were installed
+or applied by adding this catalog.
+
+| Category | Components |
+| --- | ---: |
+| Core Components | 11 |
+| Text Effects | 7 |
+| Number Effects | 2 |
+| Interactive Elements | 7 |
+| Toolbars | 2 |
+| Advanced Effects | 4 |
+
+### Motion Primitives — Core Components (11)
+
+- [Accordion](https://motion-primitives.com/docs/accordion)
+- [Animated Background](https://motion-primitives.com/docs/animated-background)
+- [Animated Group](https://motion-primitives.com/docs/animated-group)
+- [Border Trail](https://motion-primitives.com/docs/border-trail)
+- [Carousel](https://motion-primitives.com/docs/carousel)
+- [Cursor](https://motion-primitives.com/docs/cursor)
+- [Dialog](https://motion-primitives.com/docs/dialog)
+- [Disclosure](https://motion-primitives.com/docs/disclosure)
+- [In View](https://motion-primitives.com/docs/in-view)
+- [Infinite Slider](https://motion-primitives.com/docs/infinite-slider)
+- [Transition Panel](https://motion-primitives.com/docs/transition-panel)
+
+### Motion Primitives — Text Effects (7)
+
+- [Text Effect](https://motion-primitives.com/docs/text-effect)
+- [Text Loop](https://motion-primitives.com/docs/text-loop)
+- [Text Morph](https://motion-primitives.com/docs/text-morph)
+- [Text Roll](https://motion-primitives.com/docs/text-roll)
+- [Text Scramble](https://motion-primitives.com/docs/text-scramble)
+- [Text Shimmer](https://motion-primitives.com/docs/text-shimmer)
+- [Text Shimmer Wave](https://motion-primitives.com/docs/text-shimmer-wave)
+
+### Motion Primitives — Number Effects (2)
+
+- [Animated Number](https://motion-primitives.com/docs/animated-number)
+- [Sliding Number](https://motion-primitives.com/docs/sliding-number)
+
+### Motion Primitives — Interactive Elements (7)
+
+- [Dock](https://motion-primitives.com/docs/dock)
+- [Glow Effect](https://motion-primitives.com/docs/glow-effect)
+- [Image Comparison](https://motion-primitives.com/docs/image-comparison)
+- [Scroll Progress](https://motion-primitives.com/docs/scroll-progress)
+- [Spotlight](https://motion-primitives.com/docs/spotlight)
+- [Spinning Text](https://motion-primitives.com/docs/spinning-text)
+- [Tilt](https://motion-primitives.com/docs/tilt)
+
+### Motion Primitives — Toolbars (2)
+
+- [Toolbar Dynamic](https://motion-primitives.com/docs/toolbar-dynamic)
+- [Toolbar Expandable](https://motion-primitives.com/docs/toolbar-expandable)
+
+### Motion Primitives — Advanced Effects (4)
+
+- [Magnetic](https://motion-primitives.com/docs/magnetic)
+- [Morphing Dialog](https://motion-primitives.com/docs/morphing-dialog)
+- [Morphing Popover](https://motion-primitives.com/docs/morphing-popover)
+- [Progressive Blur](https://motion-primitives.com/docs/progressive-blur)
