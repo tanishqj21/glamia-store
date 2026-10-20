@@ -159,7 +159,7 @@ test('direct product links render the Wibrawl header and footer before JavaScrip
   const response = await worker.renderPublicPage(new Request(WIBRAWL_ORIGIN+path),env);
   assert.equal(response.status,200);
   const html = await response.text();
-  assert.match(html,/wibrawl-wordmark/); assert.match(html,/wibrawl-footer/);
+  assert.match(html,/wibrawl-wordmark/); assert.match(html,/aria-label="Wibrawl footer"/);
   assert.ok(!html.includes('id="initial-loader"'));
   assert.match(html,/\/wibrawl\/favicon.svg/);
   assert.match(html,/\/wibrawl\/logo.svg/);
@@ -205,4 +205,17 @@ test('both storefronts use the same saved About us timeline and reflect one edit
     bodies.push(html.match(/<main class="info-page">[\s\S]*?<\/main>/)?.[0]);
   }
   assert.ok(bodies[0]);assert.equal(bodies[0],bodies[1]);
+});
+
+test('both footers render grouped navigation, legal links and owner-brand links before JavaScript',async t=>{
+ const {env}=fixture(t);
+ for(const [brand,origin,sibling] of [['Glamia','https://glamiastore.com',WIBRAWL_ORIGIN],['Wibrawl',WIBRAWL_ORIGIN,'https://glamiastore.com']]){
+  const html=await(await worker.renderPublicPage(new Request(origin),env)).text();
+  const footer=html.match(new RegExp('<footer[^>]+aria-label="'+brand+' footer">([^]*?)</footer>'))?.[1];
+  assert.ok(footer,'Shared component is present in the server document');
+  assert.ok(footer.includes('<h2>Shop</h2>')&&footer.includes('<h2>Need a hand?</h2>'));
+  for(const path of ['/orders','/track-order','/support','/terms-and-conditions','/privacy-policy','/return-policy','/refund-cancellation-policy','/shipping-policy'])assert.ok(footer.includes('href="'+path+'"'));
+  assert.ok(footer.includes('href="'+sibling+'"'));assert.ok(!footer.includes('<form'));
+  assert.ok(html.includes('.footer-navigation'),'Footer layout is available before hydration');
+ }
 });

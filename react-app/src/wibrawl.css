@@ -155,16 +155,6 @@
 .wibrawl-manifesto>p { color:var(--muted); font-size:20px; margin:4px 0 0; line-height:1.4; }
 .wibrawl-manifesto h2 { font-size:clamp(42px,6vw,82px); letter-spacing:-.06em; line-height:1; margin:0 0 24px; }
 .wibrawl-manifesto div>p { color:var(--muted); max-width:410px; font-size:16px; line-height:1.6; margin:0 0 28px; }
-.wibrawl-shell .site-footer { background:var(--surface); color:var(--ink); border-top:1px solid var(--line); margin-top:0; padding:54px clamp(24px,5vw,76px); }
-.wibrawl-shell .footer-mark { font-family:Jost,sans-serif; color:var(--ink); font-size:30px; font-weight:600; letter-spacing:-.05em; }
-.wibrawl-shell .footer-mark .wibrawl-logo { display:block; width:260px; height:auto; max-width:100%; }
-.wibrawl-shell .site-footer>p,.wibrawl-shell .footer-nav-groups a,.wibrawl-shell .footer-socials-copy small { color:var(--muted); }
-.wibrawl-shell .footer-nav-groups a:hover,.wibrawl-shell .footer-policy-nav>span { color:var(--ink); }
-:root[data-brand="wibrawl"] .wibrawl-shell .footer-policy-nav>span { color:var(--ink); }
-.wibrawl-shell .footer-social-links a { color:var(--ink); border-color:var(--line); }
-.wibrawl-shell .footer-socials-copy>span { color:var(--ink); }
-.wibrawl-footer-origin { display:block; margin-top:28px; color:var(--muted); font-size:12px; }
-.wibrawl-footer-origin a { text-underline-offset:4px; }
 .wibrawl-admin-visibility { display:flex; flex-direction:column; gap:8px; margin-block:18px; max-width:540px; }
 .wibrawl-admin-visibility select { min-height:44px; }
 .wibrawl-admin-preview { --bg:#101413; --surface:#191e1b; --surface-strong:#252e27; --ink:#f1f4eb; --muted:#abb6aa; --line:#39473b; --accent:#c3f35e; --accent-text:#c3f35e; background:var(--bg); color:var(--ink); font-family:Jost,sans-serif; border:1px solid var(--line); border-radius:4px; overflow:hidden; }

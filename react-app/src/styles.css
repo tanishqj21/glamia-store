@@ -208,18 +208,6 @@ h1 em { color: var(--accent-text); font-style: italic; }
 .modal-price.is-event .product-price-amount { font-size: 26px; }
 del { color: var(--muted); margin-left: 6px; }
 .empty-state { border: 1px dashed var(--line); color: var(--muted); padding: 50px; text-align: center; }
-.site-footer { background: var(--deep); color: var(--bg); margin-top: 80px; padding: 70px clamp(20px, 8vw, 150px); }
-.site-footer p { color: color-mix(in srgb, var(--bg) 68%, transparent); line-height: 1.7; margin: 24px 0 30px; }
-.site-footer > a:last-child { color: var(--accent); font-size: 13px; text-decoration: none; }
-.footer-socials { align-items: end; border-top: 1px solid color-mix(in srgb, var(--bg) 20%, transparent); display: flex; flex-wrap: wrap; gap: 20px 34px; justify-content: space-between; margin: 34px 0 26px; padding-top: 22px; }
-.footer-socials-copy { display: grid; gap: 5px; }
-.footer-socials-copy span { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
-.footer-socials-copy small { color: color-mix(in srgb, var(--bg) 62%, transparent); font-size: 12px; }
-.footer-social-links { display: flex; flex-wrap: wrap; gap: 9px 18px; }
-.footer-social-links a { align-items: center; background: transparent; border: 1px solid color-mix(in srgb, var(--bg) 28%, transparent); color: color-mix(in srgb, var(--bg) 82%, transparent); display: inline-flex; font-size: 13px; gap: 7px; min-height: 38px; padding: 7px 11px; text-decoration: none; transition: background .2s ease, border-color .2s ease, color .2s ease, transform .2s ease; }
-.footer-social-links a:hover { background: color-mix(in srgb, var(--bg) 8%, transparent); border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
-.footer-social-icon { display: inline-flex; }
-.footer-social-label { font-size: 13px; }
 .menu-layer { inset: 0; position: fixed; z-index: 100; }
 .menu-backdrop { background: rgb(0 0 0 / 48%); border: 0; cursor: pointer; inset: 0; position: absolute; width: 100%; }
 .menu-drawer { animation: drawer .24s ease-out; background: color-mix(in srgb, var(--surface) 80%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.15); backdrop-filter: blur(18px) saturate(1.15); border: 1px solid var(--line); box-shadow: var(--shadow); height: 100%; left: 0; max-width: 420px; overflow-y: auto; padding: 30px clamp(22px, 5vw, 40px); position: absolute; top: 0; width: min(88vw, 420px); z-index: 101; }
@@ -567,13 +555,6 @@ html, body, .site-header, .site-footer, .product-image, .product-modal, .cinemat
 /* Phase 11 customer care: readable request creation and conversation surfaces. */
 @keyframes chart-callout-in { from { opacity: 0; transform: translateY(-5px); } }
 @keyframes support-online-pulse { 0% { box-shadow: 0 0 0 0 rgb(47 191 113 / 50%); } 75% { box-shadow: 0 0 0 9px rgb(47 191 113 / 0%); } 100% { box-shadow: 0 0 0 0 rgb(47 191 113 / 0%); } }
-.footer-nav-groups { display: grid; gap: 20px; }
-.footer-nav-groups nav { display: flex; flex-wrap: wrap; gap: 9px 18px; }
-.footer-nav-groups a { color: color-mix(in srgb, var(--bg) 78%, transparent); font-size: 13px; text-decoration: none; }
-.footer-nav-groups a:hover { color: var(--accent); }
-.footer-policy-nav { border-top: 1px solid color-mix(in srgb, var(--bg) 20%, transparent); padding-top: 18px; }
-.footer-policy-nav span { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; width: 100%; }
-:root[data-theme="dark"] .footer-policy-nav span { color: #684b90; }
 .label-system-row { align-items: start; }
 .label-tracking-editor { align-items: end; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; }
 .label-tracking-editor label { color: var(--muted); display: grid; font-size: 10px; gap: 5px; letter-spacing: .08em; text-transform: uppercase; }

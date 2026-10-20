@@ -6,7 +6,7 @@ const shellClass = /^(?:app-shell|skip-link|sr-only|announce(?:-.+)?|site-header
 // Wibrawl's first document contains the command bar, hero, hubs and footer.
 // Catalogue/account/admin and retired-layout rules arrive in the deferred CSS.
 const wibrawlShellClass = /^(?:wibrawl-(?:shell|logo|primary-action|secondary-action)|wb-(?:storefront|tech|hint(?:-badge)?|header(?:-.+)?|command-.+|logo-badge|hub-bar|category-trigger|icon-action|search-trigger|mode-switch|credit-badge|count|dock-symbol|arena-.+|hero--.+|poster-hud|collage-.+|split-.+|spine-loop|home-(?:telemetry|hubs|hub-sign|signoff)|stadium-footer|footer-.+|catalog-deck|product-spec-page)|is-current|is-paused)$/;
-const wibrawlSharedClass = /^(?:app-shell|skip-link|sr-only|announce(?:-.+)?|primary-action|secondary-action|text-link|trust-(?:strip(?:-.+)?|promise)|ui-icon|cart-link|cart-count|glamia-logo|active|muted)$/;
+const wibrawlSharedClass = /^(?:app-shell|skip-link|sr-only|announce(?:-.+)?|primary-action|secondary-action|text-link|trust-(?:strip(?:-.+)?|promise)|ui-icon|cart-link|cart-count|glamia-logo|footer(?:-.+)?|active|muted)$/;
 
 export function criticalStorefrontCss(css, additionalClass = () => false, { storefront = 'both' } = {}) {
   const root = postcss.parse(css);

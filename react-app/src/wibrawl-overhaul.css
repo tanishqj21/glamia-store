@@ -176,8 +176,6 @@
 .wb-storefront .wb-card-notice { font:10px/1.4 var(--wb-mono); color:var(--wb-text-muted); min-height:14px; margin:8px 0 0; }
 .wb-storefront .wibrawl-manifesto { border-color:var(--wb-border); }
 .wb-storefront .wibrawl-manifesto h2 { font-family:Impact,'Arial Narrow',Jost,sans-serif; font-weight:900; }
-.wb-storefront .site-footer { background:var(--wb-bg-surface); border-color:var(--wb-border); }
-.wb-storefront .footer-mark .wibrawl-logo { width:220px; }
 .wb-storefront .wb-pdp { padding-block:24px 64px; }
 .wb-storefront .wb-product-layout { display:grid; grid-template-columns:1.1fr .9fr; gap:clamp(28px,5vw,72px); align-items:start; margin-top:24px; }
 .wb-storefront .wb-product-gallery { min-width:0; }
