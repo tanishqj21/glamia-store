@@ -13,11 +13,17 @@ Glamia and Wibrawl. Add future references here.
 - Reuse component code where appropriate; a reference does not by itself request
   installing a library, redesigning existing screens or deploying changes.
 - Existing preferences: clean controls, subtle animations, no arrows in buttons.
+- The user confirmed that Three.js, React Three Fiber and Liquid Glass should
+  also be considered alongside the component references. Use them when they suit
+  the requested feature; avoid loading graphics libraries on unrelated routes.
 
 ## Collection
 
 | Added | Reference | Useful details | Status |
 | --- | --- | --- | --- |
+| 2026-10-20 | [Three.js](https://threejs.org/docs/) | Reuse for requested 3D scenes and product interactions. Load only where needed, pause rendering when idle or offscreen, and provide a lightweight fallback. | Installed locally: `three@0.186.1`; no new scene added by this entry. |
+| 2026-10-20 | [React Three Fiber](https://r3f.docs.pmnd.rs/) | Existing React integration option for Three.js features. Consider together with Three.js when the task calls for 3D, while keeping the normal storefront lightweight. | Installed locally: `@react-three/fiber@9.8.2`; no new scene added by this entry. |
+| 2026-10-20 | [Liquid Glass JS — dashersw](https://github.com/dashersw/liquid-glass-js) | User-shared source for glass buttons and containers with WebGL refraction and blur. Use selectively, check mobile rendering cost and browser support, and retain an accessible fallback. | Reference option; no matching root npm dependency or storefront import found during this check. |
 | 2026-10-20 | [React Bits Pro — full component catalog](https://pro.reactbits.dev/docs/components) | All 230 listed components indexed by category with direct documentation links in the [catalog below](#react-bits-pro-component-catalog). | Reference options; indexing does not install or apply components. |
 | 2026-10-20 | [React Bits Pro — Stipple Type](https://pro.reactbits.dev/docs/components/stipple-type) | Interactive marbled-ink typography that swirls and breaks into stippled dots. Consider for expressive headlines; adapt colours to the brand, preserve readable text and reduced-motion support, and assess rendering cost before use. | Reference option; not installed or applied. |
 | 2026-10-20 | [daisyUI megamenu and component library](https://daisyui.com/components/megamenu/) | User-shared source for natural-looking UI components. May inspire layouts or supply component code when relevant. | Reference option; explicitly not the default. |
