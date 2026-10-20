@@ -42,7 +42,7 @@ function FooterSocials({ socials, brand }) {
 }
 
 // Shared structure, with each store supplying its own artwork, language and socials.
-export function FooterFrame({ brand, className, logo, tagline, description, shopLinks, socials, sibling, onNavigate }) {
+export function FooterFrame({ brand, className, logo, tagline, description, shopLinks, socials, sibling, onNavigate, rightsNotice }) {
   const year = new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Asia/Kolkata' }).format(new Date());
   return <footer className={`footer-shell ${className}`} aria-label={`${brand} footer`}>
     <div className="footer-inner">
@@ -56,7 +56,7 @@ export function FooterFrame({ brand, className, logo, tagline, description, shop
         <div className="footer-navigation"><FooterGroup title="Shop" links={shopLinks} onNavigate={onNavigate}/><FooterGroup title="Need a hand?" links={careLinks} onNavigate={onNavigate}/></div>
       </div>
       <nav className="footer-policies" aria-label="Policies"><ul role="list">{policies.map(([href, label]) => <li key={href}><FooterLink href={href} onNavigate={onNavigate}>{label}</FooterLink></li>)}</ul></nav>
-      <div className="footer-baseline"><small>© {year} {brand}</small>{sibling}</div>
+      <div className="footer-baseline"><small>© {year} {brand}{rightsNotice ? `. ${rightsNotice}` : ''}</small>{sibling}</div>
     </div>
   </footer>;
 }

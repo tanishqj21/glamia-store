@@ -12,6 +12,7 @@ export function StorefrontFooter({ storefront, onNavigate, wibrawlMode = false, 
   if (wibrawlMode) return <WibrawlFooter storefront={storefront} onNavigate={onNavigate} mode={mode}/>;
   return <FooterFrame brand="Glamia" className="site-footer" logo={<GlamiaLogo width="221" height="43"/>}
     description="Clothing and everyday essentials."
+    rightsNotice="All rights reserved."
     shopLinks={shopLinks} socials={storefront?.socials} onNavigate={onNavigate}
     sibling={<a className="footer-sibling footer-link" href={WIBRAWL_ORIGIN}><span className="footer-link-label">Discover Wibrawl</span><span className="footer-sibling-note">Our graphic tee label</span></a>}/>;
 }
