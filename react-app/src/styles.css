@@ -82,15 +82,14 @@ body.quick-view-open { overflow: hidden; }
 .quick-links { align-items: center; display: flex; gap: 28px; }
 .quick-links a { color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: .15em; text-decoration: none; text-transform: uppercase; }
 .quick-links a:hover { color: var(--ink); }
-.quick-links .wibrawl-store-link { --wibrawl-link-blue: #00c8ff; --wibrawl-link-pink: #ff3096; --wibrawl-link-lime: #c3f35e; align-items: center; background: transparent; border: 0; border-radius: 6px; display: inline-flex; justify-content: center; min-height: 52px; padding: 3px 10px; }
-.wibrawl-store-mark { display: block; height: 45px; isolation: isolate; position: relative; width: 56px; }
-.wibrawl-store-mark img { background: transparent; display: block; height: 100%; object-fit: contain; position: relative; width: 100%; }
-/* The transparent artwork shapes the aura; no tile or oval behind the mark. */
-.wibrawl-store-aura { filter: blur(5px); inset: 0; opacity: 0; pointer-events: none; position: absolute; transition: opacity .22s ease; }
-.wibrawl-store-aura::before { background: conic-gradient(from var(--wibrawl-glow-angle, 270deg), var(--wibrawl-link-blue), var(--wibrawl-link-pink), var(--wibrawl-link-lime), var(--wibrawl-link-blue)); content: ""; inset: 0; mask: url("/wibrawl/logo.svg?v=master-a") center / contain no-repeat; position: absolute; }
-.wibrawl-store-link:is(:hover, :focus-visible) .wibrawl-store-aura { opacity: .85; }
+.quick-links .wibrawl-store-link { --wibrawl-link-blue: #00c8ff; --wibrawl-link-pink: #ff3096; --wibrawl-link-lime: #c3f35e; background: transparent; border: 0; border-radius: 999px; display: inline-flex; min-height: 52px; padding: 0; }
+.wibrawl-store-mark { align-items: center; background: var(--bg); border-radius: inherit; display: inline-flex; isolation: isolate; justify-content: center; min-height: 52px; padding: 6px 10px; position: relative; }
+.wibrawl-store-mark img { background: transparent; display: block; height: 40px; object-fit: contain; width: 56px; }
+.wibrawl-store-mark::before { background: conic-gradient(from var(--wibrawl-glow-angle, 270deg), var(--wibrawl-link-blue), var(--wibrawl-link-pink) 45deg, var(--wibrawl-link-lime) 90deg, transparent 135deg 225deg, var(--wibrawl-link-lime) 270deg, var(--wibrawl-link-pink) 315deg, var(--wibrawl-link-blue)); border-radius: inherit; content: ""; filter: blur(2px); inset: -1px; opacity: 0; pointer-events: none; position: absolute; transition: opacity .2s ease; z-index: -2; }
+.wibrawl-store-mark::after { background: var(--bg); border-radius: inherit; content: ""; inset: 0; pointer-events: none; position: absolute; z-index: -1; }
+.wibrawl-store-link:is(:hover, :focus-visible) .wibrawl-store-mark::before { opacity: 1; }
 .quick-links .wibrawl-store-link:focus-visible { outline: 2px solid var(--wibrawl-link-blue); outline-offset: 3px; }
-@media (prefers-reduced-motion: reduce) { .wibrawl-store-aura { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .wibrawl-store-mark::before { transition: none; } }
 .wordmark, .footer-mark { font-family: "Cormorant Garamond", serif; font-size: clamp(30px, 3vw, 42px); letter-spacing: .24em; text-decoration: none; }
 .wordmark, .footer-mark { align-items: center; display: inline-flex; gap: 7px; }
 .wordmark img, .footer-mark img { display: block; flex: none; height: clamp(33px, 3.3vw, 43px); object-fit: contain; width: clamp(33px, 3.3vw, 43px); }
