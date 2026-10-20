@@ -41,3 +41,13 @@ Validation:
   asset graph checks passed. No new runtime dependencies or API/database changes.
 
 Local screenshots and reports: tmp/footer-review/.
+
+Production verification passed on both domains with the reviewed build and footer
+markup present in the initial HTML. Live 1440px light and 390px dark checks passed
+for each brand: no accessibility violations, overflow or browser runtime errors.
+Logo decoding is checked after the persisted theme has restored its selected
+SVG. Background API mutations were blocked during browser verification.
+
+Implementation commit: 1f83311. Cloudflare version:
+`a3aad994-e83a-4d7e-ab6f-abf4d17b7a8e`.
+Live check: `node scripts/footer-live-check.mjs`.
