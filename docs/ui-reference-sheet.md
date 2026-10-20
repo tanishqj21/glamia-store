@@ -21,6 +21,7 @@ Glamia and Wibrawl. Add future references here.
 
 | Added | Reference | Useful details | Status |
 | --- | --- | --- | --- |
+| 2026-10-20 | [Vengeance UI — full component catalog](https://www.vengenceui.com/components) | All 76 published components indexed in the [catalog below](#vengeance-ui-component-catalog), including the user-selected [Animated Number](https://www.vengenceui.com/components/animated-number). | Reference options; not installed or applied. |
 | 2026-10-20 | [Three.js](https://threejs.org/docs/) | Reuse for requested 3D scenes and product interactions. Load only where needed, pause rendering when idle or offscreen, and provide a lightweight fallback. | Installed locally: `three@0.186.1`; no new scene added by this entry. |
 | 2026-10-20 | [React Three Fiber](https://r3f.docs.pmnd.rs/) | Existing React integration option for Three.js features. Consider together with Three.js when the task calls for 3D, while keeping the normal storefront lightweight. | Installed locally: `@react-three/fiber@9.8.2`; no new scene added by this entry. |
 | 2026-10-20 | [Liquid Glass JS — dashersw](https://github.com/dashersw/liquid-glass-js) | User-shared source for glass buttons and containers with WebGL refraction and blur. Use selectively, check mobile rendering cost and browser support, and retain an accessible fallback. | Reference option; no matching root npm dependency or storefront import found during this check. |
@@ -304,3 +305,132 @@ or applied by adding this index.
 - [Tile Reveal](https://pro.reactbits.dev/docs/components/tile-reveal)
 - [Tilted Tiles](https://pro.reactbits.dev/docs/components/tilted-tiles)
 - [Tumble Wall](https://pro.reactbits.dev/docs/components/tumble-wall)
+
+## Vengeance UI component catalog
+
+Source: [Vengeance UI components](https://www.vengenceui.com/components).
+Indexed on 2026-10-20: **76 components** across nine categories. All catalog
+links were cross-checked against the site sitemap. This is a directory snapshot;
+check the source for later additions. Animated Number was the original
+user-selected reference before the request expanded to the whole catalog.
+
+These are optional references. Individual component APIs, dependencies,
+licenses and performance have not all been reviewed. Check those details when
+choosing a component, adapt it to the relevant brand, and preserve keyboard,
+reduced-motion and mobile support. No library or component was installed or
+applied by recording this catalog.
+
+| Category | Components |
+| --- | ---: |
+| Buttons | 9 |
+| Text & Motion | 9 |
+| Interactive | 19 |
+| Layout & Cards | 10 |
+| Tooltip & Marquee | 9 |
+| Loaders | 1 |
+| Navbar & Docs | 8 |
+| Collections | 3 |
+| Backgrounds | 8 |
+
+### Vengeance UI — Buttons (9)
+
+- [Animated Button](https://www.vengenceui.com/components/my-animated-button)
+- [Candy Button](https://www.vengenceui.com/components/candy-button)
+- [Pop Button](https://www.vengenceui.com/components/pop-button)
+- [Generate Button](https://www.vengenceui.com/components/generate-button)
+- [Radial Glow Button](https://www.vengenceui.com/components/radial-glow-button)
+- [Social Flip Button](https://www.vengenceui.com/components/social-flip-button)
+- [Liquid Metal](https://www.vengenceui.com/components/liquid-metal)
+- [Creepy Button](https://www.vengenceui.com/components/creepy-button)
+- [Corner Button](https://www.vengenceui.com/components/corner-button)
+
+### Vengeance UI — Text & Motion (9)
+
+- [Animated Number](https://www.vengenceui.com/components/animated-number)
+- [Stats Counter](https://www.vengenceui.com/components/stats-counter)
+- [Flip Text](https://www.vengenceui.com/components/flip-text)
+- [Flip Fade Text](https://www.vengenceui.com/components/flip-fade-text)
+- [Liquid Text](https://www.vengenceui.com/components/liquid-text)
+- [Morph Text](https://www.vengenceui.com/components/morph-text)
+- [ASCII Glitch Ripple](https://www.vengenceui.com/components/ascii-glitch-ripple)
+- [Stagger Text](https://www.vengenceui.com/components/stagger-text)
+- [Gooey Text Reveal](https://www.vengenceui.com/components/gooey-text-reveal)
+
+### Vengeance UI — Interactive (19)
+
+- [Image Collage](https://www.vengenceui.com/components/image-collage)
+- [Interactive Book](https://www.vengenceui.com/components/interactive-book)
+- [Share Sheet](https://www.vengenceui.com/components/share-sheet)
+- [Model Viewer](https://www.vengenceui.com/components/model-viewer)
+- [Image Trail](https://www.vengenceui.com/components/image-trail)
+- [Perspective Carousel](https://www.vengenceui.com/components/perspective-carousel)
+- [Cylinder Carousel](https://www.vengenceui.com/components/cylinder-carousel)
+- [Diagonal Carousel](https://www.vengenceui.com/components/diagonal-carousel)
+- [Ripple Displacement Slider](https://www.vengenceui.com/components/ripple-displacement-slider)
+- [Scroll Dissolve Reveal](https://www.vengenceui.com/components/scroll-dissolve-reveal)
+- [Pixelated Image Trail](https://www.vengenceui.com/components/pixelated-image-trail)
+- [Interactive Keyboard](https://www.vengenceui.com/components/interactive-keyboard)
+- [Typing Keyboard](https://www.vengenceui.com/components/typing-keyboard)
+- [Solar System](https://www.vengenceui.com/components/solar-system)
+- [Interactive Particles](https://www.vengenceui.com/components/interactive-particles)
+- [Music Player](https://www.vengenceui.com/components/music-player)
+- [Verse Cards](https://www.vengenceui.com/components/verse-cards)
+- [Circular Gallery](https://www.vengenceui.com/components/circular-gallery)
+- [3D Books Showcase](https://www.vengenceui.com/components/books-showcase)
+
+### Vengeance UI — Layout & Cards (10)
+
+- [Agent Bento Grid](https://www.vengenceui.com/components/agent-bento-grid)
+- [Expandable Bento Grid](https://www.vengenceui.com/components/expandable-bento-grid)
+- [Staggered Grid](https://www.vengenceui.com/components/staggered-grid)
+- [Image Scatter](https://www.vengenceui.com/components/image-scatter)
+- [Glow Border Card](https://www.vengenceui.com/components/glow-border-card)
+- [Testimonials Card](https://www.vengenceui.com/components/testimonials-card)
+- [Highlight Grid](https://www.vengenceui.com/components/highlight-grid)
+- [Developer Service Bento](https://www.vengenceui.com/components/research-bento-grid)
+- [Team Reveal Grid](https://www.vengenceui.com/components/team-reveal-grid)
+- [Why Us Bento Grid](https://www.vengenceui.com/components/why-us-bento)
+
+### Vengeance UI — Tooltip & Marquee (9)
+
+- [Cursor Card](https://www.vengenceui.com/components/cursor-card)
+- [Elastic Stack](https://www.vengenceui.com/components/elastic-stack)
+- [Logo Slider](https://www.vengenceui.com/components/logo-slider)
+- [Stacked Logos](https://www.vengenceui.com/components/stacked-logos)
+- [Masked Avatars](https://www.vengenceui.com/components/masked-avatars)
+- [Image Reveal List](https://www.vengenceui.com/components/image-reveal-list)
+- [FAQ Accordion](https://www.vengenceui.com/components/faq-accordion)
+- [Shared Tooltip Avatars](https://www.vengenceui.com/components/shared-tooltip-avatars)
+- [Magnetic Spotlight Marquee](https://www.vengenceui.com/components/magnetic-spotlight-marquee)
+
+### Vengeance UI — Loaders (1)
+
+- [Kinetic Text Loader](https://www.vengenceui.com/components/kinetic-text-loader)
+
+### Vengeance UI — Navbar & Docs (8)
+
+- [Glass Dock](https://www.vengenceui.com/components/glass-dock)
+- [Spotlight Navbar](https://www.vengenceui.com/components/spotlight-navbar)
+- [Notch Navbar](https://www.vengenceui.com/components/notch-navbar)
+- [Mega Menu Navbar](https://www.vengenceui.com/components/mega-menu-navbar)
+- [Gooey Search](https://www.vengenceui.com/components/gooey-search)
+- [Animated Footer](https://www.vengenceui.com/components/animated-footer)
+- [Awwwards Nav](https://www.vengenceui.com/components/awwwards-nav)
+- [Search Modal](https://www.vengenceui.com/components/search-modal)
+
+### Vengeance UI — Collections (3)
+
+- [Line Hover Link](https://www.vengenceui.com/components/line-hover-link)
+- [Folder Preview](https://www.vengenceui.com/components/folder-preview)
+- [Animated Tooltip](https://www.vengenceui.com/components/animated-tooltip)
+
+### Vengeance UI — Backgrounds (8)
+
+- [Wave Grid](https://www.vengenceui.com/components/wave-grid-background)
+- [Aurora Hero](https://www.vengenceui.com/components/aurora-hero)
+- [Fluid Morph Background](https://www.vengenceui.com/components/fluid-morph-bg)
+- [Twisting Ribbon](https://www.vengenceui.com/components/twisting-ribbon)
+- [Animated Rays](https://www.vengenceui.com/components/animated-rays)
+- [Perspective Grid](https://www.vengenceui.com/components/perspective-grid)
+- [Light Lines](https://www.vengenceui.com/components/light-lines)
+- [Liquid Ocean](https://www.vengenceui.com/components/liquid-ocean)
